@@ -1,0 +1,42 @@
+package config
+
+import (
+	"os"
+	"testing"
+
+	"github.com/stretchr/testify/assert"
+)
+
+func TestLoad_Defaults(t *testing.T) {
+	// Clear any env vars that might be set
+	for _, key := range []string{"QMP_SOCK", "IPMI_USER", "IPMI_PASS", "REDFISH_PORT", "IPMI_PORT", "SERIAL_ADDR", "TLS_CERT", "TLS_KEY", "VM_BOOT_MODE"} {
+		os.Unsetenv(key)
+	}
+
+	cfg := Load()
+	assert.Equal(t, "/var/run/qemu/qmp.sock", cfg.QMPSocket)
+	assert.Equal(t, "admin", cfg.IPMIUser)
+	assert.Equal(t, "password", cfg.IPMIPass)
+	assert.Equal(t, "443", cfg.RedfishPort)
+	assert.Equal(t, "623", cfg.IPMIPort)
+	assert.Equal(t, "localhost:9002", cfg.SerialAddr)
+	assert.Equal(t, "", cfg.TLSCert)
+	assert.Equal(t, "", cfg.TLSKey)
+	assert.Equal(t, "bios", cfg.VMBootMode)
+}
+
+func TestLoad_CustomValues(t *testing.T) {
+	os.Setenv("QMP_SOCK", "/tmp/test.sock")
+	os.Setenv("IPMI_USER", "testuser")
+	os.Setenv("IPMI_PASS", "testpass")
+	defer func() {
+		os.Unsetenv("QMP_SOCK")
+		os.Unsetenv("IPMI_USER")
+		os.Unsetenv("IPMI_PASS")
+	}()
+
+	cfg := Load()
+	assert.Equal(t, "/tmp/test.sock", cfg.QMPSocket)
+	assert.Equal(t, "testuser", cfg.IPMIUser)
+	assert.Equal(t, "testpass", cfg.IPMIPass)
+}
