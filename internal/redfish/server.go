@@ -21,10 +21,11 @@ type MachineInterface interface {
 
 // Server is the Redfish HTTP server
 type Server struct {
-	router  *mux.Router
-	machine MachineInterface
-	user    string
-	pass    string
+	router       *mux.Router
+	machine      MachineInterface
+	user         string
+	pass         string
+	currentMedia string
 }
 
 // NewServer creates a new Redfish server
@@ -61,6 +62,26 @@ func (s *Server) setupRoutes() {
 	// Actions
 	s.router.HandleFunc("/redfish/v1/Systems/{id}/Actions/ComputerSystem.Reset", s.handleResetAction).Methods("POST")
 	s.router.HandleFunc("/redfish/v1/Systems/{id}/Actions/ComputerSystem.Reset/", s.handleResetAction).Methods("POST")
+
+	// Managers
+	s.router.HandleFunc("/redfish/v1/Managers", s.handleManagerCollection).Methods("GET")
+	s.router.HandleFunc("/redfish/v1/Managers/", s.handleManagerCollection).Methods("GET")
+	s.router.HandleFunc("/redfish/v1/Managers/{id}", s.handleGetManager).Methods("GET")
+	s.router.HandleFunc("/redfish/v1/Managers/{id}/", s.handleGetManager).Methods("GET")
+	s.router.HandleFunc("/redfish/v1/Managers/{id}/VirtualMedia", s.handleVirtualMediaCollection).Methods("GET")
+	s.router.HandleFunc("/redfish/v1/Managers/{id}/VirtualMedia/", s.handleVirtualMediaCollection).Methods("GET")
+	s.router.HandleFunc("/redfish/v1/Managers/{id}/VirtualMedia/{vmid}", s.handleGetVirtualMedia).Methods("GET")
+	s.router.HandleFunc("/redfish/v1/Managers/{id}/VirtualMedia/{vmid}/", s.handleGetVirtualMedia).Methods("GET")
+	s.router.HandleFunc("/redfish/v1/Managers/{id}/VirtualMedia/{vmid}/Actions/VirtualMedia.InsertMedia", s.handleInsertMedia).Methods("POST")
+	s.router.HandleFunc("/redfish/v1/Managers/{id}/VirtualMedia/{vmid}/Actions/VirtualMedia.InsertMedia/", s.handleInsertMedia).Methods("POST")
+	s.router.HandleFunc("/redfish/v1/Managers/{id}/VirtualMedia/{vmid}/Actions/VirtualMedia.EjectMedia", s.handleEjectMedia).Methods("POST")
+	s.router.HandleFunc("/redfish/v1/Managers/{id}/VirtualMedia/{vmid}/Actions/VirtualMedia.EjectMedia/", s.handleEjectMedia).Methods("POST")
+
+	// Chassis
+	s.router.HandleFunc("/redfish/v1/Chassis", s.handleChassisCollection).Methods("GET")
+	s.router.HandleFunc("/redfish/v1/Chassis/", s.handleChassisCollection).Methods("GET")
+	s.router.HandleFunc("/redfish/v1/Chassis/{id}", s.handleGetChassis).Methods("GET")
+	s.router.HandleFunc("/redfish/v1/Chassis/{id}/", s.handleGetChassis).Methods("GET")
 }
 
 // ServeHTTP implements the http.Handler interface

@@ -86,3 +86,82 @@ type RedfishErrorBody struct {
 	Code    string `json:"code"`
 	Message string `json:"message"`
 }
+
+// ManagerCollection is a collection of managers
+type ManagerCollection struct {
+	ODataType    string    `json:"@odata.type"`
+	ODataID      string    `json:"@odata.id"`
+	Name         string    `json:"Name"`
+	MembersCount int       `json:"Members@odata.count"`
+	Members      []ODataID `json:"Members"`
+}
+
+// Manager represents a BMC manager
+type Manager struct {
+	ODataType    string  `json:"@odata.type"`
+	ODataID      string  `json:"@odata.id"`
+	ODataContext string  `json:"@odata.context,omitempty"`
+	ID           string  `json:"Id"`
+	Name         string  `json:"Name"`
+	ManagerType  string  `json:"ManagerType"`
+	VirtualMedia ODataID `json:"VirtualMedia"`
+}
+
+// VirtualMediaCollection is a collection of virtual media
+type VirtualMediaCollection struct {
+	ODataType    string    `json:"@odata.type"`
+	ODataID      string    `json:"@odata.id"`
+	Name         string    `json:"Name"`
+	MembersCount int       `json:"Members@odata.count"`
+	Members      []ODataID `json:"Members"`
+}
+
+// VirtualMedia represents a virtual media resource
+type VirtualMedia struct {
+	ODataType    string              `json:"@odata.type"`
+	ODataID      string              `json:"@odata.id"`
+	ODataContext string              `json:"@odata.context,omitempty"`
+	ID           string              `json:"Id"`
+	Name         string              `json:"Name"`
+	MediaTypes   []string            `json:"MediaTypes"`
+	Image        string              `json:"Image,omitempty"`
+	Inserted     bool                `json:"Inserted"`
+	ConnectedVia string              `json:"ConnectedVia,omitempty"`
+	Actions      VirtualMediaActions `json:"Actions"`
+}
+
+// VirtualMediaActions contains available actions for virtual media
+type VirtualMediaActions struct {
+	InsertMedia VirtualMediaAction `json:"#VirtualMedia.InsertMedia"`
+	EjectMedia  VirtualMediaAction `json:"#VirtualMedia.EjectMedia"`
+}
+
+// VirtualMediaAction describes a virtual media action
+type VirtualMediaAction struct {
+	Target string `json:"target"`
+}
+
+// InsertMediaRequest is the request body for inserting virtual media
+type InsertMediaRequest struct {
+	Image    string `json:"Image"`
+	Inserted bool   `json:"Inserted"`
+}
+
+// ChassisCollection is a collection of chassis
+type ChassisCollection struct {
+	ODataType    string    `json:"@odata.type"`
+	ODataID      string    `json:"@odata.id"`
+	Name         string    `json:"Name"`
+	MembersCount int       `json:"Members@odata.count"`
+	Members      []ODataID `json:"Members"`
+}
+
+// Chassis represents a chassis resource
+type Chassis struct {
+	ODataType    string `json:"@odata.type"`
+	ODataID      string `json:"@odata.id"`
+	ODataContext string `json:"@odata.context,omitempty"`
+	ID           string `json:"Id"`
+	Name         string `json:"Name"`
+	ChassisType  string `json:"ChassisType"`
+}
