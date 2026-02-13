@@ -84,9 +84,9 @@ func HandleRMCPPlusMessage(data []byte, sessionMgr *SessionManager, user, pass s
 	case PayloadTypeOpenSessionRequest:
 		return handleOpenSession(buf.Bytes(), header, sessionMgr)
 	case PayloadTypeRAKPMessage1:
-		return handleRAKPMessage1(buf.Bytes(), header, sessionMgr, user, pass)
+		return handleRAKPMessage1(buf.Bytes(), header, sessionMgr, user, pass, state)
 	case PayloadTypeRAKPMessage3:
-		return handleRAKPMessage3(buf.Bytes(), header, sessionMgr, pass)
+		return handleRAKPMessage3(buf.Bytes(), header, sessionMgr, pass, state)
 	case PayloadTypeIPMI:
 		if header.SessionID == 0 {
 			return handlePreSessionIPMI(data, header, machine, state)
@@ -142,7 +142,7 @@ func handleOpenSession(payload []byte, header *RMCPPlusSessionHeader, sessionMgr
 	return wrapRMCPPlusResponse(PayloadTypeOpenSessionResponse, 0, 0, resp.Bytes()), nil
 }
 
-func handleRAKPMessage1(payload []byte, header *RMCPPlusSessionHeader, sessionMgr *SessionManager, user, pass string) ([]byte, error) {
+func handleRAKPMessage1(payload []byte, header *RMCPPlusSessionHeader, sessionMgr *SessionManager, user, pass string, state *bmc.State) ([]byte, error) {
 	// Parse manually to handle variable-length UserName
 	if len(payload) < 28 {
 		return nil, fmt.Errorf("RAKP message 1 too short: %d bytes", len(payload))
@@ -173,15 +173,29 @@ func handleRAKPMessage1(payload []byte, header *RMCPPlusSessionHeader, sessionMg
 	session.UserName = make([]byte, req.UserNameLength)
 	copy(session.UserName, req.UserName)
 
-	// Validate username
-	if string(session.UserName) != user {
-		// Return error status
-		resp := new(bytes.Buffer)
-		binary.Write(resp, binary.LittleEndian, req.MessageTag)
-		binary.Write(resp, binary.LittleEndian, uint8(0x0D)) // invalid username
-		binary.Write(resp, binary.LittleEndian, [2]byte{})
-		binary.Write(resp, binary.LittleEndian, session.RemoteConsoleSessionID)
-		return wrapRMCPPlusResponse(PayloadTypeRAKPMessage2, 0, 0, resp.Bytes()), nil
+	// Try BMC state first, fall back to hardcoded user
+	var authPass string
+	if state != nil {
+		userID, found := state.LookupUserByName(string(session.UserName))
+		if found {
+			pw, err := state.GetUserPassword(userID)
+			if err == nil {
+				authPass = pw
+			}
+		}
+	}
+	if authPass == "" {
+		// Fall back to hardcoded credentials
+		if string(session.UserName) != user {
+			// Return error status
+			resp := new(bytes.Buffer)
+			binary.Write(resp, binary.LittleEndian, req.MessageTag)
+			binary.Write(resp, binary.LittleEndian, uint8(0x0D)) // invalid username
+			binary.Write(resp, binary.LittleEndian, [2]byte{})
+			binary.Write(resp, binary.LittleEndian, session.RemoteConsoleSessionID)
+			return wrapRMCPPlusResponse(PayloadTypeRAKPMessage2, 0, 0, resp.Bytes()), nil
+		}
+		authPass = pass
 	}
 
 	// Build RAKP Message 2 auth code: HMAC-SHA1(password, data)
@@ -195,7 +209,7 @@ func handleRAKPMessage1(payload []byte, header *RMCPPlusSessionHeader, sessionMg
 	binary.Write(authBuf, binary.LittleEndian, session.UserNameLength)
 	authBuf.Write(session.UserName)
 
-	mac := hmac.New(sha1.New, []byte(pass))
+	mac := hmac.New(sha1.New, []byte(authPass))
 	mac.Write(authBuf.Bytes())
 	authCode := mac.Sum(nil)
 
@@ -212,7 +226,7 @@ func handleRAKPMessage1(payload []byte, header *RMCPPlusSessionHeader, sessionMg
 	return wrapRMCPPlusResponse(PayloadTypeRAKPMessage2, 0, 0, resp.Bytes()), nil
 }
 
-func handleRAKPMessage3(payload []byte, header *RMCPPlusSessionHeader, sessionMgr *SessionManager, pass string) ([]byte, error) {
+func handleRAKPMessage3(payload []byte, header *RMCPPlusSessionHeader, sessionMgr *SessionManager, pass string, state *bmc.State) ([]byte, error) {
 	var req RAKPMessage3
 	buf := bytes.NewBuffer(payload)
 	if err := binary.Read(buf, binary.LittleEndian, &req); err != nil {
@@ -224,6 +238,17 @@ func handleRAKPMessage3(payload []byte, header *RMCPPlusSessionHeader, sessionMg
 		return nil, fmt.Errorf("session not found: 0x%08x", req.ManagedSystemSessionID)
 	}
 
+	// Resolve password: try BMC state first, fall back to hardcoded
+	authPass := pass
+	if state != nil {
+		userID, found := state.LookupUserByName(string(session.UserName))
+		if found {
+			if pw, err := state.GetUserPassword(userID); err == nil && pw != "" {
+				authPass = pw
+			}
+		}
+	}
+
 	// Verify client's auth code
 	verifyBuf := new(bytes.Buffer)
 	verifyBuf.Write(session.ManagedSystemRandomNumber[:])
@@ -232,7 +257,7 @@ func handleRAKPMessage3(payload []byte, header *RMCPPlusSessionHeader, sessionMg
 	binary.Write(verifyBuf, binary.LittleEndian, session.UserNameLength)
 	verifyBuf.Write(session.UserName)
 
-	mac := hmac.New(sha1.New, []byte(pass))
+	mac := hmac.New(sha1.New, []byte(authPass))
 	mac.Write(verifyBuf.Bytes())
 	expectedAuthCode := mac.Sum(nil)
 
@@ -253,7 +278,7 @@ func handleRAKPMessage3(payload []byte, header *RMCPPlusSessionHeader, sessionMg
 	binary.Write(sikBuf, binary.LittleEndian, session.UserNameLength)
 	sikBuf.Write(session.UserName)
 
-	sikMac := hmac.New(sha1.New, []byte(pass))
+	sikMac := hmac.New(sha1.New, []byte(authPass))
 	sikMac.Write(sikBuf.Bytes())
 	session.SessionIntegrityKey = sikMac.Sum(nil)
 

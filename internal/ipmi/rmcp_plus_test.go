@@ -116,6 +116,120 @@ func TestRAKPAuthentication_WrongPassword(t *testing.T) {
 	assert.NotEqual(t, uint8(0x00), rakp4Resp[13], "RAKP4 should fail with wrong password")
 }
 
+func TestRAKP_AuthWithBMCStateUser(t *testing.T) {
+	sm := NewSessionManager()
+	state := bmc.NewState("admin", "password")
+
+	// Create a new user via BMC state (simulating in-band creation)
+	state.SetUserName(3, "maas")
+	state.SetUserPassword(3, "maas-secret")
+	state.SetUserAccess(1, 3, bmc.UserAccess{Enabled: true, PrivilegeLimit: 4, IPMIMessaging: true, LinkAuth: true})
+
+	// Step 1: Open Session
+	openReq := buildOpenSessionRequest(0x01, 0x12345678)
+	openData := wrapRMCPPlusPayload(PayloadTypeOpenSessionRequest, 0, 0, openReq)
+	openResp, err := HandleRMCPPlusMessage(openData, sm, "admin", "password", nil, state)
+	require.NoError(t, err)
+
+	// Extract managed system session ID from response (bytes 20-23, after 12-byte header)
+	managedSessionID := binary.LittleEndian.Uint32(openResp[20:24])
+
+	// Step 2: RAKP Message 1 with "maas" user
+	rakp1Req := buildRAKPMessage1(0x02, managedSessionID, "maas")
+	rakp1Data := wrapRMCPPlusPayload(PayloadTypeRAKPMessage1, 0, 0, rakp1Req)
+	rakp2Resp, err := HandleRMCPPlusMessage(rakp1Data, sm, "admin", "password", nil, state)
+	require.NoError(t, err)
+
+	// Check RAKP2 status = success (byte 13)
+	assert.Equal(t, uint8(0x00), rakp2Resp[13], "RAKP2 should succeed for BMC state user")
+
+	// Step 3: RAKP Message 3 (compute proper auth code with "maas-secret")
+	session, ok := sm.GetSession(managedSessionID)
+	require.True(t, ok)
+
+	rakp3AuthBuf := buildRAKP3AuthBuf(session.ManagedSystemRandomNumber[:], session.RemoteConsoleSessionID, session.RequestedPrivilegeLevel, session.UserNameLength, session.UserName)
+	mac := hmac.New(sha1.New, []byte("maas-secret"))
+	mac.Write(rakp3AuthBuf)
+	rakp3AuthCode := mac.Sum(nil)
+
+	rakp3 := buildRAKPMessage3(0x03, managedSessionID, rakp3AuthCode)
+	rakp3Data := wrapRMCPPlusPayload(PayloadTypeRAKPMessage3, 0, 0, rakp3)
+	rakp4Resp, err := HandleRMCPPlusMessage(rakp3Data, sm, "admin", "password", nil, state)
+	require.NoError(t, err)
+
+	// Check RAKP4 status = success (byte 13)
+	assert.Equal(t, uint8(0x00), rakp4Resp[13], "RAKP4 should succeed for BMC state user")
+
+	// Verify session is authenticated
+	assert.True(t, session.Authenticated)
+	assert.NotNil(t, session.SessionIntegrityKey)
+	assert.NotNil(t, session.IntegrityKey)
+	assert.NotNil(t, session.ConfidentialityKey)
+}
+
+func TestRAKP_AuthWithBMCStateUser_WrongPassword(t *testing.T) {
+	sm := NewSessionManager()
+	state := bmc.NewState("admin", "password")
+
+	// Create a new user via BMC state
+	state.SetUserName(3, "maas")
+	state.SetUserPassword(3, "maas-secret")
+	state.SetUserAccess(1, 3, bmc.UserAccess{Enabled: true, PrivilegeLimit: 4, IPMIMessaging: true, LinkAuth: true})
+
+	// Open Session
+	openReq := buildOpenSessionRequest(0x01, 0x12345678)
+	openData := wrapRMCPPlusPayload(PayloadTypeOpenSessionRequest, 0, 0, openReq)
+	openResp, err := HandleRMCPPlusMessage(openData, sm, "admin", "password", nil, state)
+	require.NoError(t, err)
+
+	managedSessionID := binary.LittleEndian.Uint32(openResp[20:24])
+
+	// RAKP1 with "maas" user
+	rakp1Req := buildRAKPMessage1(0x02, managedSessionID, "maas")
+	rakp1Data := wrapRMCPPlusPayload(PayloadTypeRAKPMessage1, 0, 0, rakp1Req)
+	_, err = HandleRMCPPlusMessage(rakp1Data, sm, "admin", "password", nil, state)
+	require.NoError(t, err)
+
+	// RAKP3 with wrong password ("wrong-password" instead of "maas-secret")
+	session, ok := sm.GetSession(managedSessionID)
+	require.True(t, ok)
+
+	rakp3AuthBuf := buildRAKP3AuthBuf(session.ManagedSystemRandomNumber[:], session.RemoteConsoleSessionID, session.RequestedPrivilegeLevel, session.UserNameLength, session.UserName)
+	mac := hmac.New(sha1.New, []byte("wrong-password"))
+	mac.Write(rakp3AuthBuf)
+	rakp3AuthCode := mac.Sum(nil)
+
+	rakp3 := buildRAKPMessage3(0x03, managedSessionID, rakp3AuthCode)
+	rakp3Data := wrapRMCPPlusPayload(PayloadTypeRAKPMessage3, 0, 0, rakp3)
+	rakp4Resp, err := HandleRMCPPlusMessage(rakp3Data, sm, "admin", "password", nil, state)
+	require.NoError(t, err)
+
+	// RAKP4 should indicate failure
+	assert.NotEqual(t, uint8(0x00), rakp4Resp[13], "RAKP4 should fail with wrong password for BMC state user")
+}
+
+func TestRAKP_AuthWithUnknownUser(t *testing.T) {
+	sm := NewSessionManager()
+	state := bmc.NewState("admin", "password")
+
+	// Open Session
+	openReq := buildOpenSessionRequest(0x01, 0x12345678)
+	openData := wrapRMCPPlusPayload(PayloadTypeOpenSessionRequest, 0, 0, openReq)
+	openResp, err := HandleRMCPPlusMessage(openData, sm, "admin", "password", nil, state)
+	require.NoError(t, err)
+
+	managedSessionID := binary.LittleEndian.Uint32(openResp[20:24])
+
+	// RAKP1 with unknown user (not in BMC state, not hardcoded)
+	rakp1Req := buildRAKPMessage1(0x02, managedSessionID, "unknown")
+	rakp1Data := wrapRMCPPlusPayload(PayloadTypeRAKPMessage1, 0, 0, rakp1Req)
+	rakp2Resp, err := HandleRMCPPlusMessage(rakp1Data, sm, "admin", "password", nil, state)
+	require.NoError(t, err)
+
+	// RAKP2 should indicate invalid username (0x0D)
+	assert.Equal(t, uint8(0x0D), rakp2Resp[13], "RAKP2 should fail with invalid username")
+}
+
 func TestEncryptDecryptAESCBC(t *testing.T) {
 	key := make([]byte, 20)
 	for i := range key {

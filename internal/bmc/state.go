@@ -131,6 +131,16 @@ func (s *State) SetUserPassword(userID uint8, password string) error {
 	return nil
 }
 
+// GetUserPassword returns the password for the given user slot.
+func (s *State) GetUserPassword(userID uint8) (string, error) {
+	if err := validateUserID(userID); err != nil {
+		return "", err
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.users[userID].password, nil
+}
+
 // CheckPassword verifies the password for the given user slot.
 // Returns false for invalid user IDs or if no password has been set.
 func (s *State) CheckPassword(userID uint8, password string) bool {

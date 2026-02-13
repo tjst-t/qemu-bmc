@@ -68,6 +68,24 @@ func TestSetUserName_InvalidSlot(t *testing.T) {
 	assert.Error(t, err)
 }
 
+func TestGetUserPassword(t *testing.T) {
+	s := NewState("admin", "password")
+
+	// Default user in slot 2
+	pw, err := s.GetUserPassword(2)
+	require.NoError(t, err)
+	assert.Equal(t, "password", pw)
+
+	// Empty slot
+	pw, err = s.GetUserPassword(5)
+	require.NoError(t, err)
+	assert.Equal(t, "", pw)
+
+	// Invalid slot
+	_, err = s.GetUserPassword(0)
+	assert.Error(t, err)
+}
+
 func TestSetUserPassword_and_CheckPassword(t *testing.T) {
 	s := NewState("admin", "password")
 
