@@ -9,7 +9,7 @@ import (
 
 func TestLoad_Defaults(t *testing.T) {
 	// Clear any env vars that might be set
-	for _, key := range []string{"QMP_SOCK", "IPMI_USER", "IPMI_PASS", "REDFISH_PORT", "IPMI_PORT", "SERIAL_ADDR", "TLS_CERT", "TLS_KEY", "VM_BOOT_MODE"} {
+	for _, key := range []string{"QMP_SOCK", "IPMI_USER", "IPMI_PASS", "REDFISH_PORT", "IPMI_PORT", "SERIAL_ADDR", "TLS_CERT", "TLS_KEY", "VM_BOOT_MODE", "VM_IPMI_ADDR"} {
 		os.Unsetenv(key)
 	}
 
@@ -23,6 +23,7 @@ func TestLoad_Defaults(t *testing.T) {
 	assert.Equal(t, "", cfg.TLSCert)
 	assert.Equal(t, "", cfg.TLSKey)
 	assert.Equal(t, "bios", cfg.VMBootMode)
+	assert.Equal(t, "", cfg.VMIPMIAddr)
 }
 
 func TestLoad_CustomValues(t *testing.T) {
@@ -39,4 +40,17 @@ func TestLoad_CustomValues(t *testing.T) {
 	assert.Equal(t, "/tmp/test.sock", cfg.QMPSocket)
 	assert.Equal(t, "testuser", cfg.IPMIUser)
 	assert.Equal(t, "testpass", cfg.IPMIPass)
+}
+
+func TestLoad_VMIPMIAddr(t *testing.T) {
+	os.Setenv("VM_IPMI_ADDR", ":9002")
+	defer os.Unsetenv("VM_IPMI_ADDR")
+	cfg := Load()
+	assert.Equal(t, ":9002", cfg.VMIPMIAddr)
+}
+
+func TestLoad_VMIPMIAddr_Default(t *testing.T) {
+	os.Unsetenv("VM_IPMI_ADDR")
+	cfg := Load()
+	assert.Equal(t, "", cfg.VMIPMIAddr)
 }

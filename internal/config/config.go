@@ -13,6 +13,7 @@ type Config struct {
 	TLSCert     string
 	TLSKey      string
 	VMBootMode  string
+	VMIPMIAddr  string // VM IPMI chardev listen address
 }
 
 // Load reads configuration from environment variables with defaults
@@ -27,6 +28,7 @@ func Load() *Config {
 		TLSCert:     getEnv("TLS_CERT", ""),
 		TLSKey:      getEnv("TLS_KEY", ""),
 		VMBootMode:  getEnv("VM_BOOT_MODE", "bios"),
+		VMIPMIAddr:  getEnv("VM_IPMI_ADDR", ""),
 	}
 }
 

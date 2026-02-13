@@ -9,6 +9,7 @@ import (
 	"os/signal"
 	"syscall"
 
+	"github.com/tjst-t/qemu-bmc/internal/bmc"
 	"github.com/tjst-t/qemu-bmc/internal/config"
 	"github.com/tjst-t/qemu-bmc/internal/ipmi"
 	"github.com/tjst-t/qemu-bmc/internal/machine"
@@ -33,8 +34,22 @@ func main() {
 	// Create machine
 	m := machine.New(qmpClient)
 
+	// Create BMC state
+	bmcState := bmc.NewState(cfg.IPMIUser, cfg.IPMIPass)
+
+	// Start VM IPMI server (only if configured)
+	if cfg.VMIPMIAddr != "" {
+		vmServer := ipmi.NewVMServer(m, bmcState)
+		go func() {
+			log.Printf("Starting VM IPMI server on %s", cfg.VMIPMIAddr)
+			if err := vmServer.ListenAndServe(cfg.VMIPMIAddr); err != nil {
+				log.Fatalf("VM IPMI server error: %v", err)
+			}
+		}()
+	}
+
 	// Start IPMI server
-	ipmiServer := ipmi.NewServer(m, cfg.IPMIUser, cfg.IPMIPass)
+	ipmiServer := ipmi.NewServer(m, bmcState, cfg.IPMIUser, cfg.IPMIPass)
 	go func() {
 		addr := fmt.Sprintf(":%s", cfg.IPMIPort)
 		log.Printf("Starting IPMI server on %s", addr)
