@@ -17,9 +17,16 @@ import (
 	"github.com/tjst-t/qemu-bmc/internal/redfish"
 )
 
+var version = "dev"
+
 func main() {
+	if len(os.Args) == 2 && os.Args[1] == "-v" {
+		fmt.Println(version)
+		os.Exit(0)
+	}
+
 	log.SetFlags(log.LstdFlags | log.Lshortfile)
-	log.Println("qemu-bmc starting...")
+	log.Printf("qemu-bmc %s starting...", version)
 
 	cfg := config.Load()
 

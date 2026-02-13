@@ -1,11 +1,12 @@
 # Build stage
 FROM golang:1.23-bookworm AS builder
 
+ARG VERSION=dev
 WORKDIR /app
 COPY go.mod go.sum ./
 RUN go mod download
 COPY . .
-RUN CGO_ENABLED=0 GOOS=linux go build -o /qemu-bmc ./cmd/qemu-bmc
+RUN CGO_ENABLED=0 GOOS=linux go build -ldflags "-X main.version=${VERSION}" -o /qemu-bmc ./cmd/qemu-bmc
 
 # Runtime stage
 FROM debian:bookworm-slim

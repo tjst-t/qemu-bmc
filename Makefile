@@ -2,11 +2,13 @@
 
 BINARY := qemu-bmc
 DOCKER_IMAGE := qemu-bmc
+VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
+LDFLAGS := -X main.version=$(VERSION)
 COMPOSE := $(shell command -v docker-compose 2>/dev/null || echo "docker compose")
 COMPOSE_FILE := integration/docker-compose.yml
 
 build:
-	go build -o $(BINARY) ./cmd/qemu-bmc
+	go build -ldflags "$(LDFLAGS)" -o $(BINARY) ./cmd/qemu-bmc
 
 test:
 	go test ./... -count=1
