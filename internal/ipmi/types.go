@@ -47,6 +47,18 @@ const (
 	CmdCloseSession               = 0x3C
 )
 
+// IPMI App Commands - User Management
+const (
+	CmdSetChannelAccess = 0x40
+	CmdGetChannelAccess = 0x41
+	CmdGetChannelInfo   = 0x42
+	CmdSetUserAccess    = 0x43
+	CmdGetUserAccess    = 0x44
+	CmdSetUserName      = 0x45
+	CmdGetUserName      = 0x46
+	CmdSetUserPassword  = 0x47
+)
+
 // IPMI Chassis Commands
 const (
 	CmdGetChassisStatus = 0x01
