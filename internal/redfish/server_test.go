@@ -26,7 +26,7 @@ type mockMachine struct {
 func newMockMachine(status qmp.Status) *mockMachine {
 	var ps machine.PowerState
 	switch status {
-	case qmp.StatusRunning, qmp.StatusPaused:
+	case qmp.StatusRunning:
 		ps = machine.PowerOn
 	default:
 		ps = machine.PowerOff

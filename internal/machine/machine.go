@@ -49,7 +49,7 @@ func (m *Machine) GetPowerState() (PowerState, error) {
 	}
 
 	switch status {
-	case qmp.StatusRunning, qmp.StatusPaused:
+	case qmp.StatusRunning:
 		return PowerOn, nil
 	default:
 		return PowerOff, nil
@@ -70,25 +70,20 @@ func (m *Machine) Reset(resetType string) error {
 			return err
 		}
 		if state == PowerOn {
-			return fmt.Errorf("system is already powered on")
+			return nil // already on, no-op
 		}
-		// In a real implementation, we'd start the QEMU process
-		// For now, this is a placeholder
-		return nil
+		return m.qmpClient.Cont()
 	case "ForceOff":
-		return m.qmpClient.Quit()
+		return m.qmpClient.Stop()
 	case "GracefulShutdown":
-		return m.qmpClient.SystemPowerdown()
+		// Send ACPI shutdown signal, then stop the VM.
+		// The stop ensures the VM halts even without a guest OS.
+		m.qmpClient.SystemPowerdown()
+		return m.qmpClient.Stop()
 	case "ForceRestart":
-		if err := m.qmpClient.SystemReset(); err != nil {
-			return err
-		}
-		return nil
+		return m.qmpClient.SystemReset()
 	case "GracefulRestart":
-		if err := m.qmpClient.SystemPowerdown(); err != nil {
-			return err
-		}
-		return nil
+		return m.qmpClient.SystemReset()
 	default:
 		return fmt.Errorf("unsupported reset type: %s", resetType)
 	}

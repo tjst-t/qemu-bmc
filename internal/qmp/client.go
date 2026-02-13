@@ -67,20 +67,28 @@ func (c *qmpClient) execute(command string, arguments interface{}) error {
 		return fmt.Errorf("writing command: %w", err)
 	}
 
-	if !c.scanner.Scan() {
-		return fmt.Errorf("reading response: connection closed")
-	}
+	// Read response, skipping async events
+	for {
+		if !c.scanner.Scan() {
+			return fmt.Errorf("reading response: connection closed")
+		}
 
-	var resp qmpResponse
-	if err := json.Unmarshal(c.scanner.Bytes(), &resp); err != nil {
-		return fmt.Errorf("parsing response: %w", err)
-	}
+		var resp qmpResponse
+		if err := json.Unmarshal(c.scanner.Bytes(), &resp); err != nil {
+			return fmt.Errorf("parsing response: %w", err)
+		}
 
-	if resp.Error != nil {
-		return fmt.Errorf("QMP error: %s: %s", resp.Error.Class, resp.Error.Desc)
-	}
+		// Skip async events (they have "event" field, not "return"/"error")
+		if resp.Event != "" {
+			continue
+		}
 
-	return nil
+		if resp.Error != nil {
+			return fmt.Errorf("QMP error: %s: %s", resp.Error.Class, resp.Error.Desc)
+		}
+
+		return nil
+	}
 }
 
 func (c *qmpClient) executeWithResponse(command string, arguments interface{}) (json.RawMessage, error) {
@@ -102,11 +110,27 @@ func (c *qmpClient) executeWithResponse(command string, arguments interface{}) (
 		return nil, fmt.Errorf("writing command: %w", err)
 	}
 
-	if !c.scanner.Scan() {
-		return nil, fmt.Errorf("reading response: connection closed")
-	}
+	// Read response, skipping async events
+	for {
+		if !c.scanner.Scan() {
+			return nil, fmt.Errorf("reading response: connection closed")
+		}
 
-	return json.RawMessage(c.scanner.Bytes()), nil
+		var resp qmpResponse
+		rawBytes := make([]byte, len(c.scanner.Bytes()))
+		copy(rawBytes, c.scanner.Bytes())
+
+		if err := json.Unmarshal(rawBytes, &resp); err != nil {
+			return nil, fmt.Errorf("parsing response: %w", err)
+		}
+
+		// Skip async events
+		if resp.Event != "" {
+			continue
+		}
+
+		return json.RawMessage(rawBytes), nil
+	}
 }
 
 func (c *qmpClient) QueryStatus() (Status, error) {
@@ -129,6 +153,14 @@ func (c *qmpClient) SystemPowerdown() error {
 
 func (c *qmpClient) SystemReset() error {
 	return c.execute("system_reset", nil)
+}
+
+func (c *qmpClient) Stop() error {
+	return c.execute("stop", nil)
+}
+
+func (c *qmpClient) Cont() error {
+	return c.execute("cont", nil)
 }
 
 func (c *qmpClient) Quit() error {

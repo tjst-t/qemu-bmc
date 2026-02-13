@@ -40,7 +40,7 @@ func TestGetSystem_PowerState(t *testing.T) {
 	}{
 		{"running maps to On", qmp.StatusRunning, "On"},
 		{"shutdown maps to Off", qmp.StatusShutdown, "Off"},
-		{"paused maps to Paused", qmp.StatusPaused, "Paused"},
+		{"paused maps to Off", qmp.StatusPaused, "Off"},
 	}
 
 	for _, tt := range tests {

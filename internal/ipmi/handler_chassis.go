@@ -149,22 +149,33 @@ func handleGetBootOptions(reqData []byte, m MachineInterface) (CompletionCode, [
 	paramSelector := reqData[0] & 0x7F
 
 	switch paramSelector {
+	case 0: // Set In Progress
+		data := []byte{
+			0x01,             // Parameter version
+			0x80 | 0x00,      // Parameter valid (bit7=1) + selector 0
+			0x00,             // Set complete
+		}
+		return CompletionCodeOK, data
+
 	case 5: // Boot flags
 		boot := m.GetBootOverride()
-		data := make([]byte, 5)
+		data := make([]byte, 7)
 
-		// Byte 0: parameter version (1)
+		// Byte 0: parameter version
 		data[0] = 0x01
 
-		// Byte 1: valid flag + UEFI flag
+		// Byte 1: parameter valid (bit7) + parameter selector (bits 6:0)
+		data[1] = 0x80 | 0x05
+
+		// Byte 2: boot flags valid (bit7) + UEFI (bit5)
 		if boot.Enabled != "Disabled" {
-			data[1] = 0x80 // valid
+			data[2] = 0x80 // valid
 		}
 		if boot.Mode == "UEFI" {
-			data[1] |= 0x20 // UEFI
+			data[2] |= 0x20 // UEFI
 		}
 
-		// Byte 2: boot device
+		// Byte 3: boot device (bits 5:2)
 		var deviceBits byte
 		switch boot.Target {
 		case "Pxe":
@@ -178,11 +189,17 @@ func handleGetBootOptions(reqData []byte, m MachineInterface) (CompletionCode, [
 		default:
 			deviceBits = 0x00
 		}
-		data[2] = deviceBits << 2
+		data[3] = deviceBits << 2
 
 		return CompletionCodeOK, data
 
 	default:
-		return CompletionCodeParameterOutOfRange, nil
+		// Return OK with parameter valid=0 for unsupported parameters
+		data := []byte{
+			0x01,            // Parameter version
+			paramSelector,   // Parameter valid=0 (bit7=0) + selector
+			0x00,            // Empty data
+		}
+		return CompletionCodeOK, data
 	}
 }

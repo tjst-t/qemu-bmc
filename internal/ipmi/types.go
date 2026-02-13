@@ -41,6 +41,8 @@ const (
 const (
 	CmdGetDeviceID                = 0x01
 	CmdGetChannelAuthCapabilities = 0x38
+	CmdGetSessionChallenge        = 0x39
+	CmdActivateSession            = 0x3A
 	CmdSetSessionPrivilege        = 0x3B
 	CmdCloseSession               = 0x3C
 )

@@ -43,7 +43,7 @@ type OpenSessionRequest struct {
 	ConfReserved2             [3]byte
 }
 
-// RAKPMessage1 from client
+// RAKPMessage1 from client (parsed manually due to variable-length UserName)
 type RAKPMessage1 struct {
 	MessageTag             uint8
 	Reserved               [3]byte
@@ -52,7 +52,7 @@ type RAKPMessage1 struct {
 	PrivilegeLevel         uint8
 	Reserved2              [2]byte
 	UserNameLength         uint8
-	UserName               [20]byte
+	UserName               []byte
 }
 
 // RAKPMessage3 from client
@@ -86,6 +86,9 @@ func HandleRMCPPlusMessage(data []byte, sessionMgr *SessionManager, user, pass s
 	case PayloadTypeRAKPMessage3:
 		return handleRAKPMessage3(buf.Bytes(), header, sessionMgr, pass)
 	case PayloadTypeIPMI:
+		if header.SessionID == 0 {
+			return handlePreSessionIPMI(data, header, machine)
+		}
 		return handleEncryptedIPMI(data, header, sessionMgr, machine)
 	default:
 		return nil, fmt.Errorf("unsupported RMCP+ payload type: 0x%02x", payloadType)
@@ -138,11 +141,23 @@ func handleOpenSession(payload []byte, header *RMCPPlusSessionHeader, sessionMgr
 }
 
 func handleRAKPMessage1(payload []byte, header *RMCPPlusSessionHeader, sessionMgr *SessionManager, user, pass string) ([]byte, error) {
-	var req RAKPMessage1
-	buf := bytes.NewBuffer(payload)
-	if err := binary.Read(buf, binary.LittleEndian, &req); err != nil {
-		return nil, fmt.Errorf("parsing RAKP message 1: %w", err)
+	// Parse manually to handle variable-length UserName
+	if len(payload) < 28 {
+		return nil, fmt.Errorf("RAKP message 1 too short: %d bytes", len(payload))
 	}
+
+	var req RAKPMessage1
+	req.MessageTag = payload[0]
+	req.ManagedSystemSessionID = binary.LittleEndian.Uint32(payload[4:8])
+	copy(req.RemoteConsoleRandom[:], payload[8:24])
+	req.PrivilegeLevel = payload[24]
+	req.UserNameLength = payload[27]
+
+	if len(payload) < 28+int(req.UserNameLength) {
+		return nil, fmt.Errorf("RAKP message 1 too short for username: need %d, have %d", 28+int(req.UserNameLength), len(payload))
+	}
+	req.UserName = make([]byte, req.UserNameLength)
+	copy(req.UserName, payload[28:28+int(req.UserNameLength)])
 
 	session, ok := sessionMgr.GetSession(req.ManagedSystemSessionID)
 	if !ok {
@@ -154,7 +169,7 @@ func handleRAKPMessage1(payload []byte, header *RMCPPlusSessionHeader, sessionMg
 	session.RequestedPrivilegeLevel = req.PrivilegeLevel
 	session.UserNameLength = req.UserNameLength
 	session.UserName = make([]byte, req.UserNameLength)
-	copy(session.UserName, req.UserName[:req.UserNameLength])
+	copy(session.UserName, req.UserName)
 
 	// Validate username
 	if string(session.UserName) != user {
@@ -280,6 +295,31 @@ func handleRAKPMessage3(payload []byte, header *RMCPPlusSessionHeader, sessionMg
 	return wrapRMCPPlusResponse(PayloadTypeRAKPMessage4, 0, 0, resp.Bytes()), nil
 }
 
+func handlePreSessionIPMI(data []byte, header *RMCPPlusSessionHeader, machine MachineInterface) ([]byte, error) {
+	// Pre-session IPMI messages (e.g., Get Channel Auth Capabilities) sent via RMCP+
+	// with session ID 0, no encryption, no authentication
+	payloadStart := 12
+	payloadEnd := payloadStart + int(header.PayloadLength)
+	if payloadEnd > len(data) {
+		return nil, fmt.Errorf("payload length exceeds data")
+	}
+	ipmiData := data[payloadStart:payloadEnd]
+
+	if len(ipmiData) < 7 {
+		return nil, fmt.Errorf("pre-session IPMI data too short")
+	}
+
+	msg, err := ParseIPMIMessageBytes(ipmiData)
+	if err != nil {
+		return nil, err
+	}
+
+	responseCode, responseData := handleIPMICommand(msg, machine)
+	respMsg := buildIPMIResponseMessageWithSeq(msg.GetNetFn()|0x01, msg.Command, responseCode, responseData, msg.SourceLun)
+
+	return wrapRMCPPlusResponse(PayloadTypeIPMI, 0, 0, respMsg), nil
+}
+
 func handleEncryptedIPMI(data []byte, header *RMCPPlusSessionHeader, sessionMgr *SessionManager, machine MachineInterface) ([]byte, error) {
 	session, ok := sessionMgr.GetSession(header.SessionID)
 	if !ok {
@@ -297,6 +337,16 @@ func handleEncryptedIPMI(data []byte, header *RMCPPlusSessionHeader, sessionMgr 
 	}
 	payload := data[payloadStart:payloadEnd]
 
+	// Verify integrity if authenticated
+	if isAuthenticated {
+		// The integrity data starts after the payload
+		integrityStart := payloadEnd
+		// Need at least: pad(variable) + padLen(1) + nextHeader(1) + authCode(12)
+		if len(data) < integrityStart+14 { // minimum: 0 pad + 1 padLen + 1 nextHeader + 12 authCode
+			return nil, fmt.Errorf("RMCP+ data too short for integrity: %d bytes after payload", len(data)-integrityStart)
+		}
+	}
+
 	// Decrypt if needed
 	var ipmiData []byte
 	if isEncrypted {
@@ -311,7 +361,7 @@ func handleEncryptedIPMI(data []byte, header *RMCPPlusSessionHeader, sessionMgr 
 
 	// Parse and handle the IPMI message
 	if len(ipmiData) < 7 {
-		return nil, fmt.Errorf("decrypted IPMI data too short")
+		return nil, fmt.Errorf("decrypted IPMI data too short: %d", len(ipmiData))
 	}
 	msg, err := ParseIPMIMessageBytes(ipmiData)
 	if err != nil {
@@ -321,8 +371,8 @@ func handleEncryptedIPMI(data []byte, header *RMCPPlusSessionHeader, sessionMgr 
 	// Route to handler
 	responseCode, responseData := handleIPMICommand(msg, machine)
 
-	// Build response IPMI message
-	respMsg := buildIPMIResponseMessage(msg.GetNetFn()|0x01, msg.Command, responseCode, responseData)
+	// Build response IPMI message (echo request's sequence number)
+	respMsg := buildIPMIResponseMessageWithSeq(msg.GetNetFn()|0x01, msg.Command, responseCode, responseData, msg.SourceLun)
 
 	// Encrypt response
 	var respPayload []byte
@@ -339,11 +389,16 @@ func handleEncryptedIPMI(data []byte, header *RMCPPlusSessionHeader, sessionMgr 
 	respBuf := buildRMCPPlusEncryptedResponse(session, header.PayloadType, respPayload)
 
 	if isAuthenticated {
-		// Add integrity trailer and auth code
-		trailer := []byte{0xff, 0xff, 0x02, 0x07}
-		respBuf = append(respBuf, trailer...)
+		// Calculate integrity pad to align (header+payload+pad+padLen+nextHeader) to 4 bytes
+		totalBeforePad := len(respBuf) // header + encrypted payload
+		padNeeded := (4 - ((totalBeforePad + 1 + 1) % 4)) % 4
+		for i := 0; i < padNeeded; i++ {
+			respBuf = append(respBuf, 0xFF)
+		}
+		respBuf = append(respBuf, byte(padNeeded)) // Pad Length
+		respBuf = append(respBuf, 0x07)             // Next Header
 
-		// HMAC-SHA1-96 over everything from AuthType to end of trailer
+		// HMAC-SHA1-96 over everything from AuthType to end of Next Header
 		mac := hmac.New(sha1.New, session.IntegrityKey)
 		mac.Write(respBuf)
 		authCode := mac.Sum(nil)[:12]

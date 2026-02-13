@@ -33,6 +33,18 @@ func (m *mockQMPClient) SystemReset() error {
 	return nil
 }
 
+func (m *mockQMPClient) Stop() error {
+	m.calls = append(m.calls, "Stop")
+	m.status = qmp.StatusPaused
+	return nil
+}
+
+func (m *mockQMPClient) Cont() error {
+	m.calls = append(m.calls, "Cont")
+	m.status = qmp.StatusRunning
+	return nil
+}
+
 func (m *mockQMPClient) Quit() error {
 	m.calls = append(m.calls, "Quit")
 	m.status = qmp.StatusShutdown
@@ -81,7 +93,7 @@ func TestReset_ForceOff(t *testing.T) {
 
 	err := m.Reset("ForceOff")
 	require.NoError(t, err)
-	assert.Contains(t, mock.Calls(), "Quit")
+	assert.Contains(t, mock.Calls(), "Stop")
 }
 
 func TestReset_GracefulShutdown(t *testing.T) {
@@ -108,7 +120,7 @@ func TestReset_GracefulRestart(t *testing.T) {
 
 	err := m.Reset("GracefulRestart")
 	require.NoError(t, err)
-	assert.Contains(t, mock.Calls(), "SystemPowerdown")
+	assert.Contains(t, mock.Calls(), "SystemReset")
 }
 
 func TestReset_InvalidType(t *testing.T) {

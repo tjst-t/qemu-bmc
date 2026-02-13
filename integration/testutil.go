@@ -132,20 +132,18 @@ func readJSON(resp *http.Response) (map[string]any, error) {
 	return result, nil
 }
 
+// runIPMITool executes ipmitool with RMCP+ (lanplus) interface and cipher suite 3
 func runIPMITool(host, user, pass string, args ...string) (string, error) {
-	cmdArgs := []string{"-I", "lan", "-H", host, "-U", user, "-P", pass}
+	cmdArgs := []string{"-I", "lanplus", "-C", "3", "-H", host, "-U", user, "-P", pass}
 	cmdArgs = append(cmdArgs, args...)
 	cmd := exec.Command("ipmitool", cmdArgs...)
 	out, err := cmd.CombinedOutput()
 	return strings.TrimSpace(string(out)), err
 }
 
+// runIPMIToolLANPlus is an alias for runIPMITool (both use lanplus)
 func runIPMIToolLANPlus(host, user, pass string, args ...string) (string, error) {
-	cmdArgs := []string{"-I", "lanplus", "-H", host, "-U", user, "-P", pass}
-	cmdArgs = append(cmdArgs, args...)
-	cmd := exec.Command("ipmitool", cmdArgs...)
-	out, err := cmd.CombinedOutput()
-	return strings.TrimSpace(string(out)), err
+	return runIPMITool(host, user, pass, args...)
 }
 
 func waitForBMCReady(env testEnv, timeout time.Duration) error {

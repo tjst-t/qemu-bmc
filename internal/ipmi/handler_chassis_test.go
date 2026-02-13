@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"github.com/tjst-t/qemu-bmc/internal/machine"
 )
 
@@ -88,6 +89,9 @@ func TestGetBootOptions(t *testing.T) {
 	msg := &IPMIMessage{Command: CmdGetBootOptions, Data: data}
 	code, resp := handleChassisCommand(msg, mock)
 	assert.Equal(t, CompletionCodeOK, code)
-	assert.Equal(t, byte(0xA0), resp[1]) // valid + UEFI
-	assert.Equal(t, byte(0x04), resp[2]) // PXE (0x01 << 2)
+	require.Len(t, resp, 7)
+	assert.Equal(t, byte(0x01), resp[0]) // parameter version
+	assert.Equal(t, byte(0x85), resp[1]) // valid + param selector 5
+	assert.Equal(t, byte(0xA0), resp[2]) // boot flags valid + UEFI
+	assert.Equal(t, byte(0x04), resp[3]) // PXE (0x01 << 2)
 }

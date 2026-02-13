@@ -121,10 +121,6 @@ func mapQMPStatusToRedfish(status qmp.Status) string {
 	switch status {
 	case qmp.StatusRunning:
 		return "On"
-	case qmp.StatusShutdown:
-		return "Off"
-	case qmp.StatusPaused:
-		return "Paused"
 	default:
 		return "Off"
 	}

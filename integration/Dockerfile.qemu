@@ -1,0 +1,15 @@
+FROM debian:bookworm-slim
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    qemu-system-x86 \
+    qemu-utils \
+    && rm -rf /var/lib/apt/lists/*
+
+CMD ["qemu-system-x86_64", \
+     "-machine", "q35", \
+     "-nographic", \
+     "-no-shutdown", \
+     "-qmp", "unix:/shared/qmp.sock,server,nowait", \
+     "-drive", "id=cd0,if=none,media=cdrom", \
+     "-device", "ide-cd,id=ide0-cd0,drive=cd0,bus=ide.1", \
+     "-m", "128"]

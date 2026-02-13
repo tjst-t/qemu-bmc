@@ -1,5 +1,15 @@
 package ipmi
 
+import (
+	"crypto/rand"
+	"encoding/binary"
+)
+
+// ipmi15Session tracks IPMI 1.5 session state
+var ipmi15TempSessionID uint32
+var ipmi15Challenge [16]byte
+var ipmi15ActiveSessionID uint32
+
 // handleAppCommand handles Application network function commands
 func handleAppCommand(msg *IPMIMessage, machine MachineInterface) (CompletionCode, []byte) {
 	switch msg.Command {
@@ -7,6 +17,10 @@ func handleAppCommand(msg *IPMIMessage, machine MachineInterface) (CompletionCod
 		return handleGetDeviceID()
 	case CmdGetChannelAuthCapabilities:
 		return handleGetChannelAuthCapabilities(msg.Data)
+	case CmdGetSessionChallenge:
+		return handleGetSessionChallenge(msg.Data)
+	case CmdActivateSession:
+		return handleActivateSession(msg.Data)
 	case CmdSetSessionPrivilege:
 		return handleSetSessionPrivilege(msg.Data)
 	case CmdCloseSession:
@@ -42,6 +56,51 @@ func handleGetChannelAuthCapabilities(reqData []byte) (CompletionCode, []byte) {
 		0x00, // OEM Aux
 	}
 	return CompletionCodeOK, data
+}
+
+func handleGetSessionChallenge(reqData []byte) (CompletionCode, []byte) {
+	// Generate temporary session ID and challenge
+	b := make([]byte, 4)
+	if _, err := rand.Read(b); err != nil {
+		return CompletionCodeUnspecified, nil
+	}
+	ipmi15TempSessionID = binary.LittleEndian.Uint32(b)
+
+	if _, err := rand.Read(ipmi15Challenge[:]); err != nil {
+		return CompletionCodeUnspecified, nil
+	}
+
+	resp := make([]byte, 20)
+	binary.LittleEndian.PutUint32(resp[0:4], ipmi15TempSessionID)
+	copy(resp[4:20], ipmi15Challenge[:])
+	return CompletionCodeOK, resp
+}
+
+func handleActivateSession(reqData []byte) (CompletionCode, []byte) {
+	if len(reqData) < 22 {
+		return CompletionCodeInvalidField, nil
+	}
+
+	authType := reqData[0]
+	maxPriv := reqData[1]
+
+	// Generate active session ID
+	b := make([]byte, 4)
+	if _, err := rand.Read(b); err != nil {
+		return CompletionCodeUnspecified, nil
+	}
+	ipmi15ActiveSessionID = binary.LittleEndian.Uint32(b)
+	// Avoid zero session ID
+	if ipmi15ActiveSessionID == 0 {
+		ipmi15ActiveSessionID = 1
+	}
+
+	resp := make([]byte, 10)
+	resp[0] = authType
+	binary.LittleEndian.PutUint32(resp[1:5], ipmi15ActiveSessionID)
+	binary.LittleEndian.PutUint32(resp[5:9], 1) // initial inbound seq
+	resp[9] = maxPriv
+	return CompletionCodeOK, resp
 }
 
 func handleSetSessionPrivilege(reqData []byte) (CompletionCode, []byte) {

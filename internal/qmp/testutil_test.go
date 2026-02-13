@@ -92,12 +92,17 @@ func (m *mockQMPServer) handleConnection(conn net.Conn) {
 			}
 			data, _ := json.Marshal(resp)
 			response = string(data) + "\n"
-		case "system_powerdown", "system_reset", "quit":
-			if cmd.Execute == "quit" {
-				m.mu.Lock()
+		case "system_powerdown", "system_reset", "quit", "stop", "cont":
+			m.mu.Lock()
+			switch cmd.Execute {
+			case "quit":
 				m.status = StatusShutdown
-				m.mu.Unlock()
+			case "stop":
+				m.status = StatusPaused
+			case "cont":
+				m.status = StatusRunning
 			}
+			m.mu.Unlock()
 			response = `{"return": {}}` + "\n"
 		case "blockdev-change-medium", "blockdev-remove-medium":
 			response = `{"return": {}}` + "\n"

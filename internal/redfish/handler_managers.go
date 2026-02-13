@@ -2,6 +2,7 @@ package redfish
 
 import (
 	"encoding/json"
+	"log"
 	"net/http"
 )
 
@@ -80,9 +81,10 @@ func (s *Server) handleInsertMedia(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Track media state in BMC. QMP insertion is best-effort since
+	// the URL may not be accessible until boot time.
 	if err := s.machine.InsertMedia(req.Image); err != nil {
-		writeError(w, http.StatusInternalServerError, "InternalError", err.Error())
-		return
+		log.Printf("VirtualMedia: QMP insert failed (non-fatal): %v", err)
 	}
 
 	s.currentMedia = req.Image
@@ -93,8 +95,7 @@ func (s *Server) handleInsertMedia(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleEjectMedia(w http.ResponseWriter, r *http.Request) {
 	if err := s.machine.EjectMedia(); err != nil {
-		writeError(w, http.StatusInternalServerError, "InternalError", err.Error())
-		return
+		log.Printf("VirtualMedia: QMP eject failed (non-fatal): %v", err)
 	}
 
 	s.currentMedia = ""

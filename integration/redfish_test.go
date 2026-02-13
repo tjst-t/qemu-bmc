@@ -21,7 +21,7 @@ func TestRedfish_ServiceRoot(t *testing.T) {
 	require.NoError(t, err)
 
 	assert.Equal(t, http.StatusOK, resp.StatusCode)
-	assert.Equal(t, "#ServiceRoot.v1_0_0.ServiceRoot", data["@odata.type"])
+	assert.Equal(t, "#ServiceRoot.v1_5_0.ServiceRoot", data["@odata.type"])
 	assert.Equal(t, "/redfish/v1", data["@odata.id"])
 	assert.NotEmpty(t, data["Name"])
 }

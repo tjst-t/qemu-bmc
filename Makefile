@@ -2,6 +2,8 @@
 
 BINARY := qemu-bmc
 DOCKER_IMAGE := qemu-bmc
+COMPOSE := $(shell command -v docker-compose 2>/dev/null || echo "docker compose")
+COMPOSE_FILE := integration/docker-compose.yml
 
 build:
 	go build -o $(BINARY) ./cmd/qemu-bmc
@@ -23,18 +25,21 @@ docker-build:
 	docker build -t $(DOCKER_IMAGE) .
 
 integration:
-	docker compose -f integration/docker-compose.yml run --rm --build test
-	docker compose -f integration/docker-compose.yml down -v
+	$(COMPOSE) -f $(COMPOSE_FILE) down -v 2>/dev/null || true
+	$(COMPOSE) -f $(COMPOSE_FILE) build
+	$(COMPOSE) -f $(COMPOSE_FILE) run --rm test
+	$(COMPOSE) -f $(COMPOSE_FILE) down -v
 
 integration-up:
-	docker compose -f integration/docker-compose.yml up --build -d qemu bmc
+	$(COMPOSE) -f $(COMPOSE_FILE) build bmc
+	$(COMPOSE) -f $(COMPOSE_FILE) up -d qemu bmc
 	@echo "QEMU + BMC running. Use 'make integration-down' to stop."
 
 integration-down:
-	docker compose -f integration/docker-compose.yml down -v
+	$(COMPOSE) -f $(COMPOSE_FILE) down -v
 
 ci: vet test-race integration
 
 clean:
 	rm -f $(BINARY) coverage.out
-	docker compose -f integration/docker-compose.yml down -v --rmi local 2>/dev/null || true
+	$(COMPOSE) -f $(COMPOSE_FILE) down -v --rmi local 2>/dev/null || true

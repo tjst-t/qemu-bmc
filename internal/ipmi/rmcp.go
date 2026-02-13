@@ -95,6 +95,14 @@ func ParseIPMI15Message(data []byte) (*IPMISessionHeader, *IPMIMessage, error) {
 		return session, nil, nil
 	}
 
+	// Skip 16-byte auth code for authenticated sessions
+	if session.AuthType != AuthTypeNone {
+		if buf.Len() < 16 {
+			return nil, nil, fmt.Errorf("IPMI auth code truncated")
+		}
+		buf.Next(16)
+	}
+
 	// Read message length
 	var msgLen uint8
 	if err := binary.Read(buf, binary.LittleEndian, &msgLen); err != nil {
@@ -148,6 +156,13 @@ func SerializeIPMIResponse(session *IPMISessionHeader, netFn uint8, cmd uint8, c
 	binary.Write(buf, binary.LittleEndian, session.AuthType)
 	binary.Write(buf, binary.LittleEndian, session.SequenceNumber)
 	binary.Write(buf, binary.LittleEndian, session.SessionID)
+
+	// Include 16-byte auth code for authenticated sessions
+	if session.AuthType != AuthTypeNone {
+		authCode := make([]byte, 16)
+		buf.Write(authCode)
+	}
+
 	binary.Write(buf, binary.LittleEndian, uint8(len(msg)))
 	buf.Write(msg)
 
@@ -155,10 +170,14 @@ func SerializeIPMIResponse(session *IPMISessionHeader, netFn uint8, cmd uint8, c
 }
 
 func buildIPMIResponseMessage(netFn uint8, cmd uint8, code CompletionCode, data []byte) []byte {
+	return buildIPMIResponseMessageWithSeq(netFn, cmd, code, data, 0x00)
+}
+
+func buildIPMIResponseMessageWithSeq(netFn uint8, cmd uint8, code CompletionCode, data []byte, reqSeqLun uint8) []byte {
 	targetAddr := uint8(0x81) // remote console
 	sourceAddr := uint8(0x20) // BMC
 	targetLun := (netFn << 2) | 0x00
-	sourceLun := uint8(0x00)
+	sourceLun := reqSeqLun // echo request's sequence number and LUN
 
 	// Header checksum
 	headerSum := uint32(targetAddr) + uint32(targetLun)

@@ -1,6 +1,7 @@
 package ipmi
 
 import (
+	"encoding/binary"
 	"fmt"
 	"log"
 	"net"
@@ -75,6 +76,10 @@ func (s *Server) HandleMessage(data []byte) ([]byte, error) {
 		return nil, err
 	}
 
+	if header.Class == RMCPClassASF {
+		return handleASFPing(payload)
+	}
+
 	if header.Class != RMCPClassIPMI {
 		return nil, fmt.Errorf("unsupported RMCP class: 0x%02x", header.Class)
 	}
@@ -102,6 +107,46 @@ func (s *Server) HandleMessage(data []byte) ([]byte, error) {
 
 	respPayload := SerializeIPMIResponse(session, msg.GetNetFn()|0x01, msg.Command, code, respData)
 	return SerializeRMCPMessage(RMCPClassIPMI, respPayload), nil
+}
+
+// handleASFPing responds to ASF Presence Ping with a Pong
+func handleASFPing(payload []byte) ([]byte, error) {
+	// ASF message header: 4-byte IANA + 1-byte type + 1-byte tag + 1-byte reserved + 1-byte length
+	if len(payload) < 8 {
+		return nil, fmt.Errorf("ASF message too short")
+	}
+
+	msgType := payload[4]
+	msgTag := payload[5]
+
+	if msgType != 0x80 { // Only handle Presence Ping
+		return nil, fmt.Errorf("unsupported ASF message type: 0x%02x", msgType)
+	}
+
+	// Build ASF Presence Pong
+	resp := make([]byte, 28) // 4 RMCP + 8 ASF header + 16 pong data
+
+	// RMCP header
+	resp[0] = RMCPVersion1
+	resp[1] = 0x00
+	resp[2] = 0xFF
+	resp[3] = RMCPClassASF
+
+	// ASF header
+	binary.BigEndian.PutUint32(resp[4:8], 0x000011BE) // IANA Enterprise Number for ASF
+	resp[8] = 0x40                                      // Message Type: Presence Pong
+	resp[9] = msgTag                                     // Echo back message tag
+	resp[10] = 0x00                                      // Reserved
+	resp[11] = 0x10                                      // Data Length: 16 bytes
+
+	// Pong data
+	binary.BigEndian.PutUint32(resp[12:16], 0x000011BE) // IANA Enterprise Number
+	// OEM-defined: 4 bytes zeros (resp[16:20] already zero)
+	resp[20] = 0x81 // Supported Entities: IPMI supported (bit 7) + ASF 1.0 (bit 0)
+	resp[21] = 0x00 // Supported Interactions
+	// Reserved: 6 bytes zeros (resp[22:28] already zero)
+
+	return resp, nil
 }
 
 // Close stops the server

@@ -14,6 +14,8 @@ type Client interface {
 	QueryStatus() (Status, error)
 	SystemPowerdown() error
 	SystemReset() error
+	Stop() error
+	Cont() error
 	Quit() error
 	BlockdevChangeMedium(device, filename string) error
 	BlockdevRemoveMedium(device string) error
@@ -42,6 +44,7 @@ type qmpCommand struct {
 type qmpResponse struct {
 	Return interface{} `json:"return,omitempty"`
 	Error  *qmpError   `json:"error,omitempty"`
+	Event  string      `json:"event,omitempty"`
 }
 
 type qmpError struct {
