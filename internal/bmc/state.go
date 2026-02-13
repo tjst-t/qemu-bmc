@@ -23,11 +23,31 @@ type userSlot struct {
 	access   UserAccess
 }
 
+// ChannelAccess represents channel access settings.
+type ChannelAccess struct {
+	AccessMode      uint8 // 0=Disabled, 1=PreBoot, 2=AlwaysAvailable, 3=Shared
+	UserLevelAuth   bool
+	PerMsgAuth      bool
+	AlertingEnabled bool
+	PrivilegeLimit  uint8 // Max privilege for channel
+}
+
+// ChannelInfo holds static channel information.
+type ChannelInfo struct {
+	ChannelNumber   uint8
+	ChannelMedium   uint8 // 0x04 = 802.3 LAN
+	ChannelProtocol uint8 // 0x01 = IPMB-1.0
+	SessionSupport  uint8 // 0x02 = multi-session
+	ActiveSessions  uint8
+}
+
 // State manages BMC configuration state, starting with user accounts.
 // All methods are safe for concurrent use.
 type State struct {
-	mu    sync.RWMutex
-	users [maxUsers + 1]userSlot // index 0 unused, 1-15 valid
+	mu            sync.RWMutex
+	users         [maxUsers + 1]userSlot // index 0 unused, 1-15 valid
+	lanConfig     map[uint8][]byte       // parameter number → value
+	channelAccess [16]ChannelAccess      // indexed by channel (0-15)
 }
 
 // NewState creates a new State with a default admin user in slot 2.
@@ -44,6 +64,26 @@ func NewState(defaultUser, defaultPass string) *State {
 			LinkAuth:       true,
 		},
 	}
+
+	// Initialize LAN configuration defaults
+	s.lanConfig = map[uint8][]byte{
+		1:  {0x97},                         // Auth Type Support (read-only)
+		2:  {0x14, 0x14, 0x14, 0x14, 0x00}, // Auth Type Enables
+		3:  {0, 0, 0, 0},                   // IP Address
+		4:  {0x01},                          // IP Source: Static
+		5:  {0, 0, 0, 0, 0, 0},             // MAC Address
+		6:  {0, 0, 0, 0},                   // Subnet Mask
+		12: {0, 0, 0, 0},                   // Default Gateway
+	}
+
+	// Initialize channel 1 defaults
+	s.channelAccess[1] = ChannelAccess{
+		AccessMode:     2, // AlwaysAvailable
+		UserLevelAuth:  true,
+		PerMsgAuth:     true,
+		PrivilegeLimit: 4, // Admin
+	}
+
 	return s
 }
 
@@ -156,4 +196,61 @@ func (s *State) LookupUserByName(name string) (uint8, bool) {
 		}
 	}
 	return 0, false
+}
+
+// GetLANConfig returns a copy of the LAN configuration parameter value.
+// Returns nil if the parameter is not found.
+func (s *State) GetLANConfig(param uint8) []byte {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	v, ok := s.lanConfig[param]
+	if !ok {
+		return nil
+	}
+	out := make([]byte, len(v))
+	copy(out, v)
+	return out
+}
+
+// SetLANConfig stores a copy of the data for the given LAN configuration parameter.
+func (s *State) SetLANConfig(param uint8, data []byte) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	stored := make([]byte, len(data))
+	copy(stored, data)
+	s.lanConfig[param] = stored
+}
+
+// GetChannelAccess returns the access settings for the given channel (0-15).
+// Returns a zero-value ChannelAccess for out-of-range channels.
+func (s *State) GetChannelAccess(channel uint8) ChannelAccess {
+	if channel > 15 {
+		return ChannelAccess{}
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.channelAccess[channel]
+}
+
+// SetChannelAccess sets the access settings for the given channel (0-15).
+// Silently ignores out-of-range channels.
+func (s *State) SetChannelAccess(channel uint8, access ChannelAccess) {
+	if channel > 15 {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.channelAccess[channel] = access
+}
+
+// GetChannelInfo returns static channel information for the given channel.
+// All channels report as 802.3 LAN with IPMB-1.0 protocol and multi-session support.
+func (s *State) GetChannelInfo(channel uint8) ChannelInfo {
+	return ChannelInfo{
+		ChannelNumber:   channel,
+		ChannelMedium:   0x04, // 802.3 LAN
+		ChannelProtocol: 0x01, // IPMB-1.0
+		SessionSupport:  0x02, // multi-session
+		ActiveSessions:  0,
+	}
 }

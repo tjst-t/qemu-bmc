@@ -173,3 +173,142 @@ func TestLookupUserByName(t *testing.T) {
 	_, found = s.LookupUserByName("")
 	assert.False(t, found)
 }
+
+// --- LAN Configuration Tests ---
+
+func TestLANConfig_Defaults(t *testing.T) {
+	s := NewState("admin", "password")
+
+	// Param 1: Auth Type Support (read-only)
+	assert.Equal(t, []byte{0x97}, s.GetLANConfig(1))
+
+	// Param 3: IP Address (default zeros)
+	assert.Equal(t, []byte{0, 0, 0, 0}, s.GetLANConfig(3))
+
+	// Param 4: IP Source (default Static = 0x01)
+	assert.Equal(t, []byte{0x01}, s.GetLANConfig(4))
+
+	// Unknown param returns nil
+	assert.Nil(t, s.GetLANConfig(200))
+}
+
+func TestLANConfig_SetGet(t *testing.T) {
+	s := NewState("admin", "password")
+
+	// Set IP address (param 3)
+	ip := []byte{10, 0, 0, 1}
+	s.SetLANConfig(3, ip)
+	assert.Equal(t, []byte{10, 0, 0, 1}, s.GetLANConfig(3))
+
+	// Set subnet mask (param 6)
+	subnet := []byte{255, 255, 255, 0}
+	s.SetLANConfig(6, subnet)
+	assert.Equal(t, []byte{255, 255, 255, 0}, s.GetLANConfig(6))
+
+	// Set default gateway (param 12)
+	gw := []byte{10, 0, 0, 254}
+	s.SetLANConfig(12, gw)
+	assert.Equal(t, []byte{10, 0, 0, 254}, s.GetLANConfig(12))
+
+	// Verify no aliasing: modifying original slice doesn't affect stored value
+	ip[0] = 192
+	assert.Equal(t, []byte{10, 0, 0, 1}, s.GetLANConfig(3))
+
+	// Verify no aliasing: modifying returned slice doesn't affect stored value
+	got := s.GetLANConfig(3)
+	got[0] = 172
+	assert.Equal(t, []byte{10, 0, 0, 1}, s.GetLANConfig(3))
+}
+
+func TestLANConfig_IPSource(t *testing.T) {
+	s := NewState("admin", "password")
+
+	// Default is Static (0x01)
+	assert.Equal(t, []byte{0x01}, s.GetLANConfig(4))
+
+	// Set to DHCP (0x02)
+	s.SetLANConfig(4, []byte{0x02})
+	assert.Equal(t, []byte{0x02}, s.GetLANConfig(4))
+}
+
+func TestLANConfig_MACAddress(t *testing.T) {
+	s := NewState("admin", "password")
+
+	// Default is all zeros (6 bytes)
+	assert.Equal(t, []byte{0, 0, 0, 0, 0, 0}, s.GetLANConfig(5))
+
+	// Set MAC address
+	mac := []byte{0x52, 0x54, 0x00, 0xAB, 0xCD, 0xEF}
+	s.SetLANConfig(5, mac)
+	assert.Equal(t, []byte{0x52, 0x54, 0x00, 0xAB, 0xCD, 0xEF}, s.GetLANConfig(5))
+}
+
+func TestLANConfig_AuthTypeEnables(t *testing.T) {
+	s := NewState("admin", "password")
+
+	// Default param 2: 5 bytes
+	assert.Equal(t, []byte{0x14, 0x14, 0x14, 0x14, 0x00}, s.GetLANConfig(2))
+
+	// Set new auth type enables
+	newAuth := []byte{0x15, 0x15, 0x15, 0x15, 0x01}
+	s.SetLANConfig(2, newAuth)
+	assert.Equal(t, []byte{0x15, 0x15, 0x15, 0x15, 0x01}, s.GetLANConfig(2))
+}
+
+// --- Channel Access Tests ---
+
+func TestChannelAccess_Defaults(t *testing.T) {
+	s := NewState("admin", "password")
+
+	access := s.GetChannelAccess(1)
+	assert.Equal(t, uint8(2), access.AccessMode, "channel 1 should default to AlwaysAvailable")
+	assert.True(t, access.UserLevelAuth, "channel 1 should have UserLevelAuth enabled")
+	assert.True(t, access.PerMsgAuth, "channel 1 should have PerMsgAuth enabled")
+	assert.False(t, access.AlertingEnabled, "channel 1 alerting should be disabled")
+	assert.Equal(t, uint8(4), access.PrivilegeLimit, "channel 1 privilege limit should be Admin")
+
+	// Channel 0 should be zero-value
+	access0 := s.GetChannelAccess(0)
+	assert.Equal(t, uint8(0), access0.AccessMode)
+	assert.Equal(t, uint8(0), access0.PrivilegeLimit)
+}
+
+func TestChannelAccess_SetGet(t *testing.T) {
+	s := NewState("admin", "password")
+
+	access := ChannelAccess{
+		AccessMode:      3,
+		UserLevelAuth:   false,
+		PerMsgAuth:      true,
+		AlertingEnabled: true,
+		PrivilegeLimit:  3,
+	}
+
+	s.SetChannelAccess(2, access)
+	got := s.GetChannelAccess(2)
+	assert.Equal(t, access, got)
+
+	// Out-of-range get returns zero-value
+	outOfRange := s.GetChannelAccess(16)
+	assert.Equal(t, ChannelAccess{}, outOfRange)
+
+	// Out-of-range set is silently ignored
+	s.SetChannelAccess(16, access) // should not panic
+	s.SetChannelAccess(255, access) // should not panic
+}
+
+func TestGetChannelInfo(t *testing.T) {
+	s := NewState("admin", "password")
+
+	info := s.GetChannelInfo(1)
+	assert.Equal(t, uint8(1), info.ChannelNumber)
+	assert.Equal(t, uint8(0x04), info.ChannelMedium, "should be 802.3 LAN")
+	assert.Equal(t, uint8(0x01), info.ChannelProtocol, "should be IPMB-1.0")
+	assert.Equal(t, uint8(0x02), info.SessionSupport, "should be multi-session")
+	assert.Equal(t, uint8(0), info.ActiveSessions)
+
+	// Different channel number
+	info5 := s.GetChannelInfo(5)
+	assert.Equal(t, uint8(5), info5.ChannelNumber)
+	assert.Equal(t, uint8(0x04), info5.ChannelMedium)
+}
