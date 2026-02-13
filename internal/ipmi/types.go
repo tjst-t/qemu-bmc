@@ -31,10 +31,18 @@ const (
 
 // IPMI Network Functions
 const (
-	NetFnChassis         = 0x00
-	NetFnChassisResponse = 0x01
-	NetFnApp             = 0x06
-	NetFnAppResponse     = 0x07
+	NetFnChassis           = 0x00
+	NetFnChassisResponse   = 0x01
+	NetFnApp               = 0x06
+	NetFnAppResponse       = 0x07
+	NetFnTransport         = 0x0C
+	NetFnTransportResponse = 0x0D
+)
+
+// IPMI Transport Commands
+const (
+	CmdSetLANConfigParams = 0x01
+	CmdGetLANConfigParams = 0x02
 )
 
 // IPMI App Commands
