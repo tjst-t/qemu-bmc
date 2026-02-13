@@ -182,9 +182,12 @@ func handleSetUserAccess(reqData []byte, state *bmc.State) (CompletionCode, []by
 	userID := reqData[1] & 0x3F
 	privLimit := reqData[2] & 0x0F
 
+	// Preserve existing Enabled state (enable/disable is done via Set User Password)
+	existing, _ := state.GetUserAccess(channel, userID)
+
 	access := bmc.UserAccess{
 		PrivilegeLimit: privLimit,
-		Enabled:        true,
+		Enabled:        existing.Enabled,
 		IPMIMessaging:  ipmiMsg,
 		LinkAuth:       linkAuth,
 		CallinCallback: callin,

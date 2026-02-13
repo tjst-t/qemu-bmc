@@ -113,6 +113,13 @@ func TestHandleSetUserPassword_TestPassword(t *testing.T) {
 
 func TestHandleSetUserAccess(t *testing.T) {
 	state := newTestBMCState()
+
+	// Enable user 3 first (as MaaS does via Set User Password, operation=enable)
+	enableReq := make([]byte, 2)
+	enableReq[0] = 0x03 // user_id=3
+	enableReq[1] = 0x01 // operation=enable
+	handleSetUserPassword(enableReq, state)
+
 	// Set user 3 with admin privilege on channel 1
 	reqData := []byte{
 		0x91, // change_enable(1) | callin(0) | link_auth(0) | ipmi_msg(1) | channel(1)

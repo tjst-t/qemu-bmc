@@ -1,6 +1,7 @@
 package bmc
 
 import (
+	"crypto/subtle"
 	"fmt"
 	"sync"
 )
@@ -153,7 +154,7 @@ func (s *State) CheckPassword(userID uint8, password string) bool {
 	if stored == "" {
 		return false
 	}
-	return stored == password
+	return subtle.ConstantTimeCompare([]byte(stored), []byte(password)) == 1
 }
 
 // GetUserAccess returns the access settings for the given user slot.
