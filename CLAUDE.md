@@ -15,7 +15,8 @@ internal/
   qmp/                         # QMP socket client (interface + implementation)
   machine/                     # VM state management (wraps QMP)
   redfish/                     # HTTP server with gorilla/mux, 15+ endpoints
-  ipmi/                        # UDP server, RMCP/RMCP+, RAKP auth, chassis commands
+  ipmi/                        # UDP server + VM chardev server, RMCP/RMCP+, RAKP auth, chassis commands
+  bmc/                          # BMC configuration state (users, LAN, channels)
   config/                      # Environment variable config
 ```
 
@@ -68,6 +69,7 @@ go tool cover -html=coverage.out
 | `TLS_CERT` | (empty, falls back to HTTP) | TLS certificate path |
 | `TLS_KEY` | (empty) | TLS key path |
 | `VM_BOOT_MODE` | `bios` | Default boot mode |
+| `VM_IPMI_ADDR` | (empty, disabled) | VM IPMI chardev listen address (e.g., `:9002`) |
 
 ## Redfish Endpoints
 
@@ -104,6 +106,39 @@ Middleware: Basic Auth, ETag (If-Match), trailing slash normalization
 | Get Boot Options | Chassis | 0x09 | Boot device query |
 
 Supports: RMCP v1.0, IPMI 1.5, RMCP+ with RAKP HMAC-SHA1 auth, AES-CBC-128 encryption
+
+## VM IPMI (In-Band)
+
+Supports QEMU's `ipmi-bmc-extern` device for in-band IPMI communication from the guest OS via KCS interface. This enables MaaS commissioning scripts to configure BMC users, LAN settings, and channel access from within the VM.
+
+### QEMU Configuration
+
+```bash
+qemu-system-x86_64 \
+  -chardev socket,id=ipmi0,host=localhost,port=9002,reconnect=10 \
+  -device ipmi-bmc-extern,id=bmc0,chardev=ipmi0 \
+  -device isa-ipmi-kcs,bmc=bmc0 \
+  ...
+```
+
+### Supported In-Band Commands
+
+| Command | NetFn | Cmd | Description |
+|---------|-------|-----|-------------|
+| Get User Access | App (0x06) | 0x44 | Read user privileges |
+| Get User Name | App (0x06) | 0x46 | Read username |
+| Set User Name | App (0x06) | 0x45 | Set username |
+| Set User Password | App (0x06) | 0x47 | Set password |
+| Set User Access | App (0x06) | 0x43 | Set user privileges |
+| Get Channel Access | App (0x06) | 0x41 | Read channel settings |
+| Set Channel Access | App (0x06) | 0x40 | Write channel settings |
+| Get Channel Info | App (0x06) | 0x42 | Channel information |
+| Get LAN Config | Transport (0x0C) | 0x02 | Read LAN parameters |
+| Set LAN Config | Transport (0x0C) | 0x01 | Write LAN parameters |
+
+Plus all existing chassis and app commands (Get Device ID, Chassis Status, Boot Options, etc.)
+
+Uses the OpenIPMI VM wire protocol over TCP with framing (0xA0/0xA1), byte escaping (0xAA), and two's complement checksums.
 
 ## Development Guidelines
 

@@ -5,26 +5,30 @@ A Go single binary that controls QEMU VMs via both Redfish API (HTTPS) and IPMI 
 Replaces [docker-qemu-bmc](https://github.com/tjst-t/docker-qemu-bmc) (shell scripts + ipmi_sim + supervisord) with a single Go binary.
 
 ```
-┌─────────────────────────────────────┐
-│ OCI Container                       │
-│                                     │
-│  ┌───────────┐   ┌──────────────┐  │
-│  │ qemu-bmc  │   │    QEMU      │  │
-│  │ (Go)      │   │              │  │
-│  │           │   │              │  │
-│  │ :443/tcp  │   │              │  │
-│  │  Redfish  ├──►│              │  │
-│  │           │   │  QMP Socket  │  │
-│  │ :623/udp  │   │              │  │
-│  │  IPMI     ├──►│              │  │
-│  └───────────┘   └──────────────┘  │
-└─────────────────────────────────────┘
+┌──────────────────────────────────────────┐
+│ OCI Container                            │
+│                                          │
+│  ┌───────────┐   ┌──────────────────┐   │
+│  │ qemu-bmc  │   │      QEMU        │   │
+│  │ (Go)      │   │                  │   │
+│  │           │   │                  │   │
+│  │ :443/tcp  │   │                  │   │
+│  │  Redfish  ├──►│  QMP Socket      │   │
+│  │           │   │                  │   │
+│  │ :623/udp  │   │                  │   │
+│  │  IPMI     ├──►│                  │   │
+│  │           │   │                  │   │
+│  │ :9002/tcp │   │  ipmi-bmc-extern │   │
+│  │  VM IPMI  │◄──┤  (KCS)          │   │
+│  └───────────┘   └──────────────────┘   │
+└──────────────────────────────────────────┘
 ```
 
 ## Features
 
 - **Redfish API** - ServiceRoot, Systems, Managers, VirtualMedia, Chassis (gofish compatible)
 - **IPMI over LAN** - RMCP/RMCP+, RAKP HMAC-SHA1 authentication, AES-CBC-128 encryption
+- **VM IPMI (In-Band)** - Guest OS IPMI via QEMU `ipmi-bmc-extern` KCS interface for MaaS commissioning
 - **QMP Control** - Power operations, boot device changes, VirtualMedia mount
 - **Compatibility** - MAAS, Tinkerbell/Rufio, Cybozu placemat
 
@@ -107,6 +111,36 @@ ipmitool -I lanplus -H localhost -U admin -P password chassis power off
 ipmitool -I lanplus -H localhost -U admin -P password chassis bootdev pxe
 ```
 
+### VM IPMI (In-Band)
+
+qemu-bmc supports QEMU's `ipmi-bmc-extern` device for in-band IPMI from the guest OS. This enables MaaS commissioning scripts to configure BMC users, LAN settings, and channel access from within the VM. Users created in-band are automatically available for out-of-band IPMI and Redfish authentication.
+
+Set `VM_IPMI_ADDR` to enable the VM IPMI chardev listener:
+
+```bash
+export VM_IPMI_ADDR=:9002
+```
+
+Configure QEMU to connect to qemu-bmc:
+
+```bash
+qemu-system-x86_64 \
+  -chardev socket,id=ipmi0,host=localhost,port=9002,reconnect=10 \
+  -device ipmi-bmc-extern,id=bmc0,chardev=ipmi0 \
+  -device isa-ipmi-kcs,bmc=bmc0 \
+  ...
+```
+
+The guest OS can then use standard `ipmitool` commands via the KCS interface:
+
+```bash
+# Inside the VM
+ipmitool user set name 3 newuser
+ipmitool user set password 3 newpass
+ipmitool channel setaccess 1 3 callin=on ipmi=on link=on privilege=4
+ipmitool user enable 3
+```
+
 ## Redfish Endpoints
 
 | Method | Path | Description |
@@ -148,6 +182,7 @@ ipmitool -I lanplus -H localhost -U admin -P password chassis bootdev pxe
 | `TLS_CERT` | (auto) | TLS certificate path |
 | `TLS_KEY` | (auto) | TLS key path |
 | `VM_BOOT_MODE` | `bios` | Default boot mode |
+| `VM_IPMI_ADDR` | (empty, disabled) | VM IPMI chardev listen address (e.g., `:9002`) |
 
 ## Development
 
@@ -173,7 +208,8 @@ internal/
   qmp/                         # QMP socket client
   machine/                     # VM state management
   redfish/                     # Redfish HTTP server (gorilla/mux)
-  ipmi/                        # IPMI UDP server (RMCP/RMCP+)
+  ipmi/                        # IPMI UDP server + VM chardev server (RMCP/RMCP+)
+  bmc/                          # BMC configuration state (users, LAN, channels)
   config/                      # Environment variable config
 ```
 
@@ -190,26 +226,30 @@ QEMU VM を Redfish API (HTTPS) と IPMI over LAN (UDP) の両方で制御する
 [docker-qemu-bmc](https://github.com/tjst-t/docker-qemu-bmc)（シェルスクリプト + ipmi_sim + supervisord）を Go 単体で置き換える。
 
 ```
-┌─────────────────────────────────────┐
-│ OCI コンテナ                         │
-│                                     │
-│  ┌───────────┐   ┌──────────────┐  │
-│  │ qemu-bmc  │   │    QEMU      │  │
-│  │ (Go)      │   │              │  │
-│  │           │   │              │  │
-│  │ :443/tcp  │   │              │  │
-│  │  Redfish  ├──►│              │  │
-│  │           │   │  QMP Socket  │  │
-│  │ :623/udp  │   │              │  │
-│  │  IPMI     ├──►│              │  │
-│  └───────────┘   └──────────────┘  │
-└─────────────────────────────────────┘
+┌──────────────────────────────────────────┐
+│ OCI コンテナ                              │
+│                                          │
+│  ┌───────────┐   ┌──────────────────┐   │
+│  │ qemu-bmc  │   │      QEMU        │   │
+│  │ (Go)      │   │                  │   │
+│  │           │   │                  │   │
+│  │ :443/tcp  │   │                  │   │
+│  │  Redfish  ├──►│  QMP Socket      │   │
+│  │           │   │                  │   │
+│  │ :623/udp  │   │                  │   │
+│  │  IPMI     ├──►│                  │   │
+│  │           │   │                  │   │
+│  │ :9002/tcp │   │  ipmi-bmc-extern │   │
+│  │  VM IPMI  │◄──┤  (KCS)          │   │
+│  └───────────┘   └──────────────────┘   │
+└──────────────────────────────────────────┘
 ```
 
 ## 機能
 
 - **Redfish API** - ServiceRoot, Systems, Managers, VirtualMedia, Chassis (gofish 互換)
 - **IPMI over LAN** - RMCP/RMCP+, RAKP HMAC-SHA1 認証, AES-CBC-128 暗号化
+- **VM IPMI（イン・バンド）** - QEMU `ipmi-bmc-extern` KCS インターフェースによるゲスト OS IPMI（MaaS コミッショニング対応）
 - **QMP 制御** - 電源操作、ブートデバイス変更、VirtualMedia マウント
 - **互換性** - MAAS, Tinkerbell/Rufio, Cybozu placemat
 
@@ -292,6 +332,36 @@ ipmitool -I lanplus -H localhost -U admin -P password chassis power off
 ipmitool -I lanplus -H localhost -U admin -P password chassis bootdev pxe
 ```
 
+### VM IPMI（イン・バンド）
+
+qemu-bmc は QEMU の `ipmi-bmc-extern` デバイスを使ったゲスト OS からのイン・バンド IPMI をサポートします。MaaS コミッショニングスクリプトが VM 内から BMC ユーザー、LAN 設定、チャネルアクセスを設定できます。イン・バンドで作成されたユーザーは、アウト・オブ・バンド IPMI および Redfish 認証でも自動的に利用可能です。
+
+`VM_IPMI_ADDR` を設定して VM IPMI chardev リスナーを有効にします:
+
+```bash
+export VM_IPMI_ADDR=:9002
+```
+
+QEMU を qemu-bmc に接続するよう設定します:
+
+```bash
+qemu-system-x86_64 \
+  -chardev socket,id=ipmi0,host=localhost,port=9002,reconnect=10 \
+  -device ipmi-bmc-extern,id=bmc0,chardev=ipmi0 \
+  -device isa-ipmi-kcs,bmc=bmc0 \
+  ...
+```
+
+ゲスト OS 内で標準の `ipmitool` コマンドが KCS インターフェース経由で使用できます:
+
+```bash
+# VM 内
+ipmitool user set name 3 newuser
+ipmitool user set password 3 newpass
+ipmitool channel setaccess 1 3 callin=on ipmi=on link=on privilege=4
+ipmitool user enable 3
+```
+
 ## Redfish エンドポイント
 
 | メソッド | パス | 説明 |
@@ -333,6 +403,7 @@ ipmitool -I lanplus -H localhost -U admin -P password chassis bootdev pxe
 | `TLS_CERT` | (自動) | TLS 証明書パス |
 | `TLS_KEY` | (自動) | TLS 鍵パス |
 | `VM_BOOT_MODE` | `bios` | デフォルトブートモード |
+| `VM_IPMI_ADDR` | (空、無効) | VM IPMI chardev リッスンアドレス (例: `:9002`) |
 
 ## 開発
 
@@ -358,7 +429,8 @@ internal/
   qmp/                         # QMP ソケットクライアント
   machine/                     # VM 状態管理
   redfish/                     # Redfish HTTP サーバー (gorilla/mux)
-  ipmi/                        # IPMI UDP サーバー (RMCP/RMCP+)
+  ipmi/                        # IPMI UDP サーバー + VM chardev サーバー (RMCP/RMCP+)
+  bmc/                          # BMC 設定状態 (ユーザー、LAN、チャネル)
   config/                      # 環境変数設定
 ```
 
