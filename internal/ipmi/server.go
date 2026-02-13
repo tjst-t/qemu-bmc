@@ -5,11 +5,14 @@ import (
 	"fmt"
 	"log"
 	"net"
+
+	"github.com/tjst-t/qemu-bmc/internal/bmc"
 )
 
 // Server is the IPMI UDP server
 type Server struct {
 	machine    MachineInterface
+	bmcState   *bmc.State
 	sessionMgr *SessionManager
 	user       string
 	pass       string
@@ -17,9 +20,10 @@ type Server struct {
 }
 
 // NewServer creates a new IPMI server
-func NewServer(m MachineInterface, user, pass string) *Server {
+func NewServer(m MachineInterface, state *bmc.State, user, pass string) *Server {
 	return &Server{
 		machine:    m,
+		bmcState:   state,
 		sessionMgr: NewSessionManager(),
 		user:       user,
 		pass:       pass,
@@ -86,7 +90,7 @@ func (s *Server) HandleMessage(data []byte) ([]byte, error) {
 
 	// Check if this is RMCP+ (auth type 0x06 at first byte of payload)
 	if len(payload) > 0 && payload[0] == AuthTypeRMCPPlus {
-		resp, err := HandleRMCPPlusMessage(payload, s.sessionMgr, s.user, s.pass, s.machine)
+		resp, err := HandleRMCPPlusMessage(payload, s.sessionMgr, s.user, s.pass, s.machine, s.bmcState)
 		if err != nil {
 			return nil, err
 		}
@@ -103,7 +107,7 @@ func (s *Server) HandleMessage(data []byte) ([]byte, error) {
 		return nil, fmt.Errorf("no IPMI message parsed")
 	}
 
-	code, respData := handleIPMICommand(msg, s.machine)
+	code, respData := handleIPMICommand(msg, s.machine, s.bmcState)
 
 	respPayload := SerializeIPMIResponse(session, msg.GetNetFn()|0x01, msg.Command, code, respData)
 	return SerializeRMCPMessage(RMCPClassIPMI, respPayload), nil

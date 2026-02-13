@@ -5,12 +5,13 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"github.com/tjst-t/qemu-bmc/internal/bmc"
 	"github.com/tjst-t/qemu-bmc/internal/machine"
 )
 
 func TestServer_HandleMessage_GetChannelAuthCaps(t *testing.T) {
 	mock := newIPMIMockMachine(machine.PowerOn)
-	server := NewServer(mock, "admin", "password")
+	server := NewServer(mock, bmc.NewState("admin", "password"), "admin", "password")
 
 	// Build RMCP + IPMI 1.5 Get Channel Auth Capabilities request
 	ipmiMsg := buildTestIPMIRequest(NetFnApp, CmdGetChannelAuthCapabilities, []byte{0x0e, 0x04})
@@ -28,7 +29,7 @@ func TestServer_HandleMessage_GetChannelAuthCaps(t *testing.T) {
 
 func TestServer_HandleMessage_GetChassisStatus(t *testing.T) {
 	mock := newIPMIMockMachine(machine.PowerOn)
-	server := NewServer(mock, "admin", "password")
+	server := NewServer(mock, bmc.NewState("admin", "password"), "admin", "password")
 
 	ipmiMsg := buildTestIPMIRequest(NetFnChassis, CmdGetChassisStatus, nil)
 	sessionWrapper := buildTestSessionWrapper(ipmiMsg)
@@ -41,7 +42,7 @@ func TestServer_HandleMessage_GetChassisStatus(t *testing.T) {
 
 func TestServer_HandleMessage_ChassisControl(t *testing.T) {
 	mock := newIPMIMockMachine(machine.PowerOn)
-	server := NewServer(mock, "admin", "password")
+	server := NewServer(mock, bmc.NewState("admin", "password"), "admin", "password")
 
 	ipmiMsg := buildTestIPMIRequest(NetFnChassis, CmdChassisControl, []byte{ChassisControlPowerDown})
 	sessionWrapper := buildTestSessionWrapper(ipmiMsg)

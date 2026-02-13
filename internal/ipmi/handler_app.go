@@ -3,6 +3,8 @@ package ipmi
 import (
 	"crypto/rand"
 	"encoding/binary"
+
+	"github.com/tjst-t/qemu-bmc/internal/bmc"
 )
 
 // ipmi15Session tracks IPMI 1.5 session state
@@ -11,7 +13,7 @@ var ipmi15Challenge [16]byte
 var ipmi15ActiveSessionID uint32
 
 // handleAppCommand handles Application network function commands
-func handleAppCommand(msg *IPMIMessage, machine MachineInterface) (CompletionCode, []byte) {
+func handleAppCommand(msg *IPMIMessage, machine MachineInterface, state *bmc.State) (CompletionCode, []byte) {
 	switch msg.Command {
 	case CmdGetDeviceID:
 		return handleGetDeviceID()
@@ -25,6 +27,22 @@ func handleAppCommand(msg *IPMIMessage, machine MachineInterface) (CompletionCod
 		return handleSetSessionPrivilege(msg.Data)
 	case CmdCloseSession:
 		return CompletionCodeOK, nil
+	case CmdGetUserAccess:
+		return handleGetUserAccess(msg.Data, state)
+	case CmdGetUserName:
+		return handleGetUserName(msg.Data, state)
+	case CmdSetUserName:
+		return handleSetUserName(msg.Data, state)
+	case CmdSetUserPassword:
+		return handleSetUserPassword(msg.Data, state)
+	case CmdSetUserAccess:
+		return handleSetUserAccess(msg.Data, state)
+	case CmdGetChannelAccess:
+		return handleGetChannelAccess(msg.Data, state)
+	case CmdSetChannelAccess:
+		return handleSetChannelAccess(msg.Data, state)
+	case CmdGetChannelInfo:
+		return handleGetChannelInfo(msg.Data, state)
 	default:
 		return CompletionCodeInvalidCommand, nil
 	}

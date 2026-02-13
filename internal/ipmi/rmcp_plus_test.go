@@ -8,6 +8,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"github.com/tjst-t/qemu-bmc/internal/bmc"
 	"github.com/tjst-t/qemu-bmc/internal/machine"
 )
 
@@ -18,7 +19,7 @@ func TestOpenSession(t *testing.T) {
 	req := buildOpenSessionRequest(0x01, 0x12345678)
 	data := wrapRMCPPlusPayload(PayloadTypeOpenSessionRequest, 0, 0, req)
 
-	resp, err := HandleRMCPPlusMessage(data, sm, "admin", "password", nil)
+	resp, err := HandleRMCPPlusMessage(data, sm, "admin", "password", nil, bmc.NewState("admin", "password"))
 	require.NoError(t, err)
 	require.NotNil(t, resp)
 
@@ -39,7 +40,7 @@ func TestRAKPAuthentication(t *testing.T) {
 	// Step 1: Open Session
 	openReq := buildOpenSessionRequest(0x01, 0xAAAABBBB)
 	openData := wrapRMCPPlusPayload(PayloadTypeOpenSessionRequest, 0, 0, openReq)
-	openResp, err := HandleRMCPPlusMessage(openData, sm, user, pass, nil)
+	openResp, err := HandleRMCPPlusMessage(openData, sm, user, pass, nil, bmc.NewState(user, pass))
 	require.NoError(t, err)
 
 	// Extract ManagedSystemSessionID from response (bytes 20-23)
@@ -48,7 +49,7 @@ func TestRAKPAuthentication(t *testing.T) {
 	// Step 2: RAKP Message 1
 	rakp1 := buildRAKPMessage1(0x02, managedSessionID, user)
 	rakp1Data := wrapRMCPPlusPayload(PayloadTypeRAKPMessage1, 0, 0, rakp1)
-	rakp2Resp, err := HandleRMCPPlusMessage(rakp1Data, sm, user, pass, nil)
+	rakp2Resp, err := HandleRMCPPlusMessage(rakp1Data, sm, user, pass, nil, bmc.NewState(user, pass))
 	require.NoError(t, err)
 
 	// Check RAKP2 status (byte 13)
@@ -69,7 +70,7 @@ func TestRAKPAuthentication(t *testing.T) {
 
 	rakp3 := buildRAKPMessage3(0x03, managedSessionID, rakp3AuthCode)
 	rakp3Data := wrapRMCPPlusPayload(PayloadTypeRAKPMessage3, 0, 0, rakp3)
-	rakp4Resp, err := HandleRMCPPlusMessage(rakp3Data, sm, user, pass, nil)
+	rakp4Resp, err := HandleRMCPPlusMessage(rakp3Data, sm, user, pass, nil, bmc.NewState(user, pass))
 	require.NoError(t, err)
 
 	// Check RAKP4 status (byte 13)
@@ -93,7 +94,7 @@ func TestRAKPAuthentication_WrongPassword(t *testing.T) {
 	// Open Session
 	openReq := buildOpenSessionRequest(0x01, 0xAAAABBBB)
 	openData := wrapRMCPPlusPayload(PayloadTypeOpenSessionRequest, 0, 0, openReq)
-	openResp, err := HandleRMCPPlusMessage(openData, sm, user, pass, nil)
+	openResp, err := HandleRMCPPlusMessage(openData, sm, user, pass, nil, bmc.NewState(user, pass))
 	require.NoError(t, err)
 
 	managedSessionID := binary.LittleEndian.Uint32(openResp[20:24])
@@ -101,14 +102,14 @@ func TestRAKPAuthentication_WrongPassword(t *testing.T) {
 	// RAKP1
 	rakp1 := buildRAKPMessage1(0x02, managedSessionID, user)
 	rakp1Data := wrapRMCPPlusPayload(PayloadTypeRAKPMessage1, 0, 0, rakp1)
-	_, err = HandleRMCPPlusMessage(rakp1Data, sm, user, pass, nil)
+	_, err = HandleRMCPPlusMessage(rakp1Data, sm, user, pass, nil, bmc.NewState(user, pass))
 	require.NoError(t, err)
 
 	// RAKP3 with wrong auth code (simulating wrong password)
 	wrongAuthCode := make([]byte, 20)
 	rakp3 := buildRAKPMessage3(0x03, managedSessionID, wrongAuthCode)
 	rakp3Data := wrapRMCPPlusPayload(PayloadTypeRAKPMessage3, 0, 0, rakp3)
-	rakp4Resp, err := HandleRMCPPlusMessage(rakp3Data, sm, user, pass, nil)
+	rakp4Resp, err := HandleRMCPPlusMessage(rakp3Data, sm, user, pass, nil, bmc.NewState(user, pass))
 	require.NoError(t, err)
 
 	// RAKP4 should indicate failure (status != 0x00)
