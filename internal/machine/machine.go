@@ -2,7 +2,9 @@ package machine
 
 import (
 	"fmt"
+	"log"
 	"sync"
+	"time"
 
 	"github.com/tjst-t/qemu-bmc/internal/qmp"
 )
@@ -22,14 +24,24 @@ type BootOverride struct {
 	Mode    string // "UEFI", "Legacy"
 }
 
-// Machine manages the state of a QEMU VM
-type Machine struct {
-	qmpClient    qmp.Client
-	bootOverride BootOverride
-	mu           sync.RWMutex
+// ProcessManager controls the QEMU process lifecycle.
+type ProcessManager interface {
+	Start(bootTarget string) error
+	Stop(timeout time.Duration) error
+	Kill() error
+	IsRunning() bool
+	WaitForExit(timeout time.Duration) error
 }
 
-// New creates a new Machine with the given QMP client
+// Machine manages the state of a QEMU VM
+type Machine struct {
+	qmpClient      qmp.Client
+	processManager ProcessManager // nil = legacy mode
+	bootOverride   BootOverride
+	mu             sync.RWMutex
+}
+
+// New creates a new Machine with the given QMP client (legacy mode)
 func New(client qmp.Client) *Machine {
 	return &Machine{
 		qmpClient: client,
@@ -41,8 +53,28 @@ func New(client qmp.Client) *Machine {
 	}
 }
 
+// NewWithProcess creates a Machine in process management mode
+func NewWithProcess(client qmp.Client, pm ProcessManager) *Machine {
+	return &Machine{
+		qmpClient:      client,
+		processManager: pm,
+		bootOverride: BootOverride{
+			Enabled: "Disabled",
+			Target:  "None",
+			Mode:    "UEFI",
+		},
+	}
+}
+
 // GetPowerState returns the current power state of the VM
 func (m *Machine) GetPowerState() (PowerState, error) {
+	if m.processManager != nil {
+		return m.getPowerStateProcess()
+	}
+	return m.getPowerStateLegacy()
+}
+
+func (m *Machine) getPowerStateLegacy() (PowerState, error) {
 	status, err := m.qmpClient.QueryStatus()
 	if err != nil {
 		return "", fmt.Errorf("querying VM status: %w", err)
@@ -56,13 +88,59 @@ func (m *Machine) GetPowerState() (PowerState, error) {
 	}
 }
 
+func (m *Machine) getPowerStateProcess() (PowerState, error) {
+	if !m.processManager.IsRunning() {
+		return PowerOff, nil
+	}
+
+	status, err := m.qmpClient.QueryStatus()
+	if err != nil {
+		// QMP not ready yet, but process is running
+		return PowerOn, nil
+	}
+
+	switch status {
+	case qmp.StatusRunning, qmp.StatusPaused:
+		return PowerOn, nil
+	case qmp.StatusShutdown:
+		// Guest has shut down — stop the process
+		m.processManager.Stop(30 * time.Second)
+		return PowerOff, nil
+	default:
+		return PowerOn, nil
+	}
+}
+
 // GetQMPStatus returns the raw QMP status string
 func (m *Machine) GetQMPStatus() (qmp.Status, error) {
+	if m.processManager != nil {
+		return m.getQMPStatusProcess()
+	}
 	return m.qmpClient.QueryStatus()
+}
+
+func (m *Machine) getQMPStatusProcess() (qmp.Status, error) {
+	if !m.processManager.IsRunning() {
+		return qmp.StatusShutdown, nil
+	}
+
+	status, err := m.qmpClient.QueryStatus()
+	if err != nil {
+		// QMP not ready yet, but process is running — report running
+		return qmp.StatusRunning, nil
+	}
+	return status, nil
 }
 
 // Reset performs a reset action on the VM
 func (m *Machine) Reset(resetType string) error {
+	if m.processManager != nil {
+		return m.resetProcessMode(resetType)
+	}
+	return m.resetLegacy(resetType)
+}
+
+func (m *Machine) resetLegacy(resetType string) error {
 	switch resetType {
 	case "On":
 		state, err := m.GetPowerState()
@@ -86,6 +164,77 @@ func (m *Machine) Reset(resetType string) error {
 		return m.qmpClient.SystemReset()
 	default:
 		return fmt.Errorf("unsupported reset type: %s", resetType)
+	}
+}
+
+func (m *Machine) resetProcessMode(resetType string) error {
+	switch resetType {
+	case "On":
+		if m.processManager.IsRunning() {
+			return nil // already running
+		}
+		m.mu.RLock()
+		target := m.bootOverride.Target
+		m.mu.RUnlock()
+
+		if err := m.processManager.Start(target); err != nil {
+			return fmt.Errorf("starting QEMU: %w", err)
+		}
+
+		if err := m.waitForQMP(30 * time.Second); err != nil {
+			return fmt.Errorf("waiting for QMP: %w", err)
+		}
+
+		m.ConsumeBootOnce()
+		return nil
+
+	case "ForceOff":
+		if err := m.qmpClient.Quit(); err != nil {
+			// QMP may not be connected; force-kill the process
+			log.Printf("QMP quit failed (%v), killing process", err)
+			return m.processManager.Stop(30 * time.Second)
+		}
+		return m.processManager.WaitForExit(30 * time.Second)
+
+	case "ForceRestart":
+		return m.qmpClient.SystemReset()
+
+	case "GracefulShutdown":
+		if err := m.qmpClient.SystemPowerdown(); err != nil {
+			return err
+		}
+		if err := m.processManager.WaitForExit(120 * time.Second); err != nil {
+			log.Printf("Graceful shutdown timed out: %v", err)
+		}
+		return nil
+
+	case "GracefulRestart":
+		if err := m.qmpClient.SystemPowerdown(); err != nil {
+			return err
+		}
+		if err := m.processManager.WaitForExit(120 * time.Second); err != nil {
+			log.Printf("Graceful shutdown timed out, killing: %v", err)
+			m.processManager.Kill()
+			m.processManager.WaitForExit(5 * time.Second)
+		}
+		return m.resetProcessMode("On")
+
+	default:
+		return fmt.Errorf("unsupported reset type: %s", resetType)
+	}
+}
+
+// waitForQMP polls qmpClient.Connect() until success or timeout.
+func (m *Machine) waitForQMP(timeout time.Duration) error {
+	deadline := time.Now().Add(timeout)
+	for {
+		if err := m.qmpClient.Connect(); err == nil {
+			return nil
+		}
+		if time.Now().After(deadline) {
+			return fmt.Errorf("QMP connection timed out after %s", timeout)
+		}
+		time.Sleep(100 * time.Millisecond)
 	}
 }
 

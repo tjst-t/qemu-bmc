@@ -9,7 +9,7 @@ import (
 
 func TestLoad_Defaults(t *testing.T) {
 	// Clear any env vars that might be set
-	for _, key := range []string{"QMP_SOCK", "IPMI_USER", "IPMI_PASS", "REDFISH_PORT", "IPMI_PORT", "SERIAL_ADDR", "TLS_CERT", "TLS_KEY", "VM_BOOT_MODE", "VM_IPMI_ADDR"} {
+	for _, key := range []string{"QMP_SOCK", "IPMI_USER", "IPMI_PASS", "REDFISH_PORT", "IPMI_PORT", "SERIAL_ADDR", "TLS_CERT", "TLS_KEY", "VM_BOOT_MODE", "VM_IPMI_ADDR", "QEMU_BINARY"} {
 		os.Unsetenv(key)
 	}
 
@@ -24,6 +24,15 @@ func TestLoad_Defaults(t *testing.T) {
 	assert.Equal(t, "", cfg.TLSKey)
 	assert.Equal(t, "bios", cfg.VMBootMode)
 	assert.Equal(t, "", cfg.VMIPMIAddr)
+	assert.Equal(t, "qemu-system-x86_64", cfg.QEMUBinary)
+}
+
+func TestLoad_QEMUBinary_Custom(t *testing.T) {
+	os.Setenv("QEMU_BINARY", "/usr/bin/qemu-system-aarch64")
+	defer os.Unsetenv("QEMU_BINARY")
+
+	cfg := Load()
+	assert.Equal(t, "/usr/bin/qemu-system-aarch64", cfg.QEMUBinary)
 }
 
 func TestLoad_CustomValues(t *testing.T) {

@@ -14,6 +14,7 @@ type Config struct {
 	TLSKey      string
 	VMBootMode  string
 	VMIPMIAddr  string // VM IPMI chardev listen address
+	QEMUBinary  string // QEMU binary path for process management mode
 }
 
 // Load reads configuration from environment variables with defaults
@@ -29,6 +30,7 @@ func Load() *Config {
 		TLSKey:      getEnv("TLS_KEY", ""),
 		VMBootMode:  getEnv("VM_BOOT_MODE", "bios"),
 		VMIPMIAddr:  getEnv("VM_IPMI_ADDR", ""),
+		QEMUBinary:  getEnv("QEMU_BINARY", "qemu-system-x86_64"),
 	}
 }
 

@@ -3,55 +3,99 @@ package qmp
 import (
 	"bufio"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net"
 	"sync"
 )
 
+// ErrNotConnected is returned when a command is issued on a disconnected client.
+var ErrNotConnected = errors.New("QMP client not connected")
+
 // qmpClient implements the Client interface
 type qmpClient struct {
-	conn    net.Conn
-	scanner *bufio.Scanner
-	mu      sync.Mutex
+	socketPath string
+	conn       net.Conn
+	scanner    *bufio.Scanner
+	connected  bool
+	mu         sync.Mutex
 }
 
 // NewClient creates a new QMP client connected to the given UNIX socket
 func NewClient(socketPath string) (Client, error) {
-	conn, err := net.Dial("unix", socketPath)
-	if err != nil {
-		return nil, fmt.Errorf("connecting to QMP socket: %w", err)
+	c := NewDisconnectedClient(socketPath)
+	if err := c.Connect(); err != nil {
+		return nil, err
+	}
+	return c, nil
+}
+
+// NewDisconnectedClient creates a QMP client that is not yet connected.
+// Call Connect() to establish the connection.
+func NewDisconnectedClient(socketPath string) Client {
+	return &qmpClient{
+		socketPath: socketPath,
+	}
+}
+
+// Connect establishes (or re-establishes) the QMP connection.
+func (c *qmpClient) Connect() error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	// Close existing connection if any
+	if c.conn != nil {
+		c.conn.Close()
+		c.conn = nil
+		c.scanner = nil
+		c.connected = false
 	}
 
-	c := &qmpClient{
-		conn:    conn,
-		scanner: bufio.NewScanner(conn),
+	conn, err := net.Dial("unix", c.socketPath)
+	if err != nil {
+		return fmt.Errorf("connecting to QMP socket: %w", err)
 	}
+
+	c.conn = conn
+	c.scanner = bufio.NewScanner(conn)
 
 	// Read QMP greeting
 	if !c.scanner.Scan() {
 		conn.Close()
-		return nil, fmt.Errorf("reading QMP greeting: connection closed")
+		c.conn = nil
+		c.scanner = nil
+		return fmt.Errorf("reading QMP greeting: connection closed")
 	}
 
 	var greeting qmpGreeting
 	if err := json.Unmarshal(c.scanner.Bytes(), &greeting); err != nil {
 		conn.Close()
-		return nil, fmt.Errorf("parsing QMP greeting: %w", err)
+		c.conn = nil
+		c.scanner = nil
+		return fmt.Errorf("parsing QMP greeting: %w", err)
 	}
 
 	// Send qmp_capabilities
-	if err := c.execute("qmp_capabilities", nil); err != nil {
+	if err := c.executeLocked("qmp_capabilities", nil); err != nil {
 		conn.Close()
-		return nil, fmt.Errorf("QMP capabilities negotiation: %w", err)
+		c.conn = nil
+		c.scanner = nil
+		return fmt.Errorf("QMP capabilities negotiation: %w", err)
 	}
 
-	return c, nil
+	c.connected = true
+	return nil
 }
 
-func (c *qmpClient) execute(command string, arguments interface{}) error {
-	c.mu.Lock()
-	defer c.mu.Unlock()
+func (c *qmpClient) checkConnected() error {
+	if !c.connected {
+		return ErrNotConnected
+	}
+	return nil
+}
 
+// executeLocked sends a command and reads the response. Caller must hold c.mu.
+func (c *qmpClient) executeLocked(command string, arguments interface{}) error {
 	cmd := qmpCommand{
 		Execute:   command,
 		Arguments: arguments,
@@ -91,9 +135,24 @@ func (c *qmpClient) execute(command string, arguments interface{}) error {
 	}
 }
 
+func (c *qmpClient) execute(command string, arguments interface{}) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	if err := c.checkConnected(); err != nil {
+		return err
+	}
+
+	return c.executeLocked(command, arguments)
+}
+
 func (c *qmpClient) executeWithResponse(command string, arguments interface{}) (json.RawMessage, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+
+	if err := c.checkConnected(); err != nil {
+		return nil, err
+	}
 
 	cmd := qmpCommand{
 		Execute:   command,
@@ -181,5 +240,12 @@ func (c *qmpClient) BlockdevRemoveMedium(device string) error {
 }
 
 func (c *qmpClient) Close() error {
-	return c.conn.Close()
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	c.connected = false
+	if c.conn != nil {
+		return c.conn.Close()
+	}
+	return nil
 }

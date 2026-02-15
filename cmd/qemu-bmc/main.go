@@ -2,17 +2,20 @@ package main
 
 import (
 	"crypto/tls"
+	"flag"
 	"fmt"
 	"log"
 	"net/http"
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	"github.com/tjst-t/qemu-bmc/internal/bmc"
 	"github.com/tjst-t/qemu-bmc/internal/config"
 	"github.com/tjst-t/qemu-bmc/internal/ipmi"
 	"github.com/tjst-t/qemu-bmc/internal/machine"
+	"github.com/tjst-t/qemu-bmc/internal/qemu"
 	"github.com/tjst-t/qemu-bmc/internal/qmp"
 	"github.com/tjst-t/qemu-bmc/internal/redfish"
 )
@@ -20,6 +23,8 @@ import (
 var version = "dev"
 
 func main() {
+	flag.Parse()
+
 	if len(os.Args) == 2 && os.Args[1] == "-v" {
 		fmt.Println(version)
 		os.Exit(0)
@@ -29,17 +34,44 @@ func main() {
 	log.Printf("qemu-bmc %s starting...", version)
 
 	cfg := config.Load()
+	qemuArgs := flag.Args()
 
-	// Connect to QMP
-	qmpClient, err := qmp.NewClient(cfg.QMPSocket)
-	if err != nil {
-		log.Fatalf("Failed to connect to QMP socket %s: %v", cfg.QMPSocket, err)
+	var qmpClient qmp.Client
+	var m *machine.Machine
+
+	if len(qemuArgs) > 0 {
+		// Process management mode
+		log.Printf("Process management mode: managing QEMU lifecycle")
+
+		cmdArgs, err := qemu.BuildCommandLine(qemuArgs, qemu.BuildOptions{
+			QMPSocketPath: cfg.QMPSocket,
+			SerialAddr:    cfg.SerialAddr,
+		})
+		if err != nil {
+			log.Fatalf("Invalid QEMU arguments: %v", err)
+		}
+
+		qmpClient = qmp.NewDisconnectedClient(cfg.QMPSocket)
+		pm := qemu.NewProcessManager(cfg.QEMUBinary, cmdArgs, qemu.DefaultCommandFactory)
+		m = machine.NewWithProcess(qmpClient, pm)
+
+		log.Printf("Starting QEMU: %s %v", cfg.QEMUBinary, cmdArgs)
+		if err := m.Reset("On"); err != nil {
+			log.Fatalf("Failed to start QEMU: %v", err)
+		}
+	} else {
+		// Legacy mode
+		log.Printf("Legacy mode: connecting to existing QEMU instance")
+		var err error
+		qmpClient, err = qmp.NewClient(cfg.QMPSocket)
+		if err != nil {
+			log.Fatalf("Failed to connect to QMP socket %s: %v", cfg.QMPSocket, err)
+		}
+		log.Println("Connected to QMP socket")
+
+		m = machine.New(qmpClient)
 	}
 	defer qmpClient.Close()
-	log.Println("Connected to QMP socket")
-
-	// Create machine
-	m := machine.New(qmpClient)
 
 	// Create BMC state
 	bmcState := bmc.NewState(cfg.IPMIUser, cfg.IPMIPass)
@@ -99,4 +131,14 @@ func main() {
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 	sig := <-sigCh
 	log.Printf("Received signal %s, shutting down...", sig)
+
+	// Shutdown QEMU in process mode
+	if len(qemuArgs) > 0 {
+		log.Println("Stopping QEMU process...")
+		if err := m.Reset("ForceOff"); err != nil {
+			log.Printf("Error during QEMU shutdown: %v", err)
+		}
+		// Give process time to exit
+		time.Sleep(500 * time.Millisecond)
+	}
 }

@@ -1,7 +1,9 @@
 package machine
 
 import (
+	"errors"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -10,16 +12,29 @@ import (
 
 // mockQMPClient implements qmp.Client for testing
 type mockQMPClient struct {
-	status qmp.Status
-	calls  []string
+	status     qmp.Status
+	calls      []string
+	connectErr error
+	queryErr   error
 }
 
 func newMockQMPClient(status qmp.Status) *mockQMPClient {
 	return &mockQMPClient{status: status}
 }
 
+func (m *mockQMPClient) Connect() error {
+	m.calls = append(m.calls, "Connect")
+	if m.connectErr != nil {
+		return m.connectErr
+	}
+	return nil
+}
+
 func (m *mockQMPClient) QueryStatus() (qmp.Status, error) {
 	m.calls = append(m.calls, "QueryStatus")
+	if m.queryErr != nil {
+		return "", m.queryErr
+	}
 	return m.status, nil
 }
 
@@ -68,6 +83,71 @@ func (m *mockQMPClient) Close() error {
 func (m *mockQMPClient) Calls() []string {
 	return m.calls
 }
+
+// mockProcessManager implements ProcessManager for testing
+type mockProcessManager struct {
+	running    bool
+	startCalls []string // boot targets passed to Start
+	calls      []string
+	exitCh     chan struct{}
+}
+
+func newMockProcessManager(running bool) *mockProcessManager {
+	ch := make(chan struct{})
+	if !running {
+		close(ch)
+	}
+	return &mockProcessManager{
+		running: running,
+		exitCh:  ch,
+	}
+}
+
+func (m *mockProcessManager) Start(bootTarget string) error {
+	m.calls = append(m.calls, "Start")
+	m.startCalls = append(m.startCalls, bootTarget)
+	m.running = true
+	m.exitCh = make(chan struct{})
+	return nil
+}
+
+func (m *mockProcessManager) Stop(timeout time.Duration) error {
+	m.calls = append(m.calls, "Stop")
+	m.running = false
+	select {
+	case <-m.exitCh:
+	default:
+		close(m.exitCh)
+	}
+	return nil
+}
+
+func (m *mockProcessManager) Kill() error {
+	m.calls = append(m.calls, "Kill")
+	m.running = false
+	select {
+	case <-m.exitCh:
+	default:
+		close(m.exitCh)
+	}
+	return nil
+}
+
+func (m *mockProcessManager) IsRunning() bool {
+	return m.running
+}
+
+func (m *mockProcessManager) WaitForExit(timeout time.Duration) error {
+	m.calls = append(m.calls, "WaitForExit")
+	select {
+	case <-m.exitCh:
+		return nil
+	case <-time.After(timeout):
+		return errors.New("timeout")
+	}
+}
+
+// --- Legacy mode tests (existing) ---
 
 func TestGetPowerState_Running(t *testing.T) {
 	mock := newMockQMPClient(qmp.StatusRunning)
@@ -179,4 +259,171 @@ func TestEjectMedia(t *testing.T) {
 	err := m.EjectMedia()
 	require.NoError(t, err)
 	assert.Contains(t, mock.Calls(), "BlockdevRemoveMedium")
+}
+
+// --- Process mode tests ---
+
+func TestProcessMode_GetPowerState_ProcessNotRunning(t *testing.T) {
+	qmpMock := newMockQMPClient(qmp.StatusShutdown)
+	pm := newMockProcessManager(false)
+	m := NewWithProcess(qmpMock, pm)
+
+	state, err := m.GetPowerState()
+	require.NoError(t, err)
+	assert.Equal(t, PowerOff, state)
+	// Should not call QMP when process is not running
+	assert.NotContains(t, qmpMock.Calls(), "QueryStatus")
+}
+
+func TestProcessMode_GetPowerState_ProcessRunning(t *testing.T) {
+	qmpMock := newMockQMPClient(qmp.StatusRunning)
+	pm := newMockProcessManager(true)
+	m := NewWithProcess(qmpMock, pm)
+
+	state, err := m.GetPowerState()
+	require.NoError(t, err)
+	assert.Equal(t, PowerOn, state)
+}
+
+func TestProcessMode_GetPowerState_ProcessRunning_QMPError(t *testing.T) {
+	qmpMock := newMockQMPClient(qmp.StatusRunning)
+	qmpMock.queryErr = errors.New("QMP not ready")
+	pm := newMockProcessManager(true)
+	m := NewWithProcess(qmpMock, pm)
+
+	state, err := m.GetPowerState()
+	require.NoError(t, err)
+	assert.Equal(t, PowerOn, state) // Process running = PowerOn even if QMP fails
+}
+
+func TestProcessMode_GetPowerState_GuestShutdown(t *testing.T) {
+	qmpMock := newMockQMPClient(qmp.StatusShutdown)
+	pm := newMockProcessManager(true)
+	m := NewWithProcess(qmpMock, pm)
+
+	state, err := m.GetPowerState()
+	require.NoError(t, err)
+	assert.Equal(t, PowerOff, state)
+	assert.Contains(t, pm.calls, "Stop") // Process should be stopped
+}
+
+func TestProcessMode_GetQMPStatus_ProcessNotRunning(t *testing.T) {
+	qmpMock := newMockQMPClient(qmp.StatusShutdown)
+	pm := newMockProcessManager(false)
+	m := NewWithProcess(qmpMock, pm)
+
+	status, err := m.GetQMPStatus()
+	require.NoError(t, err)
+	assert.Equal(t, qmp.StatusShutdown, status)
+}
+
+func TestProcessMode_GetQMPStatus_ProcessRunning_QMPError(t *testing.T) {
+	qmpMock := newMockQMPClient(qmp.StatusRunning)
+	qmpMock.queryErr = errors.New("QMP not ready")
+	pm := newMockProcessManager(true)
+	m := NewWithProcess(qmpMock, pm)
+
+	status, err := m.GetQMPStatus()
+	require.NoError(t, err)
+	assert.Equal(t, qmp.StatusRunning, status) // synthetic running status
+}
+
+func TestProcessMode_Reset_On_StartsProcess(t *testing.T) {
+	qmpMock := newMockQMPClient(qmp.StatusRunning)
+	pm := newMockProcessManager(false)
+	m := NewWithProcess(qmpMock, pm)
+
+	err := m.Reset("On")
+	require.NoError(t, err)
+	assert.Contains(t, pm.calls, "Start")
+	assert.Contains(t, qmpMock.Calls(), "Connect")
+}
+
+func TestProcessMode_Reset_On_AlreadyRunning_Noop(t *testing.T) {
+	qmpMock := newMockQMPClient(qmp.StatusRunning)
+	pm := newMockProcessManager(true)
+	m := NewWithProcess(qmpMock, pm)
+
+	err := m.Reset("On")
+	require.NoError(t, err)
+	assert.NotContains(t, pm.calls, "Start")
+}
+
+func TestProcessMode_Reset_On_WithBootOverride(t *testing.T) {
+	qmpMock := newMockQMPClient(qmp.StatusRunning)
+	pm := newMockProcessManager(false)
+	m := NewWithProcess(qmpMock, pm)
+
+	m.SetBootOverride(BootOverride{Enabled: "Once", Target: "Pxe", Mode: "UEFI"})
+	err := m.Reset("On")
+	require.NoError(t, err)
+
+	require.Len(t, pm.startCalls, 1)
+	assert.Equal(t, "Pxe", pm.startCalls[0])
+}
+
+func TestProcessMode_Reset_On_ConsumesBootOnce(t *testing.T) {
+	qmpMock := newMockQMPClient(qmp.StatusRunning)
+	pm := newMockProcessManager(false)
+	m := NewWithProcess(qmpMock, pm)
+
+	m.SetBootOverride(BootOverride{Enabled: "Once", Target: "Pxe", Mode: "UEFI"})
+	err := m.Reset("On")
+	require.NoError(t, err)
+
+	boot := m.GetBootOverride()
+	assert.Equal(t, "Disabled", boot.Enabled)
+	assert.Equal(t, "None", boot.Target)
+}
+
+func TestProcessMode_Reset_ForceOff_Quits(t *testing.T) {
+	qmpMock := newMockQMPClient(qmp.StatusRunning)
+	pm := newMockProcessManager(true)
+	m := NewWithProcess(qmpMock, pm)
+
+	// Simulate the process exiting shortly after Quit is sent
+	go func() {
+		time.Sleep(50 * time.Millisecond)
+		pm.running = false
+		close(pm.exitCh)
+	}()
+
+	err := m.Reset("ForceOff")
+	require.NoError(t, err)
+	assert.Contains(t, qmpMock.Calls(), "Quit")
+	assert.Contains(t, pm.calls, "WaitForExit")
+}
+
+func TestProcessMode_Reset_ForceRestart_SystemReset(t *testing.T) {
+	qmpMock := newMockQMPClient(qmp.StatusRunning)
+	pm := newMockProcessManager(true)
+	m := NewWithProcess(qmpMock, pm)
+
+	err := m.Reset("ForceRestart")
+	require.NoError(t, err)
+	assert.Contains(t, qmpMock.Calls(), "SystemReset")
+}
+
+func TestProcessMode_Reset_GracefulShutdown(t *testing.T) {
+	qmpMock := newMockQMPClient(qmp.StatusRunning)
+	pm := newMockProcessManager(true)
+	m := NewWithProcess(qmpMock, pm)
+
+	// Close exitCh so WaitForExit returns immediately
+	pm.running = false
+	close(pm.exitCh)
+
+	err := m.Reset("GracefulShutdown")
+	require.NoError(t, err)
+	assert.Contains(t, qmpMock.Calls(), "SystemPowerdown")
+	assert.Contains(t, pm.calls, "WaitForExit")
+}
+
+func TestLegacyMode_Reset_ForceOff_StopsQMP(t *testing.T) {
+	mock := newMockQMPClient(qmp.StatusRunning)
+	m := New(mock)
+
+	err := m.Reset("ForceOff")
+	require.NoError(t, err)
+	assert.Contains(t, mock.Calls(), "Stop")
 }

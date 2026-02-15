@@ -11,6 +11,7 @@ const (
 
 // Client is the interface for QMP communication
 type Client interface {
+	Connect() error
 	QueryStatus() (Status, error)
 	SystemPowerdown() error
 	SystemReset() error

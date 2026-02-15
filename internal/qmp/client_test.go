@@ -123,3 +123,68 @@ func TestClient_BlockdevRemoveMedium(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "blockdev-remove-medium", mockQMP.LastCommand())
 }
+
+func TestNewDisconnectedClient_NotConnected(t *testing.T) {
+	client := NewDisconnectedClient("/tmp/nonexistent.sock")
+	defer client.Close()
+
+	_, err := client.QueryStatus()
+	assert.ErrorIs(t, err, ErrNotConnected)
+}
+
+func TestDisconnectedClient_Connect(t *testing.T) {
+	socketPath := filepath.Join(t.TempDir(), "qmp.sock")
+	mockQMP := newMockQMPServer(t, socketPath)
+	mockQMP.SetStatus(StatusRunning)
+	defer mockQMP.Close()
+
+	time.Sleep(50 * time.Millisecond)
+
+	client := NewDisconnectedClient(socketPath)
+	defer client.Close()
+
+	// Should fail before connect
+	_, err := client.QueryStatus()
+	assert.ErrorIs(t, err, ErrNotConnected)
+
+	// Connect
+	err = client.Connect()
+	require.NoError(t, err)
+
+	// Should work after connect
+	status, err := client.QueryStatus()
+	require.NoError(t, err)
+	assert.Equal(t, StatusRunning, status)
+}
+
+func TestClient_Close_ThenConnect(t *testing.T) {
+	socketPath := filepath.Join(t.TempDir(), "qmp.sock")
+	mockQMP := newMockQMPServer(t, socketPath)
+	mockQMP.SetStatus(StatusRunning)
+	defer mockQMP.Close()
+
+	time.Sleep(50 * time.Millisecond)
+
+	client, err := NewClient(socketPath)
+	require.NoError(t, err)
+
+	// Verify connected
+	status, err := client.QueryStatus()
+	require.NoError(t, err)
+	assert.Equal(t, StatusRunning, status)
+
+	// Close
+	err = client.Close()
+	require.NoError(t, err)
+
+	// Reconnect
+	err = client.Connect()
+	require.NoError(t, err)
+
+	// Should work again
+	status, err = client.QueryStatus()
+	require.NoError(t, err)
+	assert.Equal(t, StatusRunning, status)
+
+	client.Close()
+}
