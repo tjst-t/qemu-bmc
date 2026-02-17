@@ -1,4 +1,4 @@
-.PHONY: build test test-race vet coverage docker-build integration integration-up integration-down ci clean
+.PHONY: build test test-race vet coverage docker-build integration integration-up integration-down container-test container-test-all ci clean
 
 BINARY := qemu-bmc
 DOCKER_IMAGE := qemu-bmc
@@ -24,7 +24,7 @@ coverage:
 	go tool cover -func=coverage.out
 
 docker-build:
-	docker build -t $(DOCKER_IMAGE) .
+	docker build -t $(DOCKER_IMAGE) -f docker/Dockerfile .
 
 integration:
 	$(COMPOSE) -f $(COMPOSE_FILE) down -v 2>/dev/null || true
@@ -39,6 +39,12 @@ integration-up:
 
 integration-down:
 	$(COMPOSE) -f $(COMPOSE_FILE) down -v
+
+container-test:
+	./tests/run_tests.sh --build quick
+
+container-test-all:
+	./tests/run_tests.sh --build all
 
 ci: vet test-race integration
 

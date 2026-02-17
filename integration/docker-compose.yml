@@ -16,7 +16,7 @@ services:
   bmc:
     build:
       context: ..
-      dockerfile: Dockerfile
+      dockerfile: docker/Dockerfile
     entrypoint: ["/usr/local/bin/qemu-bmc"]
     environment:
       QMP_SOCK: /shared/qmp.sock

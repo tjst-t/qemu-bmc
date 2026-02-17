@@ -1,0 +1,46 @@
+name: qemu-bmc-lab
+
+topology:
+  nodes:
+    node1:
+      kind: linux
+      image: ghcr.io/tjst-t/qemu-bmc:latest
+      binds:
+        - ../vm/node1:/vm
+        - ../iso:/iso
+      ports:
+        - "5901:5900"
+        - "6231:623/udp"
+      env:
+        VM_MEMORY: "2048"
+        VM_CPUS: "2"
+        VM_BOOT_MODE: "bios"
+        IPMI_USER: "admin"
+        IPMI_PASS: "password"
+
+    node2:
+      kind: linux
+      image: ghcr.io/tjst-t/qemu-bmc:latest
+      binds:
+        - ../vm/node2:/vm
+        - ../iso:/iso
+      ports:
+        - "5902:5900"
+        - "6232:623/udp"
+      env:
+        VM_MEMORY: "2048"
+        VM_CPUS: "2"
+
+    mgmt-switch:
+      kind: linux
+      image: alpine:latest
+      exec:
+        - ip link add br0 type bridge
+        - ip link set br0 up
+        - ip link set eth1 master br0
+        - ip link set eth2 master br0
+
+  links:
+    - endpoints: ["node1:eth1", "mgmt-switch:eth1"]
+    - endpoints: ["node2:eth1", "mgmt-switch:eth2"]
+    - endpoints: ["node1:eth2", "node2:eth2"]

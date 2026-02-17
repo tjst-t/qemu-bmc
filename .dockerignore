@@ -1,0 +1,8 @@
+.git
+coverage.out
+*.md
+docs/
+tests/evidence/
+containerlab/
+vm/
+iso/

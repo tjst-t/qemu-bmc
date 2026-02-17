@@ -1,0 +1,47 @@
+services:
+  qemu-bmc:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+    image: ghcr.io/tjst-t/qemu-bmc:latest
+    container_name: qemu-bmc
+    hostname: qemu-bmc
+    restart: unless-stopped
+
+    devices:
+      - /dev/kvm:/dev/kvm
+      - /dev/net/tun:/dev/net/tun
+
+    cap_add:
+      - NET_ADMIN
+      - SYS_ADMIN
+
+    security_opt:
+      - apparmor=unconfined
+
+    ports:
+      - "5900:5900"       # VNC
+      - "623:623/udp"     # IPMI
+      - "443:443"         # Redfish
+
+    volumes:
+      - ./vm:/vm:rw
+      - ./iso:/iso:ro
+
+    environment:
+      - VM_MEMORY=2048
+      - VM_CPUS=2
+      - VM_DISK=/vm/disk.qcow2
+      - VM_BOOT_MODE=bios
+      - ENABLE_KVM=true
+      - VNC_PORT=5900
+      - IPMI_USER=admin
+      - IPMI_PASS=password
+
+    healthcheck:
+      test: ["CMD", "ipmitool", "-I", "lanplus", "-H", "127.0.0.1",
+             "-U", "admin", "-P", "password", "mc", "info"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s

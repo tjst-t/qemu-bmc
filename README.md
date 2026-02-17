@@ -34,17 +34,37 @@ Replaces [docker-qemu-bmc](https://github.com/tjst-t/docker-qemu-bmc) (shell scr
 
 ## Quick Start
 
-### Docker
+### Docker Compose (Process Management Mode)
+
+qemu-bmc manages the QEMU process directly inside the container:
 
 ```bash
-docker build -t qemu-bmc .
-docker run --rm \
-  -v /var/run/qemu/qmp.sock:/var/run/qemu/qmp.sock \
-  -p 443:443 -p 623:623/udp \
+# Create VM disk
+mkdir -p vm
+qemu-img create -f qcow2 vm/disk.qcow2 20G
+
+# Start
+docker compose up -d
+
+# Check status
+ipmitool -I lanplus -H localhost -U admin -P password mc info
+curl -k -u admin:password https://localhost/redfish/v1/Systems/1
+```
+
+### Docker Build
+
+```bash
+docker build -t qemu-bmc -f docker/Dockerfile .
+docker run --rm --device /dev/kvm --cap-add NET_ADMIN \
+  -p 5900:5900 -p 623:623/udp -p 443:443 \
+  -v ./vm:/vm \
+  -e VM_MEMORY=4096 -e VM_CPUS=4 \
   qemu-bmc
 ```
 
-### Binary
+### Binary (Legacy Mode)
+
+Connect to an existing QEMU instance via QMP socket:
 
 ```bash
 go build -o qemu-bmc ./cmd/qemu-bmc
@@ -171,6 +191,8 @@ ipmitool user enable 3
 
 ## Environment Variables
 
+### BMC Configuration
+
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `QMP_SOCK` | `/var/run/qemu/qmp.sock` | QMP socket path |
@@ -181,23 +203,44 @@ ipmitool user enable 3
 | `SERIAL_ADDR` | `localhost:9002` | SOL bridge target |
 | `TLS_CERT` | (auto) | TLS certificate path |
 | `TLS_KEY` | (auto) | TLS key path |
-| `VM_BOOT_MODE` | `bios` | Default boot mode |
+| `VM_BOOT_MODE` | `bios` | Default boot mode (`bios` or `uefi`) |
 | `VM_IPMI_ADDR` | (empty, disabled) | VM IPMI chardev listen address (e.g., `:9002`) |
+
+### Container Configuration
+
+These variables are used by `docker/entrypoint.sh` to construct QEMU arguments:
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `VM_MEMORY` | `2048` | VM memory in MB |
+| `VM_CPUS` | `2` | Number of VM CPUs |
+| `ENABLE_KVM` | `true` | Use KVM acceleration (falls back to TCG) |
+| `VNC_PORT` | `5900` | VNC display port |
+| `VM_DISK` | `/vm/disk.qcow2` | VM disk image path |
+| `VM_CDROM` | (empty) | CD-ROM ISO path |
+| `VM_BOOT` | `c` | Boot device (c=disk, d=cdrom, n=network) |
+| `VM_BOOT_MENU_TIMEOUT` | `0` | Boot menu timeout in ms (0=disabled) |
+| `VM_NETWORKS` | (empty) | Comma-separated host interfaces for TAP passthrough |
+| `QEMU_EXTRA_ARGS` | (empty) | Additional QEMU arguments |
+| `DEBUG` | `false` | Enable debug output |
 
 ## Development
 
 ```bash
-# Test
-go test ./... -count=1
+# Build
+go build ./cmd/qemu-bmc
+make docker-build
 
-# Test with race detector
+# Unit tests
+go test ./... -count=1
 go test ./... -race -count=1
 
 # Static analysis
 go vet ./...
 
-# Build
-go build ./cmd/qemu-bmc
+# Container integration tests
+make container-test         # Quick smoke tests
+make container-test-all     # All 82 tests (9 categories)
 ```
 
 ## Architecture
@@ -206,11 +249,18 @@ go build ./cmd/qemu-bmc
 cmd/qemu-bmc/main.go          # Entrypoint
 internal/
   qmp/                         # QMP socket client
+  qemu/                        # QEMU process management
   machine/                     # VM state management
   redfish/                     # Redfish HTTP server (gorilla/mux)
   ipmi/                        # IPMI UDP server + VM chardev server (RMCP/RMCP+)
-  bmc/                          # BMC configuration state (users, LAN, channels)
+  bmc/                         # BMC configuration state (users, LAN, channels)
   config/                      # Environment variable config
+docker/
+  Dockerfile                   # Multi-stage build (Go builder + Debian runtime)
+  entrypoint.sh                # Environment variables → QEMU args
+  setup-network.sh             # TAP/bridge network setup
+tests/                         # Bash-based container integration tests
+containerlab/                  # containerlab topology example
 ```
 
 ## License
@@ -255,17 +305,37 @@ QEMU VM を Redfish API (HTTPS) と IPMI over LAN (UDP) の両方で制御する
 
 ## クイックスタート
 
-### Docker
+### Docker Compose（プロセス管理モード）
+
+qemu-bmc がコンテナ内で QEMU プロセスを直接管理します:
 
 ```bash
-docker build -t qemu-bmc .
-docker run --rm \
-  -v /var/run/qemu/qmp.sock:/var/run/qemu/qmp.sock \
-  -p 443:443 -p 623:623/udp \
+# VM ディスク作成
+mkdir -p vm
+qemu-img create -f qcow2 vm/disk.qcow2 20G
+
+# 起動
+docker compose up -d
+
+# 状態確認
+ipmitool -I lanplus -H localhost -U admin -P password mc info
+curl -k -u admin:password https://localhost/redfish/v1/Systems/1
+```
+
+### Docker ビルド
+
+```bash
+docker build -t qemu-bmc -f docker/Dockerfile .
+docker run --rm --device /dev/kvm --cap-add NET_ADMIN \
+  -p 5900:5900 -p 623:623/udp -p 443:443 \
+  -v ./vm:/vm \
+  -e VM_MEMORY=4096 -e VM_CPUS=4 \
   qemu-bmc
 ```
 
-### バイナリ
+### バイナリ（レガシーモード）
+
+既存の QEMU インスタンスに QMP ソケット経由で接続:
 
 ```bash
 go build -o qemu-bmc ./cmd/qemu-bmc
@@ -392,6 +462,8 @@ ipmitool user enable 3
 
 ## 環境変数
 
+### BMC 設定
+
 | 変数 | デフォルト | 説明 |
 |------|-----------|------|
 | `QMP_SOCK` | `/var/run/qemu/qmp.sock` | QMP ソケットパス |
@@ -402,23 +474,44 @@ ipmitool user enable 3
 | `SERIAL_ADDR` | `localhost:9002` | SOL ブリッジ先 |
 | `TLS_CERT` | (自動) | TLS 証明書パス |
 | `TLS_KEY` | (自動) | TLS 鍵パス |
-| `VM_BOOT_MODE` | `bios` | デフォルトブートモード |
+| `VM_BOOT_MODE` | `bios` | デフォルトブートモード (`bios` または `uefi`) |
 | `VM_IPMI_ADDR` | (空、無効) | VM IPMI chardev リッスンアドレス (例: `:9002`) |
+
+### コンテナ設定
+
+`docker/entrypoint.sh` が QEMU 引数を構成するために使用:
+
+| 変数 | デフォルト | 説明 |
+|------|-----------|------|
+| `VM_MEMORY` | `2048` | VM メモリ (MB) |
+| `VM_CPUS` | `2` | VM CPU 数 |
+| `ENABLE_KVM` | `true` | KVM アクセラレーション使用 (TCG にフォールバック) |
+| `VNC_PORT` | `5900` | VNC ディスプレイポート |
+| `VM_DISK` | `/vm/disk.qcow2` | VM ディスクイメージパス |
+| `VM_CDROM` | (空) | CD-ROM ISO パス |
+| `VM_BOOT` | `c` | ブートデバイス (c=ディスク, d=CD-ROM, n=ネットワーク) |
+| `VM_BOOT_MENU_TIMEOUT` | `0` | ブートメニュータイムアウト (ms、0=無効) |
+| `VM_NETWORKS` | (空) | TAP パススルー用ホストインターフェース (カンマ区切り) |
+| `QEMU_EXTRA_ARGS` | (空) | 追加 QEMU 引数 |
+| `DEBUG` | `false` | デバッグ出力を有効化 |
 
 ## 開発
 
 ```bash
-# テスト
-go test ./... -count=1
+# ビルド
+go build ./cmd/qemu-bmc
+make docker-build
 
-# レースコンディション検出付きテスト
+# ユニットテスト
+go test ./... -count=1
 go test ./... -race -count=1
 
 # 静的解析
 go vet ./...
 
-# ビルド
-go build ./cmd/qemu-bmc
+# コンテナ統合テスト
+make container-test         # クイックスモークテスト
+make container-test-all     # 全 82 テスト (9 カテゴリ)
 ```
 
 ## アーキテクチャ
@@ -427,11 +520,18 @@ go build ./cmd/qemu-bmc
 cmd/qemu-bmc/main.go          # エントリポイント
 internal/
   qmp/                         # QMP ソケットクライアント
+  qemu/                        # QEMU プロセス管理
   machine/                     # VM 状態管理
   redfish/                     # Redfish HTTP サーバー (gorilla/mux)
   ipmi/                        # IPMI UDP サーバー + VM chardev サーバー (RMCP/RMCP+)
-  bmc/                          # BMC 設定状態 (ユーザー、LAN、チャネル)
+  bmc/                         # BMC 設定状態 (ユーザー、LAN、チャネル)
   config/                      # 環境変数設定
+docker/
+  Dockerfile                   # マルチステージビルド (Go ビルダー + Debian ランタイム)
+  entrypoint.sh                # 環境変数 → QEMU 引数変換
+  setup-network.sh             # TAP/ブリッジネットワーク設定
+tests/                         # Bash ベースのコンテナ統合テスト
+containerlab/                  # containerlab トポロジ例
 ```
 
 ## ライセンス

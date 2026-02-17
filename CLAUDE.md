@@ -13,11 +13,23 @@ Compatible with: MAAS, Tinkerbell/Rufio, Cybozu placemat
 cmd/qemu-bmc/main.go          # Entrypoint, goroutines for Redfish + IPMI
 internal/
   qmp/                         # QMP socket client (interface + implementation)
-  machine/                     # VM state management (wraps QMP)
+  qemu/                        # QEMU process management (args, process lifecycle)
+  machine/                     # VM state management (wraps QMP + ProcessManager)
   redfish/                     # HTTP server with gorilla/mux, 15+ endpoints
   ipmi/                        # UDP server + VM chardev server, RMCP/RMCP+, RAKP auth, chassis commands
-  bmc/                          # BMC configuration state (users, LAN, channels)
+  bmc/                         # BMC configuration state (users, LAN, channels)
   config/                      # Environment variable config
+docker/
+  Dockerfile                   # Multi-stage build (Go builder + Debian runtime)
+  entrypoint.sh                # Environment variables → QEMU args conversion
+  setup-network.sh             # TAP/bridge network setup for VM passthrough
+tests/                         # Bash-based container integration tests (82 tests)
+  run_tests.sh                 # Test runner (category-based)
+  test_helper.sh               # Assertions, container mgmt, IPMI/Redfish helpers
+  test_*.sh                    # Test categories (container, ipmi, redfish, power, boot, etc.)
+containerlab/
+  example.yml                  # 2-node containerlab topology example
+integration/                   # Go-based integration tests (legacy mode)
 ```
 
 ### Key Design Patterns
@@ -54,9 +66,23 @@ go vet ./...
 # Coverage
 go test ./... -coverprofile=coverage.out
 go tool cover -html=coverage.out
+
+# Docker build
+make docker-build
+
+# Container integration tests (quick smoke tests)
+make container-test
+
+# Container integration tests (all 82 tests across 9 categories)
+make container-test-all
+
+# Run specific test categories
+./tests/run_tests.sh --build container ipmi redfish power boot
 ```
 
 ## Environment Variables
+
+### BMC Configuration (Go binary)
 
 | Variable | Default | Description |
 |----------|---------|-------------|
@@ -70,6 +96,22 @@ go tool cover -html=coverage.out
 | `TLS_KEY` | (empty) | TLS key path |
 | `VM_BOOT_MODE` | `bios` | Default boot mode |
 | `VM_IPMI_ADDR` | (empty, disabled) | VM IPMI chardev listen address (e.g., `:9002`) |
+
+### Container Configuration (entrypoint.sh)
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `VM_MEMORY` | `2048` | VM memory in MB |
+| `VM_CPUS` | `2` | Number of VM CPUs |
+| `ENABLE_KVM` | `true` | Use KVM acceleration (falls back to TCG) |
+| `VNC_PORT` | `5900` | VNC display port |
+| `VM_DISK` | `/vm/disk.qcow2` | VM disk image path |
+| `VM_CDROM` | (empty) | CD-ROM ISO path |
+| `VM_BOOT` | `c` | Boot device (c=disk, d=cdrom, n=network) |
+| `VM_BOOT_MENU_TIMEOUT` | `0` | Boot menu timeout in ms (0=disabled) |
+| `VM_NETWORKS` | (empty) | Comma-separated host interfaces for TAP passthrough |
+| `QEMU_EXTRA_ARGS` | (empty) | Additional QEMU arguments |
+| `DEBUG` | `false` | Enable debug output |
 
 ## Redfish Endpoints
 

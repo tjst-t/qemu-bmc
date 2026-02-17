@@ -1,2 +1,5 @@
 # Binary
 /qemu-bmc
+
+# Test coverage
+coverage.out
