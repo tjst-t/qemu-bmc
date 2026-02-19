@@ -24,6 +24,9 @@ type Session struct {
 	AuthAlgorithm            uint8
 	IntegrityAlgorithm       uint8
 	ConfidentialityAlgorithm uint8
+	// OutboundSequenceNumber is the BMC's sequence number for authenticated responses.
+	// Incremented with each encrypted/authenticated response (IPMI 2.0 spec §13.29).
+	OutboundSequenceNumber uint32
 }
 
 // SessionManager manages RMCP+ sessions

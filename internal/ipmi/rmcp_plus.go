@@ -469,11 +469,12 @@ func handleEncryptedIPMI(data []byte, header *RMCPPlusSessionHeader, sessionMgr 
 }
 
 func buildRMCPPlusEncryptedResponse(session *Session, payloadType uint8, payload []byte) []byte {
+	session.OutboundSequenceNumber++
 	buf := new(bytes.Buffer)
 	binary.Write(buf, binary.LittleEndian, uint8(AuthTypeRMCPPlus))
 	binary.Write(buf, binary.LittleEndian, payloadType)
 	binary.Write(buf, binary.LittleEndian, session.RemoteConsoleSessionID)
-	binary.Write(buf, binary.LittleEndian, uint32(0)) // sequence
+	binary.Write(buf, binary.LittleEndian, session.OutboundSequenceNumber)
 	binary.Write(buf, binary.LittleEndian, uint16(len(payload)))
 	buf.Write(payload)
 	return buf.Bytes()
@@ -546,7 +547,10 @@ func padPayload(data []byte) []byte {
 	for i := 0; i < padSize; i++ {
 		padding[i] = byte(i + 1)
 	}
-	padding[padSize-1] = byte(padSize - 1) // last byte is pad length
+	// Per IPMI 2.0 spec §13.28.3: the last byte is CPL (Confidentiality Pad Length),
+	// which is the count of CPad bytes ONLY (not counting CPL itself).
+	// CPL = padSize - 1 (since padSize = CPad bytes + 1 CPL byte).
+	padding[padSize-1] = byte(padSize - 1)
 	return append(data, padding...)
 }
 
@@ -554,11 +558,13 @@ func unpadPayload(data []byte) ([]byte, error) {
 	if len(data) == 0 {
 		return nil, fmt.Errorf("empty data")
 	}
-	padLen := int(data[len(data)-1])
+	// Per IPMI 2.0 spec §13.28.3: the last byte is CPL (Confidentiality Pad Length),
+	// the count of CPad bytes preceding it.  Total trailer = CPad + CPL = CPL+1 bytes.
+	padLen := int(data[len(data)-1]) // CPL = count of CPad bytes only
 	if padLen >= len(data) {
 		return nil, fmt.Errorf("invalid padding length: %d", padLen)
 	}
-	return data[:len(data)-padLen-1], nil
+	return data[:len(data)-padLen-1], nil // strip CPad (padLen bytes) + CPL (1 byte)
 }
 
 // handleIPMICommand routes an IPMI message to the appropriate handler

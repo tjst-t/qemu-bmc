@@ -1,6 +1,8 @@
 package ipmi
 
 import (
+	"crypto/aes"
+	"crypto/cipher"
 	"crypto/hmac"
 	"crypto/sha1"
 	"encoding/binary"
@@ -357,6 +359,231 @@ func TestPadUnpad(t *testing.T) {
 	unpadded, err := unpadPayload(padded)
 	require.NoError(t, err)
 	assert.Equal(t, data, unpadded)
+}
+
+// TestPadPayload_IPMISpec verifies that padPayload produces IPMI 2.0 spec-compliant
+// padding where the last byte is CPL (Confidentiality Pad Length = count of CPad bytes,
+// i.e. padSize-1), NOT the total pad byte count.
+// IPMI 2.0 spec §13.28.3: trailer = [01h, 02h, ..., CPLh, CPL] where CPL = padSize-1.
+func TestPadPayload_IPMISpec(t *testing.T) {
+	cases := []struct {
+		dataLen int
+		padSize int
+	}{
+		{7, 9},   // 7-byte IPMI msg: padSize=9, CPL=8, trailer=[1..8,8]
+		{8, 8},   // 8-byte IPMI msg: padSize=8, CPL=7, trailer=[1..7,7]
+		{16, 16}, // 16-byte aligned: padSize=16, CPL=15, trailer=[1..15,15]
+	}
+	for _, tc := range cases {
+		data := make([]byte, tc.dataLen)
+		padded := padPayload(data)
+		require.Equal(t, tc.dataLen+tc.padSize, len(padded), "padded length for dataLen=%d", tc.dataLen)
+		// Last byte must equal CPL = padSize-1 (IPMI 2.0 spec §13.28.3)
+		lastByte := padded[len(padded)-1]
+		assert.Equal(t, byte(tc.padSize-1), lastByte,
+			"last pad byte must be CPL=%d (padSize-1), got %d for dataLen=%d",
+			tc.padSize-1, lastByte, tc.dataLen)
+	}
+}
+
+// TestUnpadPayload_IPMISpec verifies that unpadPayload correctly strips IPMI 2.0
+// spec-compliant CPL-format padding as specified in §13.28.3 and sent by FreeIPMI.
+func TestUnpadPayload_IPMISpec(t *testing.T) {
+	// 7-byte IPMI message padded to 16 bytes (padSize=9):
+	// CPad=[01..08] (8 bytes) + CPL=08 (1 byte) = 9 bytes total trailer.
+	ipmiMsg := make([]byte, 7)
+	cplPadding := []byte{1, 2, 3, 4, 5, 6, 7, 8, 8} // CPad=[1..8], CPL=8
+	padded := append(ipmiMsg, cplPadding...)
+
+	unpadded, err := unpadPayload(padded)
+	require.NoError(t, err, "unpadPayload must not error on IPMI spec-compliant CPL padding")
+	assert.Equal(t, 7, len(unpadded), "must recover exactly 7 bytes after stripping 9-byte CPL trailer")
+}
+
+// TestDecryptAESCBC_FreeIPMIPayload verifies end-to-end decryption of an IPMI message
+// encrypted with IPMI 2.0 CPL-format AES-CBC padding (§13.28.3, as FreeIPMI produces).
+func TestDecryptAESCBC_FreeIPMIPayload(t *testing.T) {
+	key := make([]byte, 20)
+	for i := range key {
+		key[i] = byte(i + 1)
+	}
+
+	// Build a 7-byte IPMI message padded using IPMI 2.0 CPL format:
+	// CPad=[01..08] + CPL=08 = 9 bytes, making 16 bytes total (1 AES block).
+	ipmiMsg := []byte{0x20, 0x00, 0xE0, 0x81, 0x00, 0x01, 0x7E} // 7 bytes
+	cplPadding := []byte{1, 2, 3, 4, 5, 6, 7, 8, 8}              // CPad=[1..8], CPL=8
+	plaintext := append(ipmiMsg, cplPadding...)                    // 16 bytes = 1 AES block
+
+	// Encrypt with zero IV for deterministic test
+	iv := make([]byte, 16)
+	block, err := aes.NewCipher(key[:16])
+	require.NoError(t, err)
+	ciphertext := make([]byte, 16)
+	cipher.NewCBCEncrypter(block, iv).CryptBlocks(ciphertext, plaintext)
+	encrypted := append(iv, ciphertext...)
+
+	decrypted, err := decryptAESCBC(key, encrypted)
+	require.NoError(t, err, "decryptAESCBC must succeed with IPMI 2.0 CPL padding")
+	assert.Equal(t, ipmiMsg, decrypted, "decrypted payload must match original 7-byte IPMI message")
+}
+
+// TestHandleEncryptedIPMI_GetChassisStatus verifies that an encrypted Get Chassis Status
+// command (7-byte IPMI message, as sent by ipmi-config --driver-type LAN_2_0) receives
+// a proper response.  This is the regression test for the MAAS commissioning timeout bug.
+//
+// The key scenario: ipmi-config --driver-type LAN_2_0 sends RMCP+ encrypted IPMI commands
+// using IPMI 2.0 spec-compliant AES-CBC padding (last pad byte = count of pad bytes).
+// qemu-bmc must correctly decrypt these and return a response; previously it returned nil
+// (causing a session timeout on the client side).
+func TestHandleEncryptedIPMI_GetChassisStatus(t *testing.T) {
+	sm := NewSessionManager()
+	user := "admin"
+	pass := "password"
+	mock := newIPMIMockMachine(machine.PowerOn)
+	state := bmc.NewState(user, pass)
+
+	// Step 1: Establish RMCP+ session
+	managedSessionID := setupRMCPSession(t, sm, user, pass, state)
+	session, ok := sm.GetSession(managedSessionID)
+	require.True(t, ok)
+
+	// Step 2: Build Get Chassis Status IPMI message (7 bytes, no data payload)
+	ipmiMsg := buildTestIPMIRequest(NetFnChassis, CmdGetChassisStatus, nil)
+	require.Equal(t, 7, len(ipmiMsg), "Get Chassis Status must be 7 bytes")
+
+	// Step 3: Encrypt using IPMI 2.0 spec-compliant padding + AES-CBC.
+	// This simulates what FreeIPMI (ipmi-config --driver-type LAN_2_0) sends.
+	// IPMI spec padding: [1, 2, ..., N] where N = padSize = total pad byte count.
+	encryptedPayload, err := encryptIPMISpecAESCBC(session.ConfidentialityKey, ipmiMsg)
+	require.NoError(t, err)
+
+	// Step 4: Build authenticated RMCP+ packet
+	pktData := buildAuthenticatedRMCPPlusPacket(session, encryptedPayload)
+
+	// Step 5: Send to HandleRMCPPlusMessage and verify we get a response
+	resp, err := HandleRMCPPlusMessage(pktData, sm, user, pass, mock, state)
+	require.NoError(t, err, "encrypted Get Chassis Status must not return an error")
+	require.NotNil(t, resp, "encrypted Get Chassis Status must return a response (not nil)")
+}
+
+// TestResponseSequenceNumber verifies that BMC responses carry an incrementing
+// session_sequence_number (1, 2, 3, ...) as required by IPMI 2.0 spec §13.28.6.
+// A response with session_sequence_number=0 is rejected by FreeIPMI as "out of window",
+// causing it to retry indefinitely until session timeout — the MAAS commissioning bug.
+func TestResponseSequenceNumber(t *testing.T) {
+	sm := NewSessionManager()
+	user := "admin"
+	pass := "password"
+	mock := newIPMIMockMachine(machine.PowerOn)
+	state := bmc.NewState(user, pass)
+
+	managedSessionID := setupRMCPSession(t, sm, user, pass, state)
+	session, ok := sm.GetSession(managedSessionID)
+	require.True(t, ok)
+
+	for i := 1; i <= 3; i++ {
+		ipmiMsg := buildTestIPMIRequest(NetFnApp, CmdGetDeviceID, nil)
+		enc, err := encryptIPMISpecAESCBC(session.ConfidentialityKey, ipmiMsg)
+		require.NoError(t, err)
+
+		pkt := buildAuthenticatedRMCPPlusPacket(session, enc)
+		resp, err := HandleRMCPPlusMessage(pkt, sm, user, pass, mock, state)
+		require.NoError(t, err)
+		require.NotNil(t, resp)
+
+		// RMCP+ session header: AuthType(1)+PayloadType(1)+SessionID(4)+SeqNum(4)+PayloadLen(2)
+		// seq is at bytes 6-9
+		require.GreaterOrEqual(t, len(resp), 10, "response too short to read seq")
+		seqNum := binary.LittleEndian.Uint32(resp[6:10])
+		assert.Equal(t, uint32(i), seqNum,
+			"response #%d must have session_sequence_number=%d (not 0)", i, i)
+	}
+}
+
+// encryptIPMISpecAESCBC encrypts plaintext using AES-CBC-128 with IPMI 2.0 CPL-format
+// padding (§13.28.3): CPad=[01h..CPLh] + CPL byte, where CPL = padSize-1.
+// This matches the encryption used by FreeIPMI clients.
+func encryptIPMISpecAESCBC(key []byte, plaintext []byte) ([]byte, error) {
+	padSize := aes.BlockSize - (len(plaintext) % aes.BlockSize)
+	padding := make([]byte, padSize)
+	for i := 0; i < padSize; i++ {
+		padding[i] = byte(i + 1) // CPad bytes: 1, 2, ..., padSize
+	}
+	// Last byte is CPL = count of CPad bytes only (not counting CPL itself)
+	padding[padSize-1] = byte(padSize - 1) // CPL = padSize - 1
+	padded := append(plaintext, padding...)
+
+	block, err := aes.NewCipher(key[:16])
+	if err != nil {
+		return nil, err
+	}
+
+	iv := make([]byte, aes.BlockSize) // zero IV for deterministic test
+	ciphertext := make([]byte, len(padded))
+	cipher.NewCBCEncrypter(block, iv).CryptBlocks(ciphertext, padded)
+	return append(iv, ciphertext...), nil
+}
+
+// setupRMCPSession performs Open Session + RAKP 1-4 and returns the managed system session ID.
+func setupRMCPSession(t *testing.T, sm *SessionManager, user, pass string, state *bmc.State) uint32 {
+	t.Helper()
+
+	openReq := buildOpenSessionRequest(0x01, 0xAAAABBBB)
+	openData := wrapRMCPPlusPayload(PayloadTypeOpenSessionRequest, 0, 0, openReq)
+	openResp, err := HandleRMCPPlusMessage(openData, sm, user, pass, nil, state)
+	require.NoError(t, err)
+
+	managedSessionID := binary.LittleEndian.Uint32(openResp[20:24])
+
+	rakp1 := buildRAKPMessage1(0x02, managedSessionID, user)
+	rakp1Data := wrapRMCPPlusPayload(PayloadTypeRAKPMessage1, 0, 0, rakp1)
+	_, err = HandleRMCPPlusMessage(rakp1Data, sm, user, pass, nil, state)
+	require.NoError(t, err)
+
+	session, ok := sm.GetSession(managedSessionID)
+	require.True(t, ok)
+
+	rakp3AuthBuf := buildRAKP3AuthBuf(session.ManagedSystemRandomNumber[:], session.RemoteConsoleSessionID, session.RequestedPrivilegeLevel, session.UserNameLength, session.UserName)
+	mac := hmac.New(sha1.New, []byte(pass))
+	mac.Write(rakp3AuthBuf)
+
+	rakp3 := buildRAKPMessage3(0x03, managedSessionID, mac.Sum(nil))
+	rakp3Data := wrapRMCPPlusPayload(PayloadTypeRAKPMessage3, 0, 0, rakp3)
+	_, err = HandleRMCPPlusMessage(rakp3Data, sm, user, pass, nil, state)
+	require.NoError(t, err)
+
+	return managedSessionID
+}
+
+// buildAuthenticatedRMCPPlusPacket builds an authenticated+encrypted RMCP+ IPMI data packet.
+func buildAuthenticatedRMCPPlusPacket(session *Session, encryptedPayload []byte) []byte {
+	// Session header: AuthType + PayloadType(0xC0 = encrypted+authenticated+IPMI) + SessionID + SeqNum + PayloadLength
+	payloadType := uint8(0xC0) // encrypted=1, authenticated=1, type=IPMI(0x00)
+	seqNum := uint32(1)
+
+	var hdr [12]byte
+	hdr[0] = AuthTypeRMCPPlus
+	hdr[1] = payloadType
+	binary.LittleEndian.PutUint32(hdr[2:], session.ManagedSystemSessionID)
+	binary.LittleEndian.PutUint32(hdr[6:], seqNum)
+	binary.LittleEndian.PutUint16(hdr[10:], uint16(len(encryptedPayload)))
+
+	pkt := append(hdr[:], encryptedPayload...)
+
+	// Integrity padding (align to 4-byte boundary)
+	padNeeded := (4 - ((len(pkt) + 1 + 1) % 4)) % 4
+	for i := 0; i < padNeeded; i++ {
+		pkt = append(pkt, 0xFF)
+	}
+	pkt = append(pkt, byte(padNeeded)) // Pad Length
+	pkt = append(pkt, 0x07)             // Next Header
+
+	// HMAC-SHA1-96 over the entire packet so far
+	mac := hmac.New(sha1.New, session.IntegrityKey)
+	mac.Write(pkt)
+	pkt = append(pkt, mac.Sum(nil)[:12]...)
+
+	return pkt
 }
 
 // Helper functions for building test messages
