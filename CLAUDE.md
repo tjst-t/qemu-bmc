@@ -96,6 +96,7 @@ make container-test-all
 | `TLS_KEY` | (empty) | TLS key path |
 | `VM_BOOT_MODE` | `bios` | Default boot mode |
 | `VM_IPMI_ADDR` | (empty, disabled) | VM IPMI chardev listen address (e.g., `:9002`) |
+| `POWER_ON_AT_START` | `false` | Power on VM automatically at container start |
 
 ### Container Configuration (entrypoint.sh)
 

@@ -55,9 +55,13 @@ func main() {
 		pm := qemu.NewProcessManager(cfg.QEMUBinary, cmdArgs, qemu.DefaultCommandFactory)
 		m = machine.NewWithProcess(qmpClient, pm)
 
-		log.Printf("Starting QEMU: %s %v", cfg.QEMUBinary, cmdArgs)
-		if err := m.Reset("On"); err != nil {
-			log.Fatalf("Failed to start QEMU: %v", err)
+		if cfg.PowerOnAtStart {
+			log.Printf("Starting QEMU: %s %v", cfg.QEMUBinary, cmdArgs)
+			if err := m.Reset("On"); err != nil {
+				log.Fatalf("Failed to start QEMU: %v", err)
+			}
+		} else {
+			log.Printf("POWER_ON_AT_START=false: QEMU will not start until powered on via IPMI/Redfish")
 		}
 	} else {
 		// Legacy mode

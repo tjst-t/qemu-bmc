@@ -9,7 +9,7 @@ import (
 
 func TestLoad_Defaults(t *testing.T) {
 	// Clear any env vars that might be set
-	for _, key := range []string{"QMP_SOCK", "IPMI_USER", "IPMI_PASS", "REDFISH_PORT", "IPMI_PORT", "SERIAL_ADDR", "TLS_CERT", "TLS_KEY", "VM_BOOT_MODE", "VM_IPMI_ADDR", "QEMU_BINARY"} {
+	for _, key := range []string{"QMP_SOCK", "IPMI_USER", "IPMI_PASS", "REDFISH_PORT", "IPMI_PORT", "SERIAL_ADDR", "TLS_CERT", "TLS_KEY", "VM_BOOT_MODE", "VM_IPMI_ADDR", "QEMU_BINARY", "POWER_ON_AT_START"} {
 		os.Unsetenv(key)
 	}
 
@@ -25,6 +25,7 @@ func TestLoad_Defaults(t *testing.T) {
 	assert.Equal(t, "bios", cfg.VMBootMode)
 	assert.Equal(t, "", cfg.VMIPMIAddr)
 	assert.Equal(t, "qemu-system-x86_64", cfg.QEMUBinary)
+	assert.Equal(t, false, cfg.PowerOnAtStart)
 }
 
 func TestLoad_QEMUBinary_Custom(t *testing.T) {
@@ -62,4 +63,24 @@ func TestLoad_VMIPMIAddr_Default(t *testing.T) {
 	os.Unsetenv("VM_IPMI_ADDR")
 	cfg := Load()
 	assert.Equal(t, "", cfg.VMIPMIAddr)
+}
+
+func TestLoad_PowerOnAtStart_Default(t *testing.T) {
+	os.Unsetenv("POWER_ON_AT_START")
+	cfg := Load()
+	assert.Equal(t, false, cfg.PowerOnAtStart)
+}
+
+func TestLoad_PowerOnAtStart_True(t *testing.T) {
+	os.Setenv("POWER_ON_AT_START", "true")
+	defer os.Unsetenv("POWER_ON_AT_START")
+	cfg := Load()
+	assert.Equal(t, true, cfg.PowerOnAtStart)
+}
+
+func TestLoad_PowerOnAtStart_False(t *testing.T) {
+	os.Setenv("POWER_ON_AT_START", "false")
+	defer os.Unsetenv("POWER_ON_AT_START")
+	cfg := Load()
+	assert.Equal(t, false, cfg.PowerOnAtStart)
 }
