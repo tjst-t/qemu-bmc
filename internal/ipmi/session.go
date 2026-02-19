@@ -20,6 +20,10 @@ type Session struct {
 	IntegrityKey              []byte // K1 - 20 bytes
 	ConfidentialityKey        []byte // K2 - 20 bytes
 	Authenticated             bool
+	// Negotiated algorithms (set during Open Session exchange)
+	AuthAlgorithm            uint8
+	IntegrityAlgorithm       uint8
+	ConfidentialityAlgorithm uint8
 }
 
 // SessionManager manages RMCP+ sessions

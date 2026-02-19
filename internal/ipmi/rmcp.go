@@ -2,6 +2,7 @@ package ipmi
 
 import (
 	"bytes"
+	"crypto/md5"
 	"encoding/binary"
 	"fmt"
 )
@@ -146,10 +147,13 @@ func ParseIPMIMessageBytes(data []byte) (*IPMIMessage, error) {
 	return msg, nil
 }
 
-// SerializeIPMIResponse creates an IPMI v1.5 response
-func SerializeIPMIResponse(session *IPMISessionHeader, netFn uint8, cmd uint8, code CompletionCode, data []byte) []byte {
+// SerializeIPMIResponse creates an IPMI v1.5 response.
+// reqSeqLun is the SourceLun field from the request (upper 6 bits = seq, lower 2 bits = LUN)
+// and is echoed back in the response so the client can match responses to requests.
+// password is the session password used to compute the MD5/MD2 authentication code.
+func SerializeIPMIResponse(session *IPMISessionHeader, netFn uint8, cmd uint8, code CompletionCode, data []byte, reqSeqLun uint8, password string) []byte {
 	// Build IPMI message
-	msg := buildIPMIResponseMessage(netFn, cmd, code, data)
+	msg := buildIPMIResponseMessageWithSeq(netFn, cmd, code, data, reqSeqLun)
 
 	// Wrap in session
 	buf := new(bytes.Buffer)
@@ -157,9 +161,9 @@ func SerializeIPMIResponse(session *IPMISessionHeader, netFn uint8, cmd uint8, c
 	binary.Write(buf, binary.LittleEndian, session.SequenceNumber)
 	binary.Write(buf, binary.LittleEndian, session.SessionID)
 
-	// Include 16-byte auth code for authenticated sessions
+	// Include authentication code for authenticated sessions
 	if session.AuthType != AuthTypeNone {
-		authCode := make([]byte, 16)
+		authCode := computeIPMI15AuthCode(session.AuthType, password, session.SessionID, session.SequenceNumber, msg)
 		buf.Write(authCode)
 	}
 
@@ -167,6 +171,37 @@ func SerializeIPMIResponse(session *IPMISessionHeader, netFn uint8, cmd uint8, c
 	buf.Write(msg)
 
 	return buf.Bytes()
+}
+
+// computeIPMI15AuthCode computes the IPMI 1.5 session authentication code.
+// Format (IPMI 1.5 spec section 5.2.2):
+//
+//	MD5:  MD5(password16 || sessionID[4] || msg || seqNum[4] || password16)
+//	MD2:  same but using MD2 (not implemented, returns zeros)
+//	None: not called
+func computeIPMI15AuthCode(authType uint8, password string, sessionID uint32, seqNum uint32, msg []byte) []byte {
+	// Password padded/truncated to 16 bytes
+	passKey := make([]byte, 16)
+	copy(passKey, []byte(password))
+
+	seqBytes := make([]byte, 4)
+	binary.LittleEndian.PutUint32(seqBytes, seqNum)
+	sessionIDBytes := make([]byte, 4)
+	binary.LittleEndian.PutUint32(sessionIDBytes, sessionID)
+
+	authCode := make([]byte, 16)
+	if authType == AuthTypeMD5 {
+		h := md5.New()
+		h.Write(passKey)
+		h.Write(sessionIDBytes)
+		h.Write(msg)
+		h.Write(seqBytes)
+		h.Write(passKey)
+		copy(authCode, h.Sum(nil))
+	}
+	// For unimplemented types (MD2, straight password) return zeros.
+	// FreeIPMI's "noauthcodecheck" workaround can be used for those cases.
+	return authCode
 }
 
 func buildIPMIResponseMessage(netFn uint8, cmd uint8, code CompletionCode, data []byte) []byte {

@@ -98,6 +98,46 @@ const (
 	PayloadTypeRAKPMessage4        = 0x15
 )
 
+// RMCP+ Authentication Algorithm values (IPMI 2.0 Table 13-17)
+const (
+	AuthAlgorithmNone       = 0x00
+	AuthAlgorithmHMACSHA1   = 0x01
+	AuthAlgorithmHMACMD5    = 0x02
+	AuthAlgorithmHMACSHA256 = 0x03
+)
+
+// RMCP+ Integrity Algorithm values (IPMI 2.0 Table 13-18)
+const (
+	IntegrityAlgorithmNone          = 0x00
+	IntegrityAlgorithmHMACSHA1_96   = 0x01
+	IntegrityAlgorithmHMACMD5_128   = 0x02
+	IntegrityAlgorithmMD5_128       = 0x03
+	IntegrityAlgorithmHMACSHA256_128 = 0x04
+)
+
+// RMCP+ Confidentiality Algorithm values (IPMI 2.0 Table 13-19)
+const (
+	ConfAlgorithmNone      = 0x00
+	ConfAlgorithmAESCBC128 = 0x01
+	ConfAlgorithmXRC4_128  = 0x02
+	ConfAlgorithmXRC4_40   = 0x03
+)
+
+// Open Session Response status codes (IPMI 2.0 Table 13-16)
+const (
+	OpenSessionStatusSuccess                    = 0x00
+	OpenSessionStatusInsufficientResources      = 0x01
+	OpenSessionStatusInvalidSessionID           = 0x02
+	OpenSessionStatusInvalidPayloadType         = 0x03
+	OpenSessionStatusInvalidAuthAlgorithm       = 0x11
+	OpenSessionStatusInvalidIntegrityAlgorithm  = 0x12
+	OpenSessionStatusNoMatchingAuthPayload      = 0x13
+	OpenSessionStatusNoMatchingIntegrityPayload = 0x14
+	OpenSessionStatusInvalidConfAlgorithm       = 0x18
+	OpenSessionStatusNoCipherSuiteMatch         = 0x19
+	OpenSessionStatusIllegalParameter           = 0x20
+)
+
 // CompletionCode represents an IPMI completion code
 type CompletionCode uint8
 

@@ -182,6 +182,10 @@ Plus all existing chassis and app commands (Get Device ID, Chassis Status, Boot 
 
 Uses the OpenIPMI VM wire protocol over TCP with framing (0xA0/0xA1), byte escaping (0xAA), and two's complement checksums.
 
+## Notes for Claude Code
+
+- `grep`, `tail`, `head` are not available as bash commands in the Claude Code sandbox — use the dedicated Read/Grep tools instead
+
 ## Development Guidelines
 
 - TDD: Write tests first, verify RED, implement, verify GREEN, refactor

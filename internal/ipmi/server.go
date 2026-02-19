@@ -109,7 +109,7 @@ func (s *Server) HandleMessage(data []byte) ([]byte, error) {
 
 	code, respData := handleIPMICommand(msg, s.machine, s.bmcState)
 
-	respPayload := SerializeIPMIResponse(session, msg.GetNetFn()|0x01, msg.Command, code, respData)
+	respPayload := SerializeIPMIResponse(session, msg.GetNetFn()|0x01, msg.Command, code, respData, msg.SourceLun, s.pass)
 	return SerializeRMCPMessage(RMCPClassIPMI, respPayload), nil
 }
 

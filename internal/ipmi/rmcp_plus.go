@@ -104,15 +104,37 @@ func handleOpenSession(payload []byte, header *RMCPPlusSessionHeader, sessionMgr
 		return nil, fmt.Errorf("parsing open session request: %w", err)
 	}
 
+	// Validate proposed algorithms against supported set.
+	// Only cipher suite 3 is supported: RAKP-HMAC-SHA1 + HMAC-SHA1-96 + AES-CBC-128.
+	// Reject unsupported suites with the appropriate IPMI 2.0 error status code so that
+	// strict clients (e.g. FreeIPMI) get a proper error instead of a false success that
+	// later causes a session timeout.
+	if req.AuthPayloadAlgorithm != AuthAlgorithmHMACSHA1 {
+		return buildOpenSessionError(req.MessageTag, req.RemoteConsoleSessionID, OpenSessionStatusInvalidAuthAlgorithm), nil
+	}
+	if req.IntegrityPayloadAlgorithm != IntegrityAlgorithmHMACSHA1_96 {
+		return buildOpenSessionError(req.MessageTag, req.RemoteConsoleSessionID, OpenSessionStatusInvalidIntegrityAlgorithm), nil
+	}
+	if req.ConfPayloadAlgorithm != ConfAlgorithmAESCBC128 {
+		return buildOpenSessionError(req.MessageTag, req.RemoteConsoleSessionID, OpenSessionStatusInvalidConfAlgorithm), nil
+	}
+
 	session, err := sessionMgr.CreateSession(req.RemoteConsoleSessionID)
 	if err != nil {
 		return nil, err
 	}
 
-	// Build response
+	// Store the negotiated algorithms in the session for use in later RAKP steps.
+	session.AuthAlgorithm = AuthAlgorithmHMACSHA1
+	session.IntegrityAlgorithm = IntegrityAlgorithmHMACSHA1_96
+	session.ConfidentialityAlgorithm = ConfAlgorithmAESCBC128
+
+	// Build response - return BMC's chosen algorithms (not an echo-back of the client's
+	// proposal). Responding with the BMC's own values satisfies strict clients like
+	// FreeIPMI which validate that the BMC independently selected a supported algorithm.
 	resp := new(bytes.Buffer)
 	binary.Write(resp, binary.LittleEndian, req.MessageTag)
-	binary.Write(resp, binary.LittleEndian, uint8(0x00)) // status: success
+	binary.Write(resp, binary.LittleEndian, uint8(OpenSessionStatusSuccess))
 	binary.Write(resp, binary.LittleEndian, uint8(0x04)) // max privilege: admin
 	binary.Write(resp, binary.LittleEndian, uint8(0x00)) // reserved
 	binary.Write(resp, binary.LittleEndian, req.RemoteConsoleSessionID)
@@ -122,24 +144,35 @@ func handleOpenSession(payload []byte, header *RMCPPlusSessionHeader, sessionMgr
 	binary.Write(resp, binary.LittleEndian, uint8(0x00)) // type
 	binary.Write(resp, binary.LittleEndian, [2]byte{})   // reserved
 	binary.Write(resp, binary.LittleEndian, uint8(0x08)) // length
-	binary.Write(resp, binary.LittleEndian, req.AuthPayloadAlgorithm)
+	binary.Write(resp, binary.LittleEndian, session.AuthAlgorithm)
 	binary.Write(resp, binary.LittleEndian, [3]byte{}) // reserved
 
 	// Integrity algorithm payload
 	binary.Write(resp, binary.LittleEndian, uint8(0x01))
 	binary.Write(resp, binary.LittleEndian, [2]byte{})
 	binary.Write(resp, binary.LittleEndian, uint8(0x08))
-	binary.Write(resp, binary.LittleEndian, req.IntegrityPayloadAlgorithm)
+	binary.Write(resp, binary.LittleEndian, session.IntegrityAlgorithm)
 	binary.Write(resp, binary.LittleEndian, [3]byte{})
 
 	// Confidentiality algorithm payload
 	binary.Write(resp, binary.LittleEndian, uint8(0x02))
 	binary.Write(resp, binary.LittleEndian, [2]byte{})
 	binary.Write(resp, binary.LittleEndian, uint8(0x08))
-	binary.Write(resp, binary.LittleEndian, req.ConfPayloadAlgorithm)
+	binary.Write(resp, binary.LittleEndian, session.ConfidentialityAlgorithm)
 	binary.Write(resp, binary.LittleEndian, [3]byte{})
 
 	return wrapRMCPPlusResponse(PayloadTypeOpenSessionResponse, 0, 0, resp.Bytes()), nil
+}
+
+// buildOpenSessionError builds an RMCP+ Open Session error response.
+func buildOpenSessionError(messageTag uint8, remoteConsoleSessionID uint32, statusCode uint8) []byte {
+	resp := new(bytes.Buffer)
+	binary.Write(resp, binary.LittleEndian, messageTag)
+	binary.Write(resp, binary.LittleEndian, statusCode)
+	binary.Write(resp, binary.LittleEndian, uint8(0x00)) // reserved
+	binary.Write(resp, binary.LittleEndian, uint8(0x00)) // reserved
+	binary.Write(resp, binary.LittleEndian, remoteConsoleSessionID)
+	return wrapRMCPPlusResponse(PayloadTypeOpenSessionResponse, 0, 0, resp.Bytes())
 }
 
 func handleRAKPMessage1(payload []byte, header *RMCPPlusSessionHeader, sessionMgr *SessionManager, user, pass string, state *bmc.State) ([]byte, error) {

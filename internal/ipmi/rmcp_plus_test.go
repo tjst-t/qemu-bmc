@@ -230,6 +230,109 @@ func TestRAKP_AuthWithUnknownUser(t *testing.T) {
 	assert.Equal(t, uint8(0x0D), rakp2Resp[13], "RAKP2 should fail with invalid username")
 }
 
+func TestOpenSession_CipherSuite3_AlgorithmsStoredInSession(t *testing.T) {
+	sm := NewSessionManager()
+
+	req := buildOpenSessionRequest(0x01, 0x12345678)
+	data := wrapRMCPPlusPayload(PayloadTypeOpenSessionRequest, 0, 0, req)
+
+	resp, err := HandleRMCPPlusMessage(data, sm, "admin", "password", nil, bmc.NewState("admin", "password"))
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+
+	// Status must be success
+	assert.Equal(t, uint8(0x00), resp[13])
+
+	// Extract managed system session ID from response and verify session algorithms
+	managedSessionID := binary.LittleEndian.Uint32(resp[20:24])
+	session, ok := sm.GetSession(managedSessionID)
+	require.True(t, ok)
+	assert.Equal(t, uint8(AuthAlgorithmHMACSHA1), session.AuthAlgorithm)
+	assert.Equal(t, uint8(IntegrityAlgorithmHMACSHA1_96), session.IntegrityAlgorithm)
+	assert.Equal(t, uint8(ConfAlgorithmAESCBC128), session.ConfidentialityAlgorithm)
+
+	// Verify response payload contains BMC-chosen algorithm values.
+	// Full response layout (from byte 0):
+	//   [0-11]  RMCP+ session header (AuthType, PayloadType, SessionID×2, SeqNum, Length)
+	//   [12]    MessageTag
+	//   [13]    Status
+	//   [14]    MaxPrivilege
+	//   [15]    Reserved
+	//   [16-19] RemoteConsoleSessionID
+	//   [20-23] ManagedSystemSessionID
+	//   [24-31] Auth algorithm payload:  Type[1] + Reserved[2] + Len[1] + Algorithm[1] + Reserved[3]
+	//   [32-39] Integrity algorithm payload (same structure)
+	//   [40-47] Confidentiality algorithm payload (same structure)
+	const (
+		authAlgOffset  = 24 + 4
+		intAlgOffset   = 32 + 4
+		confAlgOffset  = 40 + 4
+	)
+	assert.Equal(t, uint8(AuthAlgorithmHMACSHA1), resp[authAlgOffset], "auth algorithm in response")
+	assert.Equal(t, uint8(IntegrityAlgorithmHMACSHA1_96), resp[intAlgOffset], "integrity algorithm in response")
+	assert.Equal(t, uint8(ConfAlgorithmAESCBC128), resp[confAlgOffset], "conf algorithm in response")
+}
+
+func TestOpenSession_UnsupportedAuthAlgorithm(t *testing.T) {
+	sm := NewSessionManager()
+
+	// Cipher suite 0: Auth=None (0x00)
+	req := buildOpenSessionRequestWithAlgorithms(0x01, 0x12345678, AuthAlgorithmNone, IntegrityAlgorithmNone, ConfAlgorithmNone)
+	data := wrapRMCPPlusPayload(PayloadTypeOpenSessionRequest, 0, 0, req)
+
+	resp, err := HandleRMCPPlusMessage(data, sm, "admin", "password", nil, bmc.NewState("admin", "password"))
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+
+	assert.Equal(t, uint8(PayloadTypeOpenSessionResponse), resp[1])
+	assert.Equal(t, uint8(OpenSessionStatusInvalidAuthAlgorithm), resp[13], "should reject unsupported auth algorithm")
+}
+
+func TestOpenSession_UnsupportedIntegrityAlgorithm(t *testing.T) {
+	sm := NewSessionManager()
+
+	// Cipher suite 1: Auth=HMAC-SHA1 but Integrity=None → only partial support
+	req := buildOpenSessionRequestWithAlgorithms(0x01, 0x12345678, AuthAlgorithmHMACSHA1, IntegrityAlgorithmNone, ConfAlgorithmNone)
+	data := wrapRMCPPlusPayload(PayloadTypeOpenSessionRequest, 0, 0, req)
+
+	resp, err := HandleRMCPPlusMessage(data, sm, "admin", "password", nil, bmc.NewState("admin", "password"))
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+
+	assert.Equal(t, uint8(PayloadTypeOpenSessionResponse), resp[1])
+	assert.Equal(t, uint8(OpenSessionStatusInvalidIntegrityAlgorithm), resp[13], "should reject unsupported integrity algorithm")
+}
+
+func TestOpenSession_UnsupportedConfAlgorithm(t *testing.T) {
+	sm := NewSessionManager()
+
+	// Cipher suite 2: Auth=HMAC-SHA1, Integrity=HMAC-SHA1-96, Conf=None
+	req := buildOpenSessionRequestWithAlgorithms(0x01, 0x12345678, AuthAlgorithmHMACSHA1, IntegrityAlgorithmHMACSHA1_96, ConfAlgorithmNone)
+	data := wrapRMCPPlusPayload(PayloadTypeOpenSessionRequest, 0, 0, req)
+
+	resp, err := HandleRMCPPlusMessage(data, sm, "admin", "password", nil, bmc.NewState("admin", "password"))
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+
+	assert.Equal(t, uint8(PayloadTypeOpenSessionResponse), resp[1])
+	assert.Equal(t, uint8(OpenSessionStatusInvalidConfAlgorithm), resp[13], "should reject unsupported conf algorithm")
+}
+
+func TestOpenSession_UnsupportedCipherSuite17(t *testing.T) {
+	sm := NewSessionManager()
+
+	// Cipher suite 17: RAKP-HMAC-SHA256 (0x03) + HMAC-SHA256-128 (0x04) + AES-CBC-128 (0x01)
+	req := buildOpenSessionRequestWithAlgorithms(0x01, 0x12345678, AuthAlgorithmHMACSHA256, IntegrityAlgorithmHMACSHA256_128, ConfAlgorithmAESCBC128)
+	data := wrapRMCPPlusPayload(PayloadTypeOpenSessionRequest, 0, 0, req)
+
+	resp, err := HandleRMCPPlusMessage(data, sm, "admin", "password", nil, bmc.NewState("admin", "password"))
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+
+	assert.Equal(t, uint8(PayloadTypeOpenSessionResponse), resp[1])
+	assert.Equal(t, uint8(OpenSessionStatusInvalidAuthAlgorithm), resp[13], "should reject SHA256 auth algorithm")
+}
+
 func TestEncryptDecryptAESCBC(t *testing.T) {
 	key := make([]byte, 20)
 	for i := range key {
@@ -286,6 +389,27 @@ func buildOpenSessionRequest(tag uint8, remoteSessionID uint32) []byte {
 	req[24] = 0x02
 	req[27] = 0x08
 	req[28] = 0x01 // AES-CBC-128
+	return req
+}
+
+// buildOpenSessionRequestWithAlgorithms builds an Open Session Request with explicit algorithm values.
+func buildOpenSessionRequestWithAlgorithms(tag uint8, remoteSessionID uint32, authAlg, intAlg, confAlg uint8) []byte {
+	req := make([]byte, 32)
+	req[0] = tag
+	req[1] = 0x04 // max privilege (admin)
+	binary.LittleEndian.PutUint32(req[4:], remoteSessionID)
+	// Auth payload
+	req[8] = 0x00  // type
+	req[11] = 0x08 // length
+	req[12] = authAlg
+	// Integrity payload
+	req[16] = 0x01
+	req[19] = 0x08
+	req[20] = intAlg
+	// Confidentiality payload
+	req[24] = 0x02
+	req[27] = 0x08
+	req[28] = confAlg
 	return req
 }
 
