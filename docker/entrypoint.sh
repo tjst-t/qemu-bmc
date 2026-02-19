@@ -64,6 +64,19 @@ QEMU_ARGS="$QEMU_ARGS -vnc :$VNC_DISPLAY"
 
 # Network
 source /scripts/setup-network.sh
+
+# Wait for explicitly specified interfaces to appear (containerlab creates them after container start)
+if [ -n "$VM_NETWORKS" ]; then
+    for iface in $(echo "$VM_NETWORKS" | tr ',' ' '); do
+        timeout=30
+        for i in $(seq 1 $timeout); do
+            [ -e "/sys/class/net/$iface" ] && break
+            [ "$i" -eq "$timeout" ] && echo "WARN: Interface $iface not found after ${timeout}s, proceeding without it" >&2
+            sleep 1
+        done
+    done
+fi
+
 NET_ARGS=$(build_network_args 2>/dev/null || true)
 if [ -n "$NET_ARGS" ]; then
     QEMU_ARGS="$QEMU_ARGS $NET_ARGS"
