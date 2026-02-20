@@ -16,6 +16,7 @@ type Config struct {
 	VMIPMIAddr     string // VM IPMI chardev listen address
 	QEMUBinary     string // QEMU binary path for process management mode
 	PowerOnAtStart bool   // Power on VM at container start
+	VNCAddr        string // VNC TCP address for noVNC proxy
 }
 
 // Load reads configuration from environment variables with defaults
@@ -33,6 +34,7 @@ func Load() *Config {
 		VMIPMIAddr:     getEnv("VM_IPMI_ADDR", ""),
 		QEMUBinary:     getEnv("QEMU_BINARY", "qemu-system-x86_64"),
 		PowerOnAtStart: getBoolEnv("POWER_ON_AT_START", false),
+		VNCAddr:        getEnv("VNC_ADDR", "localhost:5900"),
 	}
 }
 

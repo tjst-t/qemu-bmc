@@ -11,7 +11,7 @@ import (
 
 func TestBasicAuth(t *testing.T) {
 	mock := newMockMachine(qmp.StatusRunning)
-	srv := NewServer(mock, "admin", "password")
+	srv := NewServer(mock, "admin", "password", "")
 
 	t.Run("valid credentials returns 200", func(t *testing.T) {
 		req := httptest.NewRequest("GET", "/redfish/v1", nil)
@@ -42,7 +42,7 @@ func TestBasicAuth(t *testing.T) {
 
 func TestTrailingSlash(t *testing.T) {
 	mock := newMockMachine(qmp.StatusRunning)
-	srv := NewServer(mock, "", "")
+	srv := NewServer(mock, "", "", "")
 
 	t.Run("without trailing slash returns 200", func(t *testing.T) {
 		req := httptest.NewRequest("GET", "/redfish/v1/Systems", nil)

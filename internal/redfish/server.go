@@ -5,6 +5,7 @@ import (
 
 	"github.com/gorilla/mux"
 	"github.com/tjst-t/qemu-bmc/internal/machine"
+	"github.com/tjst-t/qemu-bmc/internal/novnc"
 	"github.com/tjst-t/qemu-bmc/internal/qmp"
 )
 
@@ -26,15 +27,17 @@ type Server struct {
 	user         string
 	pass         string
 	currentMedia string
+	novncHandler *novnc.Handler
 }
 
 // NewServer creates a new Redfish server
-func NewServer(m MachineInterface, user, pass string) *Server {
+func NewServer(m MachineInterface, user, pass, vncAddr string) *Server {
 	s := &Server{
-		router:  mux.NewRouter(),
-		machine: m,
-		user:    user,
-		pass:    pass,
+		router:       mux.NewRouter(),
+		machine:      m,
+		user:         user,
+		pass:         pass,
+		novncHandler: novnc.NewHandler(vncAddr),
 	}
 	s.setupRoutes()
 	return s
@@ -82,6 +85,15 @@ func (s *Server) setupRoutes() {
 	s.router.HandleFunc("/redfish/v1/Chassis/", s.handleChassisCollection).Methods("GET")
 	s.router.HandleFunc("/redfish/v1/Chassis/{id}", s.handleGetChassis).Methods("GET")
 	s.router.HandleFunc("/redfish/v1/Chassis/{id}/", s.handleGetChassis).Methods("GET")
+
+	// noVNC: redirect /novnc/ → /novnc/vnc.html, serve static files, and WebSocket proxy
+	s.router.HandleFunc("/novnc/", func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, "/novnc/vnc.html", http.StatusFound)
+	}).Methods("GET")
+	s.router.PathPrefix("/novnc/").Handler(
+		http.StripPrefix("/novnc/", s.novncHandler.ServeFiles()),
+	)
+	s.router.HandleFunc("/websockify", s.novncHandler.ServeWebSocket)
 }
 
 // ServeHTTP implements the http.Handler interface

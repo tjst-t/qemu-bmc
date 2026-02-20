@@ -29,6 +29,7 @@ Replaces [docker-qemu-bmc](https://github.com/tjst-t/docker-qemu-bmc) (shell scr
 - **Redfish API** - ServiceRoot, Systems, Managers, VirtualMedia, Chassis (gofish compatible)
 - **IPMI over LAN** - RMCP/RMCP+, RAKP HMAC-SHA1 authentication, AES-CBC-128 encryption
 - **VM IPMI (In-Band)** - Guest OS IPMI via QEMU `ipmi-bmc-extern` KCS interface for MaaS commissioning
+- **noVNC** - Browser-based VNC console served on the Redfish HTTP port (no extra port needed)
 - **QMP Control** - Power operations, boot device changes, VirtualMedia mount
 - **Compatibility** - MAAS, Tinkerbell/Rufio, Cybozu placemat
 
@@ -131,6 +132,26 @@ ipmitool -I lanplus -H localhost -U admin -P password chassis power off
 ipmitool -I lanplus -H localhost -U admin -P password chassis bootdev pxe
 ```
 
+### noVNC
+
+A browser-based VNC console is available on the same HTTP port as the Redfish API. No extra port or VNC viewer software is required.
+
+Open a browser and navigate to:
+
+```
+http://localhost/novnc/
+```
+
+The browser will prompt for Basic Auth (same credentials as Redfish). After authentication, the noVNC UI loads and connects to QEMU's VNC server automatically.
+
+| URL | Description |
+|-----|-------------|
+| `GET /novnc/` | Redirects to noVNC UI (`/novnc/vnc.html`) |
+| `GET /novnc/vnc.html` | noVNC web UI |
+| `GET /websockify` | WebSocket-to-VNC proxy (used internally by noVNC) |
+
+The VNC target address is controlled by the `VNC_ADDR` environment variable (default: `localhost:5900`).
+
 ### VM IPMI (In-Band)
 
 qemu-bmc supports QEMU's `ipmi-bmc-extern` device for in-band IPMI from the guest OS. This enables MaaS commissioning scripts to configure BMC users, LAN settings, and channel access from within the VM. Users created in-band are automatically available for out-of-band IPMI and Redfish authentication.
@@ -178,6 +199,9 @@ ipmitool user enable 3
 | POST | `.../VirtualMedia.EjectMedia` | Eject media |
 | GET | `/redfish/v1/Chassis` | Chassis collection |
 | GET | `/redfish/v1/Chassis/1` | Chassis resource |
+| GET | `/novnc/` | Redirect to noVNC UI |
+| GET | `/novnc/vnc.html` | Browser-based VNC console |
+| GET | `/websockify` | WebSocket-to-VNC proxy |
 
 ## IPMI Commands
 
@@ -205,6 +229,8 @@ ipmitool user enable 3
 | `TLS_KEY` | (auto) | TLS key path |
 | `VM_BOOT_MODE` | `bios` | Default boot mode (`bios` or `uefi`) |
 | `VM_IPMI_ADDR` | (empty, disabled) | VM IPMI chardev listen address (e.g., `:9002`) |
+| `VNC_ADDR` | `localhost:5900` | QEMU VNC TCP address for noVNC proxy |
+| `POWER_ON_AT_START` | `false` | Power on VM automatically at startup (useful for non-MAAS setups) |
 
 ### Container Configuration
 
@@ -220,7 +246,7 @@ These variables are used by `docker/entrypoint.sh` to construct QEMU arguments:
 | `VM_CDROM` | (empty) | CD-ROM ISO path |
 | `VM_BOOT` | `c` | Boot device (c=disk, d=cdrom, n=network) |
 | `VM_BOOT_MENU_TIMEOUT` | `0` | Boot menu timeout in ms (0=disabled) |
-| `VM_NETWORKS` | (empty) | Comma-separated host interfaces for TAP passthrough |
+| `VM_NETWORKS` | (empty) | Comma-separated host interfaces for TAP passthrough (waits up to 30s for interfaces to appear, useful for containerlab) |
 | `QEMU_EXTRA_ARGS` | (empty) | Additional QEMU arguments |
 | `DEBUG` | `false` | Enable debug output |
 
@@ -253,6 +279,7 @@ internal/
   machine/                     # VM state management
   redfish/                     # Redfish HTTP server (gorilla/mux)
   ipmi/                        # IPMI UDP server + VM chardev server (RMCP/RMCP+)
+  novnc/                       # noVNC static files (embedded) + WebSocket-to-VNC proxy
   bmc/                         # BMC configuration state (users, LAN, channels)
   config/                      # Environment variable config
 docker/
@@ -300,6 +327,7 @@ QEMU VM を Redfish API (HTTPS) と IPMI over LAN (UDP) の両方で制御する
 - **Redfish API** - ServiceRoot, Systems, Managers, VirtualMedia, Chassis (gofish 互換)
 - **IPMI over LAN** - RMCP/RMCP+, RAKP HMAC-SHA1 認証, AES-CBC-128 暗号化
 - **VM IPMI（イン・バンド）** - QEMU `ipmi-bmc-extern` KCS インターフェースによるゲスト OS IPMI（MaaS コミッショニング対応）
+- **noVNC** - Redfish HTTP ポートでブラウザから VNC コンソールにアクセス（追加ポート不要）
 - **QMP 制御** - 電源操作、ブートデバイス変更、VirtualMedia マウント
 - **互換性** - MAAS, Tinkerbell/Rufio, Cybozu placemat
 
@@ -402,6 +430,26 @@ ipmitool -I lanplus -H localhost -U admin -P password chassis power off
 ipmitool -I lanplus -H localhost -U admin -P password chassis bootdev pxe
 ```
 
+### noVNC
+
+Redfish API と同じ HTTP ポートでブラウザベースの VNC コンソールを利用できます。追加ポートや VNC ビューアソフトウェアは不要です。
+
+ブラウザで以下の URL を開きます:
+
+```
+http://localhost/novnc/
+```
+
+Basic 認証のプロンプトが表示されます（Redfish と同じ認証情報）。認証後、noVNC UI が表示され、QEMU の VNC サーバーに自動的に接続します。
+
+| URL | 説明 |
+|-----|------|
+| `GET /novnc/` | noVNC UI へリダイレクト (`/novnc/vnc.html`) |
+| `GET /novnc/vnc.html` | noVNC Web UI |
+| `GET /websockify` | WebSocket-to-VNC プロキシ（noVNC が内部で使用） |
+
+VNC の接続先アドレスは `VNC_ADDR` 環境変数で制御します（デフォルト: `localhost:5900`）。
+
 ### VM IPMI（イン・バンド）
 
 qemu-bmc は QEMU の `ipmi-bmc-extern` デバイスを使ったゲスト OS からのイン・バンド IPMI をサポートします。MaaS コミッショニングスクリプトが VM 内から BMC ユーザー、LAN 設定、チャネルアクセスを設定できます。イン・バンドで作成されたユーザーは、アウト・オブ・バンド IPMI および Redfish 認証でも自動的に利用可能です。
@@ -449,6 +497,9 @@ ipmitool user enable 3
 | POST | `.../VirtualMedia.EjectMedia` | メディア取り出し |
 | GET | `/redfish/v1/Chassis` | シャーシコレクション |
 | GET | `/redfish/v1/Chassis/1` | シャーシリソース |
+| GET | `/novnc/` | noVNC UI へリダイレクト |
+| GET | `/novnc/vnc.html` | ブラウザ VNC コンソール |
+| GET | `/websockify` | WebSocket-to-VNC プロキシ |
 
 ## IPMI コマンド
 
@@ -476,6 +527,8 @@ ipmitool user enable 3
 | `TLS_KEY` | (自動) | TLS 鍵パス |
 | `VM_BOOT_MODE` | `bios` | デフォルトブートモード (`bios` または `uefi`) |
 | `VM_IPMI_ADDR` | (空、無効) | VM IPMI chardev リッスンアドレス (例: `:9002`) |
+| `VNC_ADDR` | `localhost:5900` | noVNC プロキシが接続する QEMU VNC アドレス |
+| `POWER_ON_AT_START` | `false` | 起動時に VM を自動的に電源オンにする（MAAS を使わない構成で有用） |
 
 ### コンテナ設定
 
@@ -491,7 +544,7 @@ ipmitool user enable 3
 | `VM_CDROM` | (空) | CD-ROM ISO パス |
 | `VM_BOOT` | `c` | ブートデバイス (c=ディスク, d=CD-ROM, n=ネットワーク) |
 | `VM_BOOT_MENU_TIMEOUT` | `0` | ブートメニュータイムアウト (ms、0=無効) |
-| `VM_NETWORKS` | (空) | TAP パススルー用ホストインターフェース (カンマ区切り) |
+| `VM_NETWORKS` | (空) | TAP パススルー用ホストインターフェース (カンマ区切り、インターフェース出現まで最大30秒待機、containerlab 対応) |
 | `QEMU_EXTRA_ARGS` | (空) | 追加 QEMU 引数 |
 | `DEBUG` | `false` | デバッグ出力を有効化 |
 
@@ -524,6 +577,7 @@ internal/
   machine/                     # VM 状態管理
   redfish/                     # Redfish HTTP サーバー (gorilla/mux)
   ipmi/                        # IPMI UDP サーバー + VM chardev サーバー (RMCP/RMCP+)
+  novnc/                       # noVNC 静的ファイル（埋め込み）+ WebSocket-to-VNC プロキシ
   bmc/                         # BMC 設定状態 (ユーザー、LAN、チャネル)
   config/                      # 環境変数設定
 docker/

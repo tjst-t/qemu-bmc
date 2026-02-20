@@ -102,7 +102,7 @@ func (m *mockMachine) LastInsertedMedia() string {
 
 func TestServiceRoot(t *testing.T) {
 	mock := newMockMachine(qmp.StatusRunning)
-	srv := NewServer(mock, "", "")
+	srv := NewServer(mock, "", "", "")
 
 	req := httptest.NewRequest("GET", "/redfish/v1", nil)
 	w := httptest.NewRecorder()

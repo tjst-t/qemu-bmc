@@ -15,7 +15,7 @@ import (
 
 func TestGetSystems(t *testing.T) {
 	mock := newMockMachine(qmp.StatusRunning)
-	srv := NewServer(mock, "", "")
+	srv := NewServer(mock, "", "", "")
 
 	req := httptest.NewRequest("GET", "/redfish/v1/Systems", nil)
 	w := httptest.NewRecorder()
@@ -46,7 +46,7 @@ func TestGetSystem_PowerState(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			mock := newMockMachine(tt.qmpStatus)
-			srv := NewServer(mock, "", "")
+			srv := NewServer(mock, "", "", "")
 
 			req := httptest.NewRequest("GET", "/redfish/v1/Systems/1", nil)
 			w := httptest.NewRecorder()
@@ -65,7 +65,7 @@ func TestGetSystem_PowerState(t *testing.T) {
 
 func TestGetSystem_ETag(t *testing.T) {
 	mock := newMockMachine(qmp.StatusRunning)
-	srv := NewServer(mock, "", "")
+	srv := NewServer(mock, "", "", "")
 
 	req := httptest.NewRequest("GET", "/redfish/v1/Systems/1", nil)
 	w := httptest.NewRecorder()
@@ -91,7 +91,7 @@ func TestGetSystem_BootOverride(t *testing.T) {
 		Target:  "Pxe",
 		Mode:    "UEFI",
 	}
-	srv := NewServer(mock, "", "")
+	srv := NewServer(mock, "", "", "")
 
 	req := httptest.NewRequest("GET", "/redfish/v1/Systems/1", nil)
 	w := httptest.NewRecorder()
@@ -114,7 +114,7 @@ func TestGetSystem_BootOverride(t *testing.T) {
 func TestPatchBootDevice(t *testing.T) {
 	t.Run("PXE Once returns 200", func(t *testing.T) {
 		mock := newMockMachine(qmp.StatusRunning)
-		srv := NewServer(mock, "", "")
+		srv := NewServer(mock, "", "", "")
 
 		body := `{"Boot":{"BootSourceOverrideTarget":"Pxe","BootSourceOverrideEnabled":"Once"}}`
 		req := httptest.NewRequest("PATCH", "/redfish/v1/Systems/1", strings.NewReader(body))
@@ -138,7 +138,7 @@ func TestPatchBootDevice(t *testing.T) {
 
 	t.Run("ETag mismatch returns 412", func(t *testing.T) {
 		mock := newMockMachine(qmp.StatusRunning)
-		srv := NewServer(mock, "", "")
+		srv := NewServer(mock, "", "", "")
 
 		body := `{"Boot":{"BootSourceOverrideTarget":"Pxe","BootSourceOverrideEnabled":"Once"}}`
 		req := httptest.NewRequest("PATCH", "/redfish/v1/Systems/1", strings.NewReader(body))
@@ -152,7 +152,7 @@ func TestPatchBootDevice(t *testing.T) {
 
 	t.Run("No ETag returns 200", func(t *testing.T) {
 		mock := newMockMachine(qmp.StatusRunning)
-		srv := NewServer(mock, "", "")
+		srv := NewServer(mock, "", "", "")
 
 		body := `{"Boot":{"BootSourceOverrideTarget":"Hdd","BootSourceOverrideEnabled":"Continuous"}}`
 		req := httptest.NewRequest("PATCH", "/redfish/v1/Systems/1", strings.NewReader(body))

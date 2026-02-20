@@ -14,7 +14,7 @@ import (
 
 func TestGetManagerCollection(t *testing.T) {
 	mock := newMockMachine(qmp.StatusRunning)
-	srv := NewServer(mock, "", "")
+	srv := NewServer(mock, "", "", "")
 
 	req := httptest.NewRequest("GET", "/redfish/v1/Managers", nil)
 	w := httptest.NewRecorder()
@@ -30,7 +30,7 @@ func TestGetManagerCollection(t *testing.T) {
 
 func TestGetManager(t *testing.T) {
 	mock := newMockMachine(qmp.StatusRunning)
-	srv := NewServer(mock, "", "")
+	srv := NewServer(mock, "", "", "")
 
 	req := httptest.NewRequest("GET", "/redfish/v1/Managers/1", nil)
 	w := httptest.NewRecorder()
@@ -46,7 +46,7 @@ func TestGetManager(t *testing.T) {
 
 func TestGetVirtualMediaCollection(t *testing.T) {
 	mock := newMockMachine(qmp.StatusRunning)
-	srv := NewServer(mock, "", "")
+	srv := NewServer(mock, "", "", "")
 
 	req := httptest.NewRequest("GET", "/redfish/v1/Managers/1/VirtualMedia", nil)
 	w := httptest.NewRecorder()
@@ -61,7 +61,7 @@ func TestGetVirtualMediaCollection(t *testing.T) {
 
 func TestGetVirtualMedia_NotInserted(t *testing.T) {
 	mock := newMockMachine(qmp.StatusRunning)
-	srv := NewServer(mock, "", "")
+	srv := NewServer(mock, "", "", "")
 
 	req := httptest.NewRequest("GET", "/redfish/v1/Managers/1/VirtualMedia/CD1", nil)
 	w := httptest.NewRecorder()
@@ -77,7 +77,7 @@ func TestGetVirtualMedia_NotInserted(t *testing.T) {
 
 func TestInsertVirtualMedia(t *testing.T) {
 	mock := newMockMachine(qmp.StatusRunning)
-	srv := NewServer(mock, "", "")
+	srv := NewServer(mock, "", "", "")
 
 	body := `{"Image": "http://example.com/boot.iso", "Inserted": true}`
 	req := httptest.NewRequest("POST",
@@ -93,7 +93,7 @@ func TestInsertVirtualMedia(t *testing.T) {
 
 func TestInsertVirtualMedia_EmptyImage(t *testing.T) {
 	mock := newMockMachine(qmp.StatusRunning)
-	srv := NewServer(mock, "", "")
+	srv := NewServer(mock, "", "", "")
 
 	body := `{"Image": "", "Inserted": true}`
 	req := httptest.NewRequest("POST",
@@ -109,7 +109,7 @@ func TestInsertVirtualMedia_EmptyImage(t *testing.T) {
 func TestEjectVirtualMedia(t *testing.T) {
 	mock := newMockMachine(qmp.StatusRunning)
 	mock.lastMedia = "http://example.com/boot.iso"
-	srv := NewServer(mock, "", "")
+	srv := NewServer(mock, "", "", "")
 
 	req := httptest.NewRequest("POST",
 		"/redfish/v1/Managers/1/VirtualMedia/CD1/Actions/VirtualMedia.EjectMedia",
@@ -122,7 +122,7 @@ func TestEjectVirtualMedia(t *testing.T) {
 
 func TestVirtualMedia_InsertThenGet(t *testing.T) {
 	mock := newMockMachine(qmp.StatusRunning)
-	srv := NewServer(mock, "", "")
+	srv := NewServer(mock, "", "", "")
 
 	// Insert
 	body := `{"Image": "http://example.com/boot.iso", "Inserted": true}`

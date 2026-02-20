@@ -29,7 +29,7 @@ func TestResetAction(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			mock := newMockMachine(qmp.StatusRunning)
-			srv := NewServer(mock, "", "")
+			srv := NewServer(mock, "", "", "")
 
 			body := `{"ResetType":"` + tt.resetType + `"}`
 			req := httptest.NewRequest("POST", "/redfish/v1/Systems/1/Actions/ComputerSystem.Reset", strings.NewReader(body))

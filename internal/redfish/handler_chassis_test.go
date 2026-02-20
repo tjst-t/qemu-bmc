@@ -13,7 +13,7 @@ import (
 
 func TestGetChassisCollection(t *testing.T) {
 	mock := newMockMachine(qmp.StatusRunning)
-	srv := NewServer(mock, "", "")
+	srv := NewServer(mock, "", "", "")
 
 	req := httptest.NewRequest("GET", "/redfish/v1/Chassis", nil)
 	w := httptest.NewRecorder()
@@ -29,7 +29,7 @@ func TestGetChassisCollection(t *testing.T) {
 
 func TestGetChassis(t *testing.T) {
 	mock := newMockMachine(qmp.StatusRunning)
-	srv := NewServer(mock, "", "")
+	srv := NewServer(mock, "", "", "")
 
 	req := httptest.NewRequest("GET", "/redfish/v1/Chassis/1", nil)
 	w := httptest.NewRecorder()

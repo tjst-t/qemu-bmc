@@ -3,3 +3,7 @@
 
 # Test coverage
 coverage.out
+
+# noVNC static files (downloaded at build time via `make download-novnc`)
+/internal/novnc/static/*
+!/internal/novnc/static/.gitkeep

@@ -1,0 +1,2 @@
+# noVNC static files are downloaded at build time via `make download-novnc` or Dockerfile.
+# Run: make download-novnc
