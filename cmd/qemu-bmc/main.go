@@ -117,14 +117,16 @@ func main() {
 				log.Fatalf("Redfish server error: %v", err)
 			}
 		} else {
-			// Generate self-signed cert for development
 			log.Println("No TLS cert/key provided, generating self-signed certificate")
-			tlsConfig := &tls.Config{
-				MinVersion: tls.VersionTLS12,
+			cert, err := generateSelfSignedCert()
+			if err != nil {
+				log.Fatalf("Failed to generate self-signed certificate: %v", err)
 			}
-			// Fall back to HTTP for development
-			httpServer.TLSConfig = tlsConfig
-			if err := httpServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			httpServer.TLSConfig = &tls.Config{
+				MinVersion:   tls.VersionTLS12,
+				Certificates: []tls.Certificate{cert},
+			}
+			if err := httpServer.ListenAndServeTLS("", ""); err != nil && err != http.ErrServerClosed {
 				log.Fatalf("Redfish server error: %v", err)
 			}
 		}
