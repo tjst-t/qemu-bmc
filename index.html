@@ -1,0 +1,1266 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>qemu-bmc — Virtual BMC for QEMU</title>
+<meta name="description" content="Go single binary that controls QEMU VMs via Redfish API and IPMI over LAN. Drop-in virtual BMC for bare-metal provisioning workflows.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:ital,wght@0,300;0,400;0,500;0,600;0,700;1,400&family=Space+Grotesk:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+<style>
+*, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+
+:root {
+  --phosphor: #33ff88;
+  --phosphor-dim: #1a9952;
+  --phosphor-bright: #66ffaa;
+  --phosphor-glow: rgba(51, 255, 136, 0.15);
+  --amber: #ffaa33;
+  --amber-dim: #995500;
+  --red: #ff4444;
+  --cyan: #44ddff;
+  --bg-deep: #0a0e0c;
+  --bg: #0d1210;
+  --bg-card: #111916;
+  --bg-card-hover: #162019;
+  --border: #1a2e22;
+  --border-bright: #2a4e38;
+  --text: #c8d6cc;
+  --text-dim: #667a6e;
+  --mono: 'IBM Plex Mono', 'Menlo', monospace;
+  --sans: 'Space Grotesk', system-ui, sans-serif;
+}
+
+html { scroll-behavior: smooth; }
+
+body {
+  background: var(--bg-deep);
+  color: var(--text);
+  font-family: var(--mono);
+  font-size: 15px;
+  line-height: 1.7;
+  overflow-x: hidden;
+}
+
+/* ═══ CRT Scan Lines Overlay ═══ */
+body::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  background: repeating-linear-gradient(
+    0deg,
+    transparent,
+    transparent 2px,
+    rgba(0, 0, 0, 0.08) 2px,
+    rgba(0, 0, 0, 0.08) 4px
+  );
+  pointer-events: none;
+  z-index: 9999;
+}
+
+/* ═══ Noise texture ═══ */
+body::after {
+  content: '';
+  position: fixed;
+  inset: 0;
+  opacity: 0.025;
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  pointer-events: none;
+  z-index: 9998;
+}
+
+::selection {
+  background: var(--phosphor);
+  color: var(--bg-deep);
+}
+
+a { color: var(--phosphor); text-decoration: none; transition: all 0.2s; }
+a:hover { color: var(--phosphor-bright); text-shadow: 0 0 8px var(--phosphor-glow); }
+
+/* ═══ Layout ═══ */
+.container {
+  max-width: 1100px;
+  margin: 0 auto;
+  padding: 0 24px;
+}
+
+/* ═══ Navigation ═══ */
+nav {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 100;
+  padding: 16px 0;
+  background: rgba(10, 14, 12, 0.85);
+  backdrop-filter: blur(12px);
+  border-bottom: 1px solid var(--border);
+}
+
+nav .container {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.nav-logo {
+  font-family: var(--mono);
+  font-weight: 700;
+  font-size: 16px;
+  color: var(--phosphor);
+  letter-spacing: -0.5px;
+}
+
+.nav-logo span { color: var(--text-dim); font-weight: 400; }
+
+.nav-links { display: flex; gap: 28px; align-items: center; }
+.nav-links a {
+  font-size: 13px;
+  color: var(--text-dim);
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+}
+.nav-links a:hover { color: var(--phosphor); }
+
+.nav-gh {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 14px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-size: 13px;
+  color: var(--text) !important;
+  transition: all 0.25s;
+}
+.nav-gh:hover {
+  border-color: var(--phosphor-dim);
+  background: rgba(51, 255, 136, 0.05);
+  color: var(--phosphor) !important;
+}
+.nav-gh svg { width: 16px; height: 16px; fill: currentColor; }
+
+/* ═══ Hero ═══ */
+.hero {
+  padding: 160px 0 100px;
+  position: relative;
+}
+
+.hero::before {
+  content: '';
+  position: absolute;
+  top: 60px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 600px;
+  height: 600px;
+  background: radial-gradient(circle, rgba(51, 255, 136, 0.06) 0%, transparent 70%);
+  pointer-events: none;
+}
+
+.hero-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 16px;
+  border: 1px solid var(--border);
+  border-radius: 100px;
+  font-size: 12px;
+  color: var(--phosphor-dim);
+  margin-bottom: 32px;
+  animation: fadeInUp 0.6s ease both;
+}
+
+.hero-badge::before {
+  content: '';
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--phosphor);
+  box-shadow: 0 0 8px var(--phosphor);
+  animation: pulse-dot 2s ease infinite;
+}
+
+@keyframes pulse-dot {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}
+
+.hero h1 {
+  font-family: var(--sans);
+  font-size: clamp(42px, 7vw, 80px);
+  font-weight: 700;
+  line-height: 1.05;
+  letter-spacing: -2px;
+  color: #fff;
+  margin-bottom: 24px;
+  animation: fadeInUp 0.6s ease 0.1s both;
+}
+
+.hero h1 .accent {
+  background: linear-gradient(135deg, var(--phosphor), var(--cyan));
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+.hero-sub {
+  font-size: 17px;
+  color: var(--text-dim);
+  max-width: 560px;
+  line-height: 1.8;
+  margin-bottom: 40px;
+  animation: fadeInUp 0.6s ease 0.2s both;
+}
+
+.hero-sub strong { color: var(--text); font-weight: 500; }
+
+.hero-actions {
+  display: flex;
+  gap: 16px;
+  flex-wrap: wrap;
+  animation: fadeInUp 0.6s ease 0.3s both;
+}
+
+.btn-primary {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 28px;
+  background: var(--phosphor);
+  color: var(--bg-deep);
+  font-family: var(--mono);
+  font-size: 14px;
+  font-weight: 600;
+  border-radius: 8px;
+  transition: all 0.25s;
+  border: none;
+  cursor: pointer;
+}
+
+.btn-primary:hover {
+  background: var(--phosphor-bright);
+  color: var(--bg-deep);
+  transform: translateY(-1px);
+  box-shadow: 0 4px 20px rgba(51, 255, 136, 0.3);
+}
+
+.btn-secondary {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 28px;
+  border: 1px solid var(--border-bright);
+  color: var(--text);
+  font-family: var(--mono);
+  font-size: 14px;
+  font-weight: 500;
+  border-radius: 8px;
+  transition: all 0.25s;
+}
+
+.btn-secondary:hover {
+  border-color: var(--phosphor-dim);
+  background: rgba(51, 255, 136, 0.05);
+  color: var(--phosphor);
+}
+
+.btn-secondary svg, .btn-primary svg { width: 16px; height: 16px; }
+
+@keyframes fadeInUp {
+  from { opacity: 0; transform: translateY(16px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+/* ═══ Protocols Bar ═══ */
+.protocols {
+  padding: 40px 0;
+  border-top: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+  animation: fadeInUp 0.6s ease 0.4s both;
+}
+
+.protocols-inner {
+  display: flex;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 12px 32px;
+}
+
+.proto-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--text-dim);
+  letter-spacing: 0.5px;
+}
+
+.proto-chip .dot {
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: var(--phosphor-dim);
+}
+
+.proto-chip code {
+  font-family: var(--mono);
+  color: var(--phosphor-dim);
+  font-size: 12px;
+}
+
+/* ═══ Section Shared ═══ */
+section { padding: 100px 0; }
+
+.section-label {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 3px;
+  color: var(--phosphor-dim);
+  margin-bottom: 16px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.section-label::before {
+  content: '//';
+  color: var(--text-dim);
+}
+
+.section-title {
+  font-family: var(--sans);
+  font-size: clamp(28px, 4vw, 40px);
+  font-weight: 600;
+  color: #fff;
+  letter-spacing: -1px;
+  margin-bottom: 16px;
+}
+
+.section-desc {
+  color: var(--text-dim);
+  max-width: 520px;
+  margin-bottom: 48px;
+  font-size: 15px;
+}
+
+/* ═══ Features Grid ═══ */
+.features-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(310px, 1fr));
+  gap: 16px;
+}
+
+.feature-card {
+  padding: 28px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  transition: all 0.3s;
+  position: relative;
+  overflow: hidden;
+}
+
+.feature-card::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, var(--phosphor-dim), transparent);
+  opacity: 0;
+  transition: opacity 0.3s;
+}
+
+.feature-card:hover {
+  border-color: var(--border-bright);
+  background: var(--bg-card-hover);
+  transform: translateY(-2px);
+}
+
+.feature-card:hover::before { opacity: 1; }
+
+.feature-icon {
+  width: 40px;
+  height: 40px;
+  border-radius: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: 18px;
+  font-size: 18px;
+  background: rgba(51, 255, 136, 0.08);
+  border: 1px solid rgba(51, 255, 136, 0.15);
+  color: var(--phosphor);
+}
+
+.feature-icon.amber {
+  background: rgba(255, 170, 51, 0.08);
+  border-color: rgba(255, 170, 51, 0.15);
+  color: var(--amber);
+}
+
+.feature-icon.cyan {
+  background: rgba(68, 221, 255, 0.08);
+  border-color: rgba(68, 221, 255, 0.15);
+  color: var(--cyan);
+}
+
+.feature-card h3 {
+  font-family: var(--sans);
+  font-size: 17px;
+  font-weight: 600;
+  color: #fff;
+  margin-bottom: 8px;
+}
+
+.feature-card p {
+  font-size: 13.5px;
+  color: var(--text-dim);
+  line-height: 1.7;
+}
+
+.feature-tag {
+  display: inline-block;
+  margin-top: 14px;
+  font-size: 11px;
+  padding: 3px 10px;
+  border-radius: 4px;
+  background: rgba(51, 255, 136, 0.06);
+  border: 1px solid rgba(51, 255, 136, 0.12);
+  color: var(--phosphor-dim);
+}
+
+.feature-tag.amber {
+  background: rgba(255, 170, 51, 0.06);
+  border-color: rgba(255, 170, 51, 0.12);
+  color: var(--amber-dim);
+}
+
+.feature-tag.cyan {
+  background: rgba(68, 221, 255, 0.06);
+  border-color: rgba(68, 221, 255, 0.12);
+  color: #3399aa;
+}
+
+/* ═══ Architecture ═══ */
+.arch-section { background: var(--bg); }
+
+.arch-container {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 48px;
+  position: relative;
+  overflow: hidden;
+}
+
+.arch-container::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, var(--phosphor-dim), transparent);
+}
+
+.arch-diagram {
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  gap: 32px;
+  align-items: center;
+}
+
+.arch-box {
+  padding: 24px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--bg-deep);
+}
+
+.arch-box h4 {
+  font-family: var(--sans);
+  font-size: 16px;
+  font-weight: 600;
+  color: #fff;
+  margin-bottom: 16px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.arch-box h4 .tag {
+  font-family: var(--mono);
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 4px;
+  background: rgba(51, 255, 136, 0.1);
+  color: var(--phosphor-dim);
+  font-weight: 400;
+}
+
+.arch-port {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 0;
+  font-size: 13px;
+  color: var(--text-dim);
+}
+
+.arch-port code {
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--phosphor);
+  background: rgba(51, 255, 136, 0.06);
+  padding: 2px 8px;
+  border-radius: 4px;
+}
+
+.arch-port .label { color: var(--text); }
+
+.arch-arrows {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  align-items: center;
+  color: var(--phosphor-dim);
+  font-size: 13px;
+}
+
+.arch-arrow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  white-space: nowrap;
+}
+
+.arch-arrow .line {
+  width: 40px;
+  height: 1px;
+  background: var(--border-bright);
+  position: relative;
+}
+
+.arch-arrow .line::after {
+  content: '';
+  position: absolute;
+  right: -1px;
+  top: -3px;
+  border: 3px solid transparent;
+  border-left-color: var(--border-bright);
+}
+
+.arch-arrow.reverse .line::after {
+  right: auto;
+  left: -1px;
+  border-left-color: transparent;
+  border-right-color: var(--border-bright);
+}
+
+/* ═══ ASCII Architecture (mobile fallback & personality) ═══ */
+.arch-ascii {
+  background: var(--bg-deep);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 32px;
+  overflow-x: auto;
+}
+
+.arch-ascii pre {
+  font-family: var(--mono);
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--phosphor-dim);
+  white-space: pre;
+}
+
+.arch-ascii pre .hl { color: var(--phosphor); }
+.arch-ascii pre .dim { color: var(--text-dim); }
+.arch-ascii pre .amber { color: var(--amber); }
+.arch-ascii pre .cyan { color: var(--cyan); }
+
+/* ═══ Quick Start ═══ */
+.quickstart-window {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  overflow: hidden;
+}
+
+.window-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 16px;
+  background: rgba(0, 0, 0, 0.3);
+  border-bottom: 1px solid var(--border);
+}
+
+.window-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  border: 1.5px solid var(--text-dim);
+  opacity: 0.4;
+}
+
+.window-title {
+  flex: 1;
+  text-align: center;
+  font-size: 12px;
+  color: var(--text-dim);
+  margin-right: 36px;
+}
+
+.quickstart-code {
+  padding: 24px 28px;
+  overflow-x: auto;
+}
+
+.quickstart-code pre {
+  font-family: var(--mono);
+  font-size: 13.5px;
+  line-height: 1.9;
+  color: var(--text);
+}
+
+.quickstart-code .comment { color: var(--text-dim); }
+.quickstart-code .cmd { color: var(--phosphor); }
+.quickstart-code .flag { color: var(--amber); }
+.quickstart-code .string { color: var(--cyan); }
+.quickstart-code .prompt { color: var(--text-dim); user-select: none; }
+
+/* ═══ Compatibility ═══ */
+.compat-section { border-top: 1px solid var(--border); }
+
+.compat-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 16px;
+}
+
+.compat-card {
+  padding: 24px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--bg-card);
+  text-align: center;
+  transition: all 0.3s;
+}
+
+.compat-card:hover {
+  border-color: var(--border-bright);
+  transform: translateY(-2px);
+}
+
+.compat-card h4 {
+  font-family: var(--sans);
+  font-size: 16px;
+  font-weight: 600;
+  color: #fff;
+  margin-bottom: 6px;
+}
+
+.compat-card p {
+  font-size: 12px;
+  color: var(--text-dim);
+}
+
+.compat-card .compat-icon {
+  font-size: 28px;
+  margin-bottom: 12px;
+  display: block;
+}
+
+/* ═══ Endpoints Table ═══ */
+.endpoints-section {
+  border-top: 1px solid var(--border);
+  background: var(--bg);
+}
+
+.endpoints-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 24px;
+}
+
+.endpoint-group h3 {
+  font-family: var(--sans);
+  font-size: 18px;
+  font-weight: 600;
+  color: #fff;
+  margin-bottom: 20px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.endpoint-group h3 .count {
+  font-family: var(--mono);
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 4px;
+  background: rgba(51, 255, 136, 0.08);
+  color: var(--phosphor-dim);
+  font-weight: 400;
+}
+
+.endpoint-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.endpoint-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
+  border-radius: 8px;
+  background: var(--bg-card);
+  border: 1px solid transparent;
+  transition: all 0.2s;
+  font-size: 13px;
+}
+
+.endpoint-item:hover {
+  border-color: var(--border);
+  background: var(--bg-card-hover);
+}
+
+.method {
+  font-family: var(--mono);
+  font-size: 11px;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 4px;
+  min-width: 52px;
+  text-align: center;
+}
+
+.method-get { background: rgba(51, 255, 136, 0.1); color: var(--phosphor); }
+.method-post { background: rgba(255, 170, 51, 0.1); color: var(--amber); }
+.method-patch { background: rgba(68, 221, 255, 0.1); color: var(--cyan); }
+
+.endpoint-path {
+  font-family: var(--mono);
+  color: var(--text);
+  font-size: 12px;
+  flex: 1;
+}
+
+.endpoint-desc {
+  color: var(--text-dim);
+  font-size: 12px;
+}
+
+/* ═══ CTA ═══ */
+.cta-section {
+  padding: 120px 0;
+  text-align: center;
+  position: relative;
+}
+
+.cta-section::before {
+  content: '';
+  position: absolute;
+  bottom: 0;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 800px;
+  height: 400px;
+  background: radial-gradient(ellipse, rgba(51, 255, 136, 0.04) 0%, transparent 70%);
+  pointer-events: none;
+}
+
+.cta-title {
+  font-family: var(--sans);
+  font-size: clamp(28px, 4vw, 44px);
+  font-weight: 700;
+  color: #fff;
+  letter-spacing: -1px;
+  margin-bottom: 16px;
+}
+
+.cta-desc {
+  color: var(--text-dim);
+  max-width: 480px;
+  margin: 0 auto 36px;
+  font-size: 15px;
+}
+
+.cta-actions {
+  display: flex;
+  justify-content: center;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.cta-install {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 20px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  font-family: var(--mono);
+  font-size: 14px;
+  color: var(--text);
+  cursor: pointer;
+  transition: all 0.25s;
+  position: relative;
+}
+
+.cta-install:hover {
+  border-color: var(--border-bright);
+}
+
+.cta-install .prompt-char { color: var(--phosphor); user-select: none; }
+
+.cta-install .copy-hint {
+  font-size: 11px;
+  color: var(--text-dim);
+  padding: 2px 8px;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.04);
+  transition: all 0.2s;
+}
+
+.cta-install:hover .copy-hint { color: var(--phosphor-dim); }
+.cta-install.copied .copy-hint { color: var(--phosphor); }
+
+/* ═══ Footer ═══ */
+footer {
+  padding: 40px 0;
+  border-top: 1px solid var(--border);
+}
+
+footer .container {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.footer-left {
+  font-size: 13px;
+  color: var(--text-dim);
+}
+
+.footer-links {
+  display: flex;
+  gap: 20px;
+}
+
+.footer-links a {
+  font-size: 13px;
+  color: var(--text-dim);
+}
+
+/* ═══ Scroll Animations ═══ */
+.reveal {
+  opacity: 0;
+  transform: translateY(20px);
+  transition: opacity 0.6s ease, transform 0.6s ease;
+}
+
+.reveal.visible {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.reveal-delay-1 { transition-delay: 0.1s; }
+.reveal-delay-2 { transition-delay: 0.2s; }
+.reveal-delay-3 { transition-delay: 0.3s; }
+.reveal-delay-4 { transition-delay: 0.4s; }
+
+/* ═══ Responsive ═══ */
+@media (max-width: 768px) {
+  .nav-links a:not(.nav-gh) { display: none; }
+
+  .hero { padding: 120px 0 60px; }
+  .hero h1 { letter-spacing: -1px; }
+
+  section { padding: 60px 0; }
+
+  .features-grid { grid-template-columns: 1fr; }
+
+  .arch-diagram { display: none; }
+
+  .endpoints-grid { grid-template-columns: 1fr; }
+
+  .arch-container { padding: 24px; }
+
+  footer .container { flex-direction: column; gap: 16px; text-align: center; }
+}
+
+@media (min-width: 769px) {
+  .arch-ascii { display: none; }
+}
+
+/* ═══ Blinking cursor ═══ */
+@keyframes blink {
+  0%, 50% { opacity: 1; }
+  51%, 100% { opacity: 0; }
+}
+
+.cursor {
+  display: inline-block;
+  width: 8px;
+  height: 16px;
+  background: var(--phosphor);
+  animation: blink 1s step-end infinite;
+  vertical-align: text-bottom;
+  margin-left: 2px;
+}
+</style>
+</head>
+<body>
+
+<!-- Navigation -->
+<nav>
+  <div class="container">
+    <div class="nav-logo">qemu-bmc <span>v1.0</span></div>
+    <div class="nav-links">
+      <a href="#features">Features</a>
+      <a href="#architecture">Architecture</a>
+      <a href="#quickstart">Quick Start</a>
+      <a href="https://github.com/tjst-t/qemu-bmc" class="nav-gh">
+        <svg viewBox="0 0 16 16"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>
+        GitHub
+      </a>
+    </div>
+  </div>
+</nav>
+
+<!-- Hero -->
+<header class="hero">
+  <div class="container">
+    <div class="hero-badge">OPEN SOURCE VIRTUAL BMC</div>
+    <h1>
+      Control QEMU VMs<br>
+      like <span class="accent">real hardware</span>
+    </h1>
+    <p class="hero-sub">
+      A <strong>Go single binary</strong> that exposes <strong>Redfish API</strong> and
+      <strong>IPMI over LAN</strong> for QEMU virtual machines. Drop-in replacement
+      for physical BMCs in bare-metal provisioning workflows.
+    </p>
+    <div class="hero-actions">
+      <a href="#quickstart" class="btn-primary">
+        Get Started
+        <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 8h10M9 4l4 4-4 4"/></svg>
+      </a>
+      <a href="https://github.com/tjst-t/qemu-bmc" class="btn-secondary">
+        <svg viewBox="0 0 16 16" fill="currentColor"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>
+        View on GitHub
+      </a>
+    </div>
+  </div>
+</header>
+
+<!-- Protocol Bar -->
+<div class="protocols">
+  <div class="container">
+    <div class="protocols-inner">
+      <span class="proto-chip"><span class="dot"></span>Redfish <code>:443/tcp</code></span>
+      <span class="proto-chip"><span class="dot"></span>IPMI <code>:623/udp</code></span>
+      <span class="proto-chip"><span class="dot"></span>RMCP+ <code>AES-CBC-128</code></span>
+      <span class="proto-chip"><span class="dot"></span>noVNC <code>WebSocket</code></span>
+      <span class="proto-chip"><span class="dot"></span>QMP <code>UNIX socket</code></span>
+    </div>
+  </div>
+</div>
+
+<!-- Features -->
+<section id="features">
+  <div class="container">
+    <div class="section-label reveal">Features</div>
+    <h2 class="section-title reveal">Everything a BMC should do</h2>
+    <p class="section-desc reveal">Full-featured virtual BMC packed into a single binary. No shell scripts, no supervisord, no extra daemons.</p>
+    <div class="features-grid">
+      <div class="feature-card reveal reveal-delay-1">
+        <div class="feature-icon">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 01-9 9m9-9a9 9 0 00-9-9m9 9H3m9 9a9 9 0 01-9-9m9 9c1.657 0 3-4.03 3-9s-1.343-9-3-9m0 18c-1.657 0-3-4.03-3-9s1.343-9 3-9m-9 9a9 9 0 019-9"/></svg>
+        </div>
+        <h3>Redfish API</h3>
+        <p>Full DMTF Redfish implementation — Systems, Managers, VirtualMedia, Chassis. Compatible with gofish client library.</p>
+        <span class="feature-tag">HTTPS :443</span>
+      </div>
+      <div class="feature-card reveal reveal-delay-2">
+        <div class="feature-icon amber">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"/></svg>
+        </div>
+        <h3>IPMI over LAN</h3>
+        <p>RMCP and RMCP+ with RAKP HMAC-SHA1 authentication and AES-CBC-128 confidentiality. Works with ipmitool and FreeIPMI.</p>
+        <span class="feature-tag amber">UDP :623</span>
+      </div>
+      <div class="feature-card reveal reveal-delay-3">
+        <div class="feature-icon cyan">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 3v2m6-2v2M9 19v2m6-2v2M5 9H3m2 6H3m18-6h-2m2 6h-2M7 19h10a2 2 0 002-2V7a2 2 0 00-2-2H7a2 2 0 00-2 2v10a2 2 0 002 2zM9 9h6v6H9V9z"/></svg>
+        </div>
+        <h3>VM IPMI (In-Band)</h3>
+        <p>Guest OS IPMI via QEMU <code>ipmi-bmc-extern</code> KCS interface. MaaS commissioning scripts configure BMC users from inside the VM.</p>
+        <span class="feature-tag cyan">KCS :9002</span>
+      </div>
+      <div class="feature-card reveal reveal-delay-1">
+        <div class="feature-icon">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
+        </div>
+        <h3>noVNC Console</h3>
+        <p>Browser-based VNC console served on the same HTTPS port. No extra VNC viewer software or additional ports needed.</p>
+        <span class="feature-tag">/novnc/</span>
+      </div>
+      <div class="feature-card reveal reveal-delay-2">
+        <div class="feature-icon amber">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
+        </div>
+        <h3>QMP Control</h3>
+        <p>Direct QEMU Machine Protocol integration for power operations, boot device changes, and VirtualMedia management.</p>
+        <span class="feature-tag amber">UNIX socket</span>
+      </div>
+      <div class="feature-card reveal reveal-delay-3">
+        <div class="feature-icon cyan">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 7v10c0 2.21 3.582 4 8 4s8-1.79 8-4V7M4 7c0 2.21 3.582 4 8 4s8-1.79 8-4M4 7c0-2.21 3.582-4 8-4s8 1.79 8 4"/></svg>
+        </div>
+        <h3>Single Binary</h3>
+        <p>One Go binary replaces shell scripts + ipmi_sim + supervisord. Docker image includes QEMU with process management built in.</p>
+        <span class="feature-tag cyan">Go</span>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- Architecture -->
+<section id="architecture" class="arch-section">
+  <div class="container">
+    <div class="section-label reveal">Architecture</div>
+    <h2 class="section-title reveal">Inside the container</h2>
+    <p class="section-desc reveal">qemu-bmc runs alongside QEMU in a single OCI container, communicating over a QMP socket.</p>
+    <div class="arch-container reveal">
+      <!-- Visual diagram for desktop -->
+      <div class="arch-diagram">
+        <div class="arch-box">
+          <h4>qemu-bmc <span class="tag">Go</span></h4>
+          <div class="arch-port"><code>:443/tcp</code> <span class="label">Redfish HTTPS</span></div>
+          <div class="arch-port"><code>:623/udp</code> <span class="label">IPMI over LAN</span></div>
+          <div class="arch-port"><code>:9002/tcp</code> <span class="label">VM IPMI (KCS)</span></div>
+        </div>
+        <div class="arch-arrows">
+          <div class="arch-arrow">
+            <span class="line"></span>
+            <span>QMP</span>
+          </div>
+          <div class="arch-arrow">
+            <span class="line"></span>
+            <span>QMP</span>
+          </div>
+          <div class="arch-arrow reverse">
+            <span>KCS</span>
+            <span class="line"></span>
+          </div>
+        </div>
+        <div class="arch-box">
+          <h4>QEMU <span class="tag">VM</span></h4>
+          <div class="arch-port"><code>qmp.sock</code> <span class="label">Machine Protocol</span></div>
+          <div class="arch-port"><code>:5900</code> <span class="label">VNC Display</span></div>
+          <div class="arch-port"><code>bmc-extern</code> <span class="label">IPMI Device</span></div>
+        </div>
+      </div>
+      <!-- ASCII diagram for mobile -->
+      <div class="arch-ascii">
+<pre><span class="dim">┌──────────────────────────────────────────┐</span>
+<span class="dim">│</span> <span class="hl">OCI Container</span>                            <span class="dim">│</span>
+<span class="dim">│</span>                                          <span class="dim">│</span>
+<span class="dim">│</span>  <span class="dim">┌───────────┐</span>   <span class="dim">┌──────────────────┐</span>   <span class="dim">│</span>
+<span class="dim">│</span>  <span class="dim">│</span> <span class="hl">qemu-bmc</span>  <span class="dim">│</span>   <span class="dim">│</span>      <span class="cyan">QEMU</span>        <span class="dim">│</span>   <span class="dim">│</span>
+<span class="dim">│</span>  <span class="dim">│</span> <span class="dim">(Go)</span>      <span class="dim">│</span>   <span class="dim">│</span>                  <span class="dim">│</span>   <span class="dim">│</span>
+<span class="dim">│</span>  <span class="dim">│</span>           <span class="dim">│</span>   <span class="dim">│</span>                  <span class="dim">│</span>   <span class="dim">│</span>
+<span class="dim">│</span>  <span class="dim">│</span> <span class="hl">:443/tcp</span>  <span class="dim">│</span>   <span class="dim">│</span>                  <span class="dim">│</span>   <span class="dim">│</span>
+<span class="dim">│</span>  <span class="dim">│</span>  Redfish  <span class="dim">├──►│</span>  <span class="amber">QMP Socket</span>      <span class="dim">│</span>   <span class="dim">│</span>
+<span class="dim">│</span>  <span class="dim">│</span>           <span class="dim">│</span>   <span class="dim">│</span>                  <span class="dim">│</span>   <span class="dim">│</span>
+<span class="dim">│</span>  <span class="dim">│</span> <span class="hl">:623/udp</span>  <span class="dim">│</span>   <span class="dim">│</span>                  <span class="dim">│</span>   <span class="dim">│</span>
+<span class="dim">│</span>  <span class="dim">│</span>  IPMI     <span class="dim">├──►│</span>                  <span class="dim">│</span>   <span class="dim">│</span>
+<span class="dim">│</span>  <span class="dim">│</span>           <span class="dim">│</span>   <span class="dim">│</span>                  <span class="dim">│</span>   <span class="dim">│</span>
+<span class="dim">│</span>  <span class="dim">│</span> <span class="hl">:9002/tcp</span> <span class="dim">│</span>   <span class="dim">│</span>  <span class="cyan">ipmi-bmc-extern</span> <span class="dim">│</span>   <span class="dim">│</span>
+<span class="dim">│</span>  <span class="dim">│</span>  VM IPMI  <span class="dim">│◄──┤</span>  <span class="dim">(KCS)</span>          <span class="dim">│</span>   <span class="dim">│</span>
+<span class="dim">│</span>  <span class="dim">└───────────┘</span>   <span class="dim">└──────────────────┘</span>   <span class="dim">│</span>
+<span class="dim">└──────────────────────────────────────────┘</span></pre>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- Quick Start -->
+<section id="quickstart">
+  <div class="container">
+    <div class="section-label reveal">Quick Start</div>
+    <h2 class="section-title reveal">Up and running in 30 seconds</h2>
+    <p class="section-desc reveal">Docker Compose manages both QEMU and qemu-bmc in a single container.</p>
+    <div class="quickstart-window reveal">
+      <div class="window-bar">
+        <div class="window-dot"></div>
+        <div class="window-dot"></div>
+        <div class="window-dot"></div>
+        <div class="window-title">terminal</div>
+      </div>
+      <div class="quickstart-code">
+<pre><span class="comment"># Create VM disk</span>
+<span class="prompt">$ </span><span class="cmd">mkdir</span> <span class="flag">-p</span> vm
+<span class="prompt">$ </span><span class="cmd">qemu-img</span> create <span class="flag">-f</span> qcow2 vm/disk.qcow2 <span class="string">20G</span>
+
+<span class="comment"># Start the container</span>
+<span class="prompt">$ </span><span class="cmd">docker</span> compose up <span class="flag">-d</span>
+
+<span class="comment"># Check BMC status via IPMI</span>
+<span class="prompt">$ </span><span class="cmd">ipmitool</span> <span class="flag">-I</span> lanplus <span class="flag">-H</span> localhost <span class="flag">-U</span> admin <span class="flag">-P</span> password mc info
+
+<span class="comment"># Check power state via Redfish</span>
+<span class="prompt">$ </span><span class="cmd">curl</span> <span class="flag">-k</span> <span class="flag">-u</span> admin:password <span class="string">https://localhost/redfish/v1/Systems/1</span>
+
+<span class="comment"># Power on the VM</span>
+<span class="prompt">$ </span><span class="cmd">ipmitool</span> <span class="flag">-I</span> lanplus <span class="flag">-H</span> localhost <span class="flag">-U</span> admin <span class="flag">-P</span> password chassis power on<span class="cursor"></span></pre>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- API Endpoints -->
+<section class="endpoints-section" id="endpoints">
+  <div class="container">
+    <div class="section-label reveal">API Reference</div>
+    <h2 class="section-title reveal">Endpoints &amp; Commands</h2>
+    <p class="section-desc reveal">Standard-compliant Redfish and IPMI interfaces that work with existing tooling.</p>
+    <div class="endpoints-grid reveal">
+      <div class="endpoint-group">
+        <h3>Redfish API <span class="count">13 endpoints</span></h3>
+        <div class="endpoint-list">
+          <div class="endpoint-item"><span class="method method-get">GET</span> <span class="endpoint-path">/redfish/v1</span> <span class="endpoint-desc">ServiceRoot</span></div>
+          <div class="endpoint-item"><span class="method method-get">GET</span> <span class="endpoint-path">/redfish/v1/Systems/1</span> <span class="endpoint-desc">System</span></div>
+          <div class="endpoint-item"><span class="method method-patch">PATCH</span> <span class="endpoint-path">/redfish/v1/Systems/1</span> <span class="endpoint-desc">Boot Override</span></div>
+          <div class="endpoint-item"><span class="method method-post">POST</span> <span class="endpoint-path">.../ComputerSystem.Reset</span> <span class="endpoint-desc">Power Control</span></div>
+          <div class="endpoint-item"><span class="method method-get">GET</span> <span class="endpoint-path">.../VirtualMedia/CD1</span> <span class="endpoint-desc">VirtualMedia</span></div>
+          <div class="endpoint-item"><span class="method method-post">POST</span> <span class="endpoint-path">.../InsertMedia</span> <span class="endpoint-desc">Mount ISO</span></div>
+          <div class="endpoint-item"><span class="method method-post">POST</span> <span class="endpoint-path">.../EjectMedia</span> <span class="endpoint-desc">Eject ISO</span></div>
+        </div>
+      </div>
+      <div class="endpoint-group">
+        <h3>IPMI Commands <span class="count">9 commands</span></h3>
+        <div class="endpoint-list">
+          <div class="endpoint-item"><span class="method method-get">0x01</span> <span class="endpoint-path">Get Device ID</span> <span class="endpoint-desc">BMC Identity</span></div>
+          <div class="endpoint-item"><span class="method method-get">0x38</span> <span class="endpoint-path">Get Auth Capabilities</span> <span class="endpoint-desc">Auth Negotiation</span></div>
+          <div class="endpoint-item"><span class="method method-get">0x01</span> <span class="endpoint-path">Get Chassis Status</span> <span class="endpoint-desc">Power State</span></div>
+          <div class="endpoint-item"><span class="method method-post">0x02</span> <span class="endpoint-path">Chassis Control</span> <span class="endpoint-desc">Power Ops</span></div>
+          <div class="endpoint-item"><span class="method method-patch">0x08</span> <span class="endpoint-path">Set Boot Options</span> <span class="endpoint-desc">Boot Override</span></div>
+          <div class="endpoint-item"><span class="method method-get">0x09</span> <span class="endpoint-path">Get Boot Options</span> <span class="endpoint-desc">Boot Query</span></div>
+          <div class="endpoint-item"><span class="method method-post">0x45</span> <span class="endpoint-path">Set User Name</span> <span class="endpoint-desc">User Mgmt</span></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- Compatibility -->
+<section class="compat-section" id="compatibility">
+  <div class="container">
+    <div class="section-label reveal">Compatibility</div>
+    <h2 class="section-title reveal">Works with your stack</h2>
+    <p class="section-desc reveal">Tested and compatible with major bare-metal provisioning platforms.</p>
+    <div class="compat-grid reveal">
+      <div class="compat-card">
+        <span class="compat-icon">&#9729;</span>
+        <h4>Canonical MAAS</h4>
+        <p>Full IPMI + Redfish power driver support</p>
+      </div>
+      <div class="compat-card">
+        <span class="compat-icon">&#9881;</span>
+        <h4>Tinkerbell / Rufio</h4>
+        <p>Redfish-based hardware provisioning</p>
+      </div>
+      <div class="compat-card">
+        <span class="compat-icon">&#9878;</span>
+        <h4>containerlab</h4>
+        <p>Network topology simulation</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- CTA -->
+<section class="cta-section">
+  <div class="container">
+    <h2 class="cta-title reveal">Ready to try it?</h2>
+    <p class="cta-desc reveal">Get started with a single Docker command. Star the repo if you find it useful.</p>
+    <div class="cta-actions reveal">
+      <div class="cta-install" onclick="copyInstall(this)" title="Click to copy">
+        <span class="prompt-char">$</span>
+        <span>docker pull ghcr.io/tjst-t/qemu-bmc</span>
+        <span class="copy-hint">copy</span>
+      </div>
+    </div>
+    <div style="margin-top: 24px;" class="reveal">
+      <a href="https://github.com/tjst-t/qemu-bmc" class="btn-primary" style="margin-right: 8px;">
+        <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>
+        Star on GitHub
+      </a>
+      <a href="https://github.com/tjst-t/qemu-bmc/blob/main/README.md" class="btn-secondary">
+        Read the Docs
+      </a>
+    </div>
+  </div>
+</section>
+
+<!-- Footer -->
+<footer>
+  <div class="container">
+    <div class="footer-left">qemu-bmc &mdash; Virtual BMC for QEMU</div>
+    <div class="footer-links">
+      <a href="https://github.com/tjst-t/qemu-bmc">GitHub</a>
+      <a href="https://github.com/tjst-t/qemu-bmc/issues">Issues</a>
+      <a href="https://github.com/tjst-t/qemu-bmc/blob/main/README.md">Docs</a>
+    </div>
+  </div>
+</footer>
+
+<script>
+// Scroll reveal
+const observer = new IntersectionObserver((entries) => {
+  entries.forEach(entry => {
+    if (entry.isIntersecting) {
+      entry.target.classList.add('visible');
+    }
+  });
+}, { threshold: 0.1, rootMargin: '0px 0px -40px 0px' });
+
+document.querySelectorAll('.reveal').forEach(el => observer.observe(el));
+
+// Copy install command
+function copyInstall(el) {
+  navigator.clipboard.writeText('docker pull ghcr.io/tjst-t/qemu-bmc').then(() => {
+    el.classList.add('copied');
+    el.querySelector('.copy-hint').textContent = 'copied!';
+    setTimeout(() => {
+      el.classList.remove('copied');
+      el.querySelector('.copy-hint').textContent = 'copy';
+    }, 2000);
+  });
+}
+
+// Smooth scroll for nav links
+document.querySelectorAll('a[href^="#"]').forEach(anchor => {
+  anchor.addEventListener('click', function(e) {
+    e.preventDefault();
+    const target = document.querySelector(this.getAttribute('href'));
+    if (target) {
+      target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+  });
+});
+</script>
+
+</body>
+</html>
