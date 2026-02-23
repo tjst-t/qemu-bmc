@@ -2,8 +2,6 @@
 
 A Go single binary that controls QEMU VMs via both Redfish API (HTTPS) and IPMI over LAN (UDP).
 
-Replaces [docker-qemu-bmc](https://github.com/tjst-t/docker-qemu-bmc) (shell scripts + ipmi_sim + supervisord) with a single Go binary.
-
 ```
 ┌──────────────────────────────────────────┐
 │ OCI Container                            │
@@ -31,7 +29,7 @@ Replaces [docker-qemu-bmc](https://github.com/tjst-t/docker-qemu-bmc) (shell scr
 - **VM IPMI (In-Band)** - Guest OS IPMI via QEMU `ipmi-bmc-extern` KCS interface for MaaS commissioning
 - **noVNC** - Browser-based VNC console served on the Redfish HTTP port (no extra port needed)
 - **QMP Control** - Power operations, boot device changes, VirtualMedia mount
-- **Compatibility** - MAAS, Tinkerbell/Rufio, Cybozu placemat
+- **Compatibility** - MAAS, Tinkerbell/Rufio
 
 ## Quick Start
 
@@ -139,7 +137,7 @@ A browser-based VNC console is available on the same HTTP port as the Redfish AP
 Open a browser and navigate to:
 
 ```
-http://localhost/novnc/
+https://localhost/novnc/
 ```
 
 The browser will prompt for Basic Auth (same credentials as Redfish). After authentication, the noVNC UI loads and connects to QEMU's VNC server automatically.
@@ -225,8 +223,8 @@ ipmitool user enable 3
 | `REDFISH_PORT` | `443` | Redfish HTTPS port |
 | `IPMI_PORT` | `623` | IPMI UDP port |
 | `SERIAL_ADDR` | `localhost:9002` | SOL bridge target |
-| `TLS_CERT` | (auto) | TLS certificate path |
-| `TLS_KEY` | (auto) | TLS key path |
+| `TLS_CERT` | (auto-generated) | TLS certificate path; if unset, a self-signed ECDSA cert is generated automatically |
+| `TLS_KEY` | (auto-generated) | TLS key path; if unset, generated together with `TLS_CERT` |
 | `VM_BOOT_MODE` | `bios` | Default boot mode (`bios` or `uefi`) |
 | `VM_IPMI_ADDR` | (empty, disabled) | VM IPMI chardev listen address (e.g., `:9002`) |
 | `VNC_ADDR` | `localhost:5900` | QEMU VNC TCP address for noVNC proxy |
@@ -300,8 +298,6 @@ TBD
 
 QEMU VM を Redfish API (HTTPS) と IPMI over LAN (UDP) の両方で制御する Go シングルバイナリ。
 
-[docker-qemu-bmc](https://github.com/tjst-t/docker-qemu-bmc)（シェルスクリプト + ipmi_sim + supervisord）を Go 単体で置き換える。
-
 ```
 ┌──────────────────────────────────────────┐
 │ OCI コンテナ                              │
@@ -329,7 +325,7 @@ QEMU VM を Redfish API (HTTPS) と IPMI over LAN (UDP) の両方で制御する
 - **VM IPMI（イン・バンド）** - QEMU `ipmi-bmc-extern` KCS インターフェースによるゲスト OS IPMI（MaaS コミッショニング対応）
 - **noVNC** - Redfish HTTP ポートでブラウザから VNC コンソールにアクセス（追加ポート不要）
 - **QMP 制御** - 電源操作、ブートデバイス変更、VirtualMedia マウント
-- **互換性** - MAAS, Tinkerbell/Rufio, Cybozu placemat
+- **互換性** - MAAS, Tinkerbell/Rufio
 
 ## クイックスタート
 
@@ -437,7 +433,7 @@ Redfish API と同じ HTTP ポートでブラウザベースの VNC コンソー
 ブラウザで以下の URL を開きます:
 
 ```
-http://localhost/novnc/
+https://localhost/novnc/
 ```
 
 Basic 認証のプロンプトが表示されます（Redfish と同じ認証情報）。認証後、noVNC UI が表示され、QEMU の VNC サーバーに自動的に接続します。
@@ -523,8 +519,8 @@ ipmitool user enable 3
 | `REDFISH_PORT` | `443` | Redfish HTTPS ポート |
 | `IPMI_PORT` | `623` | IPMI UDP ポート |
 | `SERIAL_ADDR` | `localhost:9002` | SOL ブリッジ先 |
-| `TLS_CERT` | (自動) | TLS 証明書パス |
-| `TLS_KEY` | (自動) | TLS 鍵パス |
+| `TLS_CERT` | (自動生成) | TLS 証明書パス。未設定時は ECDSA 自己署名証明書を動的生成 |
+| `TLS_KEY` | (自動生成) | TLS 鍵パス。未設定時は `TLS_CERT` と同時に生成 |
 | `VM_BOOT_MODE` | `bios` | デフォルトブートモード (`bios` または `uefi`) |
 | `VM_IPMI_ADDR` | (空、無効) | VM IPMI chardev リッスンアドレス (例: `:9002`) |
 | `VNC_ADDR` | `localhost:5900` | noVNC プロキシが接続する QEMU VNC アドレス |
