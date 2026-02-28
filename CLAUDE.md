@@ -183,6 +183,24 @@ Plus all existing chassis and app commands (Get Device ID, Chassis Status, Boot 
 
 Uses the OpenIPMI VM wire protocol over TCP with framing (0xA0/0xA1), byte escaping (0xAA), and two's complement checksums.
 
+## GitHub Pages
+
+- Site URL: https://tjst-t.github.io/qemu-bmc/
+- `gh-pages` branch (orphan) に `index.html` を配置
+- main ブランチから `docs/gh-pages/` に git submodule として参照可能
+- サイト更新手順:
+  1. `docs/gh-pages/index.html` を編集
+  2. submodule 内でコミット&プッシュ:
+     ```bash
+     cd docs/gh-pages
+     git add -A && git commit -m "Update site" && git push origin gh-pages
+     cd ../..
+     ```
+  3. main 側で submodule 参照を更新:
+     ```bash
+     git add docs/gh-pages && git commit -m "chore: update gh-pages submodule ref"
+     ```
+
 ## Notes for Claude Code
 
 - `grep`, `tail`, `head` are not available as bash commands in the Claude Code sandbox — use the dedicated Read/Grep tools instead
