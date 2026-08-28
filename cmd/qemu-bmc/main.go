@@ -105,6 +105,7 @@ func main() {
 
 	// Start Redfish server
 	redfishServer := redfish.NewServer(m, cfg.IPMIUser, cfg.IPMIPass, cfg.VNCAddr)
+	redfishServer.SetDebug(cfg.Debug)
 	redfishServer.SetInventory(redfish.Inventory{
 		SystemUUID:             cfg.SystemUUID,
 		SystemManufacturer:     cfg.SystemManufacturer,

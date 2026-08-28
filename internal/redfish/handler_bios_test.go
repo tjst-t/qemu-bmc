@@ -1,9 +1,12 @@
 package redfish
 
 import (
+	"bytes"
 	"encoding/json"
+	"log"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"testing"
 
@@ -190,6 +193,69 @@ func TestPatchBiosSettings(t *testing.T) {
 		srv.ServeHTTP(w, req)
 
 		assert.Equal(t, http.StatusBadRequest, w.Code)
+	})
+}
+
+func TestPatchBiosSettings_DebugLogging(t *testing.T) {
+	captureLog := func(t *testing.T) *bytes.Buffer {
+		t.Helper()
+		var buf bytes.Buffer
+		log.SetOutput(&buf)
+		t.Cleanup(func() { log.SetOutput(os.Stderr) })
+		return &buf
+	}
+
+	patch := func(t *testing.T, srv *Server, body string) {
+		t.Helper()
+		req := httptest.NewRequest("PATCH", "/redfish/v1/Systems/1/Bios/Settings", strings.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+		srv.ServeHTTP(w, req)
+		require.Equal(t, http.StatusNoContent, w.Code)
+	}
+
+	t.Run("debug enabled logs applied and pending attributes", func(t *testing.T) {
+		buf := captureLog(t)
+		srv := NewServer(newMockMachine(qmp.StatusRunning), "", "", "")
+		srv.SetDebug(true)
+
+		patch(t, srv, `{"Attributes":{"AdminPhone":"+1-555-0100","BootMode":"Bios"}}`)
+
+		out := buf.String()
+		assert.Contains(t, out, "AdminPhone")
+		assert.Contains(t, out, "+1-555-0100")
+		assert.Contains(t, out, "applied immediately")
+		assert.Contains(t, out, "BootMode")
+		assert.Contains(t, out, "Bios")
+		assert.Contains(t, out, "queued as pending")
+	})
+
+	t.Run("debug enabled logs pending promotion on reset", func(t *testing.T) {
+		buf := captureLog(t)
+		srv := NewServer(newMockMachine(qmp.StatusRunning), "", "", "")
+		srv.SetDebug(true)
+
+		patch(t, srv, `{"Attributes":{"BootMode":"Bios"}}`)
+		buf.Reset()
+
+		resetReq := httptest.NewRequest("POST", "/redfish/v1/Systems/1/Actions/ComputerSystem.Reset", strings.NewReader(`{"ResetType":"PowerCycle"}`))
+		resetReq.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+		srv.ServeHTTP(w, resetReq)
+		require.Equal(t, http.StatusNoContent, w.Code)
+
+		out := buf.String()
+		assert.Contains(t, out, "applied 1 pending setting")
+		assert.Contains(t, out, "BootMode")
+	})
+
+	t.Run("debug disabled stays quiet", func(t *testing.T) {
+		buf := captureLog(t)
+		srv := NewServer(newMockMachine(qmp.StatusRunning), "", "", "")
+
+		patch(t, srv, `{"Attributes":{"AdminPhone":"+1-555-0100"}}`)
+
+		assert.NotContains(t, buf.String(), "BIOS PATCH")
 	})
 }
 

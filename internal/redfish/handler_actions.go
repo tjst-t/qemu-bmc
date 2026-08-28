@@ -3,6 +3,8 @@ package redfish
 import (
 	"encoding/json"
 	"net/http"
+
+	"github.com/gorilla/mux"
 )
 
 var validResetTypes = map[string]bool{
@@ -27,6 +29,7 @@ var powerOnResetTypes = map[string]bool{
 }
 
 func (s *Server) handleResetAction(w http.ResponseWriter, r *http.Request) {
+	id := mux.Vars(r)["id"]
 	var req ResetRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "MalformedJSON", "invalid request body")
@@ -45,7 +48,10 @@ func (s *Server) handleResetAction(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if powerOnResetTypes[req.ResetType] {
-		s.applyPendingBiosSettings()
+		if applied := s.applyPendingBiosSettings(); len(applied) > 0 {
+			s.debugf("BIOS: applied %d pending setting(s) on %s reset for system=%s: %v",
+				len(applied), req.ResetType, id, applied)
+		}
 	}
 
 	w.WriteHeader(http.StatusNoContent)

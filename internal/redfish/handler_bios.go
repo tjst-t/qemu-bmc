@@ -115,6 +115,7 @@ func (s *Server) handleGetBiosSettings(w http.ResponseWriter, r *http.Request) {
 // treated as reboot-required, matching how metal-operator's own client
 // treats a missing/null ResetRequired.
 func (s *Server) handlePatchBiosSettings(w http.ResponseWriter, r *http.Request) {
+	id := mux.Vars(r)["id"]
 	var req PatchBiosSettingsRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "MalformedJSON", "invalid request body")
@@ -129,13 +130,16 @@ func (s *Server) handlePatchBiosSettings(w http.ResponseWriter, r *http.Request)
 	for name, value := range req.Attributes {
 		if resetRequired, known := biosAttributeResetRequired[name]; known && !resetRequired {
 			s.setBiosAttribute(name, value)
+			s.debugf("BIOS PATCH system=%s: %s=%v applied immediately (no reset required)", id, name, value)
 			continue
 		}
 		pending[name] = value
+		s.debugf("BIOS PATCH system=%s: %s=%v queued as pending (reset required)", id, name, value)
 	}
 	if len(pending) > 0 {
 		s.mergeBiosPendingAttributes(pending)
 	}
+	s.debugf("BIOS PATCH system=%s: current=%v pending=%v", id, s.getBiosAttributes(), s.getBiosPendingAttributes())
 
 	w.WriteHeader(http.StatusNoContent)
 }

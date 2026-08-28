@@ -22,6 +22,10 @@ type Config struct {
 	QEMUBinary     string // QEMU binary path for process management mode
 	PowerOnAtStart bool   // Power on VM at container start
 	VNCAddr        string // VNC TCP address for noVNC proxy
+	// Debug enables verbose logging of state changes (e.g. BIOS settings
+	// applied/queued via Redfish). Driven by the DEBUG env var, which
+	// docker/entrypoint.sh also reads for its own startup diagnostics.
+	Debug bool
 	// Redfish ComputerSystem inventory — required by clients like metal-operator
 	// that key server discovery on ComputerSystem.UUID.
 	SystemUUID         string
@@ -72,6 +76,7 @@ func Load() *Config {
 		QEMUBinary:              getEnv("QEMU_BINARY", "qemu-system-x86_64"),
 		PowerOnAtStart:          getBoolEnv("POWER_ON_AT_START", false),
 		VNCAddr:                 getEnv("VNC_ADDR", "localhost:5900"),
+		Debug:                   getBoolEnv("DEBUG", false),
 		SystemUUID:              getEnv("SYSTEM_UUID", ""),
 		SystemManufacturer:      systemManufacturer,
 		SystemModel:             systemModel,

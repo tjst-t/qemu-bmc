@@ -98,6 +98,7 @@ make container-test-all
 | `VM_BOOT_MODE` | `bios` | Default boot mode |
 | `VM_IPMI_ADDR` | (empty, disabled) | VM IPMI chardev listen address (e.g., `:9002`) |
 | `POWER_ON_AT_START` | `false` | Power on VM automatically at container start |
+| `DEBUG` | `false` | When `true`, log BIOS settings changes (attributes applied/queued via Redfish, pending promotion on reset). Also read by `entrypoint.sh` for startup diagnostics. |
 
 ### Container Configuration (entrypoint.sh)
 
