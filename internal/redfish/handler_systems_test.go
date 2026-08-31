@@ -251,3 +251,81 @@ func TestPatchBootDevice(t *testing.T) {
 		assert.Equal(t, "Continuous", system.Boot.BootSourceOverrideEnabled)
 	})
 }
+
+func getSystem(t *testing.T, srv *Server) ComputerSystem {
+	t.Helper()
+	req := httptest.NewRequest("GET", "/redfish/v1/Systems/1", nil)
+	w := httptest.NewRecorder()
+	srv.ServeHTTP(w, req)
+	require.Equal(t, http.StatusOK, w.Code)
+	var system ComputerSystem
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &system))
+	return system
+}
+
+func patchSystem(t *testing.T, srv *Server, body string) *httptest.ResponseRecorder {
+	t.Helper()
+	req := httptest.NewRequest("PATCH", "/redfish/v1/Systems/1", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	srv.ServeHTTP(w, req)
+	return w
+}
+
+func TestBootOrder(t *testing.T) {
+	t.Run("GET returns the seeded persistent boot order", func(t *testing.T) {
+		srv := NewServer(newMockMachine(qmp.StatusRunning), "", "", "")
+		assert.Equal(t, []string{"Pxe", "Hdd", "Cd"}, getSystem(t, srv).Boot.BootOrder)
+	})
+
+	t.Run("PATCH BootOrder (gofish SetBoot shape) persists the new order", func(t *testing.T) {
+		mock := newMockMachine(qmp.StatusRunning)
+		srv := NewServer(mock, "", "", "")
+
+		// Exactly what metal-operator's SetBootOrder -> gofish SetBoot emits.
+		body := `{"Boot":{"BootSourceOverrideEnabled":"Continuous","BootSourceOverrideTarget":"None","BootOrder":["Hdd","Pxe","Cd"]}}`
+		w := patchSystem(t, srv, body)
+		assert.Equal(t, http.StatusOK, w.Code)
+
+		assert.Equal(t, []string{"Hdd", "Pxe", "Cd"}, getSystem(t, srv).Boot.BootOrder)
+		// Boot-order-only: the accompanying Continuous/None override is ignored,
+		// so no spurious one-time override lands on the machine.
+		assert.NotEqual(t, "Continuous", mock.bootOverride.Enabled)
+	})
+
+	t.Run("one-time override PATCH leaves BootOrder untouched", func(t *testing.T) {
+		srv := NewServer(newMockMachine(qmp.StatusRunning), "", "", "")
+
+		w := patchSystem(t, srv, `{"Boot":{"BootSourceOverrideTarget":"Pxe","BootSourceOverrideEnabled":"Once"}}`)
+		assert.Equal(t, http.StatusOK, w.Code)
+
+		sys := getSystem(t, srv)
+		assert.Equal(t, "Pxe", sys.Boot.BootSourceOverrideTarget)
+		assert.Equal(t, []string{"Pxe", "Hdd", "Cd"}, sys.Boot.BootOrder)
+	})
+
+	t.Run("changing the boot order changes the system ETag", func(t *testing.T) {
+		srv := NewServer(newMockMachine(qmp.StatusRunning), "", "", "")
+
+		before := getSystem(t, srv).ODataEtag
+		require.NotEmpty(t, before)
+
+		patchSystem(t, srv, `{"Boot":{"BootOrder":["Cd","Hdd","Pxe"]}}`)
+
+		assert.NotEqual(t, before, getSystem(t, srv).ODataEtag)
+	})
+
+	t.Run("boot order survives a subsequent reset action (persistent, not one-time)", func(t *testing.T) {
+		srv := NewServer(newMockMachine(qmp.StatusRunning), "", "", "")
+
+		patchSystem(t, srv, `{"Boot":{"BootOrder":["Cd","Hdd","Pxe"]}}`)
+
+		reset := httptest.NewRequest("POST", "/redfish/v1/Systems/1/Actions/ComputerSystem.Reset", strings.NewReader(`{"ResetType":"PowerCycle"}`))
+		reset.Header.Set("Content-Type", "application/json")
+		rw := httptest.NewRecorder()
+		srv.ServeHTTP(rw, reset)
+		require.Equal(t, http.StatusNoContent, rw.Code)
+
+		assert.Equal(t, []string{"Cd", "Hdd", "Pxe"}, getSystem(t, srv).Boot.BootOrder)
+	})
+}

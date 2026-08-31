@@ -69,6 +69,7 @@ type Server struct {
 	biosAttrs        map[string]any
 	biosPendingAttrs map[string]any
 	managerAttrs     map[string]any
+	bootOrder        []string
 }
 
 // SetInventory populates the static ComputerSystem/Manager/Processor inventory
@@ -169,6 +170,20 @@ func (s *Server) setManagerAttribute(name string, value any) {
 	s.managerAttrs[name] = value
 }
 
+func (s *Server) getBootOrder() []string {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	out := make([]string, len(s.bootOrder))
+	copy(out, s.bootOrder)
+	return out
+}
+
+func (s *Server) setBootOrder(order []string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.bootOrder = append([]string(nil), order...)
+}
+
 // applyPendingBiosSettings copies any pending (reboot-required) BIOS
 // attribute changes into the live attribute set and clears the pending set.
 // Called after a reset that leaves the VM powered on, mirroring a real BMC
@@ -204,6 +219,7 @@ func NewServer(m MachineInterface, user, pass, vncAddr string) *Server {
 			"SysLog.1.SysLogServer1": "",
 			"NTPConfigGroup.1.NTP1":  "",
 		},
+		bootOrder: []string{"Pxe", "Hdd", "Cd"},
 	}
 	s.setupRoutes()
 	return s

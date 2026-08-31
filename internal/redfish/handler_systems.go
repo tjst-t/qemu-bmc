@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strings"
 
 	"github.com/tjst-t/qemu-bmc/internal/machine"
 	"github.com/tjst-t/qemu-bmc/internal/qmp"
@@ -34,8 +35,9 @@ func (s *Server) handleGetSystem(w http.ResponseWriter, r *http.Request) {
 
 	powerState := mapQMPStatusToRedfish(status)
 	boot := s.machine.GetBootOverride()
+	bootOrder := s.getBootOrder()
 
-	etag := generateETag(powerState, boot)
+	etag := generateETag(powerState, boot, bootOrder)
 
 	system := ComputerSystem{
 		ODataType:    "#ComputerSystem.v1_5_0.ComputerSystem",
@@ -61,6 +63,7 @@ func (s *Server) handleGetSystem(w http.ResponseWriter, r *http.Request) {
 			BootSourceOverrideTarget:  boot.Target,
 			BootSourceOverrideMode:    boot.Mode,
 			AllowableValues:           []string{"None", "Pxe", "Hdd", "Cd", "BiosSetup"},
+			BootOrder:                 bootOrder,
 		},
 		Actions: ComputerSystemActions{
 			Reset: ResetAction{
@@ -94,7 +97,7 @@ func (s *Server) handlePatchSystem(w http.ResponseWriter, r *http.Request) {
 		}
 		powerState := mapQMPStatusToRedfish(status)
 		boot := s.machine.GetBootOverride()
-		currentETag := generateETag(powerState, boot)
+		currentETag := generateETag(powerState, boot, s.getBootOrder())
 
 		if ifMatch != currentETag {
 			writeError(w, http.StatusPreconditionFailed, "PreconditionFailed", "ETag mismatch")
@@ -114,22 +117,27 @@ func (s *Server) handlePatchSystem(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if req.Boot != nil {
-		// Get current boot override and merge with patch
-		current := s.machine.GetBootOverride()
+		if len(req.Boot.BootOrder) > 0 {
+			s.setBootOrder(req.Boot.BootOrder)
+			s.debugf("System PATCH: BootOrder set to %v", req.Boot.BootOrder)
+		} else {
+			// One-time boot override: merge with current machine override.
+			current := s.machine.GetBootOverride()
 
-		if req.Boot.BootSourceOverrideEnabled != "" {
-			current.Enabled = req.Boot.BootSourceOverrideEnabled
-		}
-		if req.Boot.BootSourceOverrideTarget != "" {
-			current.Target = req.Boot.BootSourceOverrideTarget
-		}
-		if req.Boot.BootSourceOverrideMode != "" {
-			current.Mode = req.Boot.BootSourceOverrideMode
-		}
+			if req.Boot.BootSourceOverrideEnabled != "" {
+				current.Enabled = req.Boot.BootSourceOverrideEnabled
+			}
+			if req.Boot.BootSourceOverrideTarget != "" {
+				current.Target = req.Boot.BootSourceOverrideTarget
+			}
+			if req.Boot.BootSourceOverrideMode != "" {
+				current.Mode = req.Boot.BootSourceOverrideMode
+			}
 
-		if err := s.machine.SetBootOverride(current); err != nil {
-			writeError(w, http.StatusBadRequest, "PropertyValueError", err.Error())
-			return
+			if err := s.machine.SetBootOverride(current); err != nil {
+				writeError(w, http.StatusBadRequest, "PropertyValueError", err.Error())
+				return
+			}
 		}
 	}
 
@@ -151,9 +159,11 @@ func mapQMPStatusToRedfish(status qmp.Status) string {
 	}
 }
 
-// generateETag creates an ETag based on the system state
-func generateETag(powerState string, boot machine.BootOverride) string {
-	data := fmt.Sprintf("%s-%s-%s-%s", powerState, boot.Enabled, boot.Target, boot.Mode)
+// generateETag fingerprints the mutable system state — power state, the one-time
+// boot override, and the persistent boot order — so any change to them
+// invalidates an ETag held by a client doing an If-Match conditional PATCH.
+func generateETag(powerState string, boot machine.BootOverride, bootOrder []string) string {
+	data := fmt.Sprintf("%s-%s-%s-%s-%s", powerState, boot.Enabled, boot.Target, boot.Mode, strings.Join(bootOrder, ","))
 	hash := sha256.Sum256([]byte(data))
 	return fmt.Sprintf(`"%x"`, hash[:8])
 }

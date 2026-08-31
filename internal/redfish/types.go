@@ -65,12 +65,16 @@ type ComputerSystemLinks struct {
 	ManagedBy []ODataID `json:"ManagedBy"`
 }
 
-// BootSource represents boot source override
+// BootSource represents boot source override plus the persistent BootOrder.
 type BootSource struct {
 	BootSourceOverrideEnabled string   `json:"BootSourceOverrideEnabled"`
 	BootSourceOverrideTarget  string   `json:"BootSourceOverrideTarget"`
 	BootSourceOverrideMode    string   `json:"BootSourceOverrideMode"`
 	AllowableValues           []string `json:"BootSourceOverrideTarget@Redfish.AllowableValues"`
+	// BootOrder is the persistent boot order (Redfish Boot.BootOrder). Unlike the
+	// one-time override above it survives resets/power cycles. metal-operator's
+	// ServerReconciler.applyBootOrder reads it back and rewrites it via SetBoot.
+	BootOrder []string `json:"BootOrder"`
 }
 
 // ComputerSystemActions contains available actions
@@ -95,11 +99,15 @@ type PatchSystemRequest struct {
 	IndicatorLED *string          `json:"IndicatorLED,omitempty"`
 }
 
-// PatchBootSource is the boot source in a patch request
+// PatchBootSource is the boot source in a patch request. gofish's SetBoot sends
+// BootOrder together with BootSourceOverrideEnabled:"Continuous" /
+// BootSourceOverrideTarget:"None"; handlePatchSystem treats a request carrying
+// BootOrder as a boot-order-only change.
 type PatchBootSource struct {
-	BootSourceOverrideEnabled string `json:"BootSourceOverrideEnabled,omitempty"`
-	BootSourceOverrideTarget  string `json:"BootSourceOverrideTarget,omitempty"`
-	BootSourceOverrideMode    string `json:"BootSourceOverrideMode,omitempty"`
+	BootSourceOverrideEnabled string   `json:"BootSourceOverrideEnabled,omitempty"`
+	BootSourceOverrideTarget  string   `json:"BootSourceOverrideTarget,omitempty"`
+	BootSourceOverrideMode    string   `json:"BootSourceOverrideMode,omitempty"`
+	BootOrder                 []string `json:"BootOrder,omitempty"`
 }
 
 // RedfishError is a Redfish error response
