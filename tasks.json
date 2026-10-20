@@ -271,6 +271,29 @@
       "extra": {}
     },
     {
+      "id": "containerlab",
+      "number": 14,
+      "kind": "task",
+      "title": "管理ネットワークを分けた containerlab のトポロジー例と手順を書く",
+      "status": "ready",
+      "parent": "containerlab-bmc",
+      "dependsOn": [
+        "systems-1-uuid-mac-cpu"
+      ],
+      "milestone": null,
+      "priority": "normal",
+      "labels": [],
+      "body": "containerlab/ に、BMC 管理ネットワーク（qemu-bmc の Redfish/IPMI）とデータネットワーク（VM の NIC）を分けた例を足す。管理ネットワークに操作用のコンテナ（curl・ipmitool 入り）を置き、そこから各ノードを操作できるようにする。各ノードの UUID・MAC を固定する設定も入れる。README に deploy と確かめ方を書く。",
+      "doneWhen": "clab deploy した例で、操作用コンテナから各ノードへ Redfish と IPMI で電源状態の取得と On/Off ができる。手順が README にある",
+      "resolution": null,
+      "refs": [],
+      "threads": [],
+      "createdAt": "2026-10-20T14:43:42.014Z",
+      "updatedAt": "2026-10-20T14:43:42.014Z",
+      "closedAt": null,
+      "extra": {}
+    },
+    {
       "id": "sol-uefi-http-cipher-suite-17",
       "number": 4,
       "kind": "story",
