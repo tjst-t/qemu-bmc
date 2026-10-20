@@ -114,7 +114,7 @@
       "number": 9,
       "kind": "task",
       "title": "テストを回す CI を入れる（GitHub Actions）",
-      "status": "ready",
+      "status": "in-progress",
       "parent": "v0-6-0",
       "dependsOn": [],
       "milestone": null,
@@ -126,7 +126,7 @@
       "refs": [],
       "threads": [],
       "createdAt": "2026-10-20T14:43:40.225Z",
-      "updatedAt": "2026-10-20T14:43:40.225Z",
+      "updatedAt": "2026-10-20T20:01:44.475Z",
       "closedAt": null,
       "extra": {}
     },
