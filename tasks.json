@@ -135,7 +135,7 @@
       "number": 10,
       "kind": "task",
       "title": "v0.6.0 をリリースする",
-      "status": "ready",
+      "status": "done",
       "parent": "v0-6-0",
       "dependsOn": [
         "apache-2-0-license-readme",
@@ -149,12 +149,12 @@
       "labels": [],
       "body": "上のタスクが終わってから、タグ v0.6.0 を打ち、release.yml でバイナリとコンテナイメージを出す。リリースノートに v0.5.3 からの変更（MAAS LAN_2_0 修正、TLS 自己署名、noVNC、POWER_ON_AT_START、上のタスク）を書く。タグの push は人が行う（資格情報がこちらに無い）。",
       "doneWhen": "GitHub Release v0.6.0 と ghcr.io/tjst-t/qemu-bmc:v0.6.0 が公開されている",
-      "resolution": null,
+      "resolution": "2026-10-20 にタグ v0.6.0 を push。Release workflow 成功、GitHub Release（amd64/arm64 バイナリとチェックサム）と ghcr.io/tjst-t/qemu-bmc:0.6.0（amd64/arm64）を公開。リリース前に release.yml のバイナリビルドに noVNC 取得を足した（9408bb7）。",
       "refs": [],
       "threads": [],
       "createdAt": "2026-10-20T14:43:40.225Z",
-      "updatedAt": "2026-10-20T14:43:40.225Z",
-      "closedAt": null,
+      "updatedAt": "2026-10-20T20:24:38.323Z",
+      "closedAt": "2026-10-20T20:24:38.323Z",
       "extra": {}
     },
     {
