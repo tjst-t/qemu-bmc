@@ -208,6 +208,7 @@ ipmitool user enable 3
 |---------|-------------|
 | Get Device ID | BMC identity |
 | Get Channel Auth Capabilities | Auth type negotiation |
+| Get Channel Cipher Suites | Cipher suite list (suite 3 only) |
 | Get Chassis Status | Power state query |
 | Chassis Control | Power on/off/cycle/reset |
 | Set/Get Boot Options | Boot device override |

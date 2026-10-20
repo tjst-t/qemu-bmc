@@ -146,6 +146,7 @@ Middleware: Basic Auth, ETag (If-Match), trailing slash normalization
 | Get Channel Auth Capabilities | App | 0x38 | Auth type negotiation |
 | Set Session Privilege | App | 0x3B | Privilege level |
 | Close Session | App | 0x3C | Session teardown |
+| Get Channel Cipher Suites | App | 0x54 | Cipher suite list (suite 3 only) |
 | Get Chassis Status | Chassis (0x00) | 0x01 | Power state query |
 | Chassis Control | Chassis | 0x02 | Power on/off/cycle/reset |
 | Chassis Identify | Chassis | 0x04 | Identify LED (log only) |

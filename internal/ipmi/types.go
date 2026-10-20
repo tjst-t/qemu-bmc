@@ -53,6 +53,7 @@ const (
 	CmdActivateSession            = 0x3A
 	CmdSetSessionPrivilege        = 0x3B
 	CmdCloseSession               = 0x3C
+	CmdGetChannelCipherSuites     = 0x54
 )
 
 // IPMI App Commands - User Management

@@ -113,3 +113,71 @@ func handleGetChannelInfo(reqData []byte, state *bmc.State) (CompletionCode, []b
 	}
 	return CompletionCodeOK, data
 }
+
+// Cipher suite 3 (RAKP-HMAC-SHA1 + HMAC-SHA1-96 + AES-CBC-128) is the only one
+// accepted by handleOpenSession. Algorithm tags follow IPMI 2.0 Table 22-19.
+var (
+	// Records listed by cipher suite: [0xC0][suite ID][auth][integrity][conf]
+	cipherSuiteRecords = []byte{
+		0xC0, 0x03,
+		0x00 | AuthAlgorithmHMACSHA1,
+		0x40 | IntegrityAlgorithmHMACSHA1_96,
+		0x80 | ConfAlgorithmAESCBC128,
+	}
+	// Records listed by supported algorithm: [auth][integrity][conf]
+	cipherAlgorithmRecords = []byte{
+		0x00 | AuthAlgorithmHMACSHA1,
+		0x40 | IntegrityAlgorithmHMACSHA1_96,
+		0x80 | ConfAlgorithmAESCBC128,
+	}
+)
+
+// handleGetChannelCipherSuites returns the cipher suites supported on the LAN channel.
+// Request (3 bytes):
+//
+//	Byte 0: channel number (bits 3:0). 0x0E = current channel (resolves to 1).
+//	Byte 1: payload type (bits 5:0)
+//	Byte 2: [list_by_cipher_suite(1)][reserved(1)][list_index(6)]
+//
+// Response (1-17 bytes):
+//
+//	Byte 0: channel number
+//	Bytes 1-16: cipher suite record data, 16 bytes per list index.
+//	            Fewer than 16 bytes marks the end of the list.
+func handleGetChannelCipherSuites(reqData []byte) (CompletionCode, []byte) {
+	if len(reqData) < 3 {
+		return CompletionCodeInvalidField, nil
+	}
+
+	channel := reqData[0] & 0x0F
+	if channel == 0x0E {
+		channel = 1 // current channel resolves to channel 1
+	}
+	if channel != 1 {
+		return CompletionCodeInvalidField, nil
+	}
+
+	payloadType := reqData[1] & 0x3F
+	listBySuite := reqData[2]&0x80 != 0
+	listIndex := int(reqData[2] & 0x3F)
+
+	var records []byte
+	if payloadType == PayloadTypeIPMI {
+		if listBySuite {
+			records = cipherSuiteRecords
+		} else {
+			records = cipherAlgorithmRecords
+		}
+	}
+
+	resp := []byte{channel}
+	start := listIndex * 16
+	if start < len(records) {
+		end := start + 16
+		if end > len(records) {
+			end = len(records)
+		}
+		resp = append(resp, records[start:end]...)
+	}
+	return CompletionCodeOK, resp
+}

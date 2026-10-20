@@ -43,6 +43,8 @@ func handleAppCommand(msg *IPMIMessage, machine MachineInterface, state *bmc.Sta
 		return handleSetChannelAccess(msg.Data, state)
 	case CmdGetChannelInfo:
 		return handleGetChannelInfo(msg.Data, state)
+	case CmdGetChannelCipherSuites:
+		return handleGetChannelCipherSuites(msg.Data)
 	default:
 		return CompletionCodeInvalidCommand, nil
 	}
