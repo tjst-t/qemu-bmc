@@ -48,6 +48,30 @@
       "updatedAt": "2026-10-20T14:43:13.094Z",
       "closedAt": null,
       "extra": {}
+    },
+    {
+      "id": "containerlab-bmc",
+      "number": 3,
+      "kind": "story",
+      "title": "containerlab の構成例（BMC 管理ネットワークとデータネットワークを分ける）",
+      "status": "ready",
+      "parent": null,
+      "dependsOn": [],
+      "milestone": null,
+      "priority": "normal",
+      "labels": [
+        "containerlab",
+        "sakutei"
+      ],
+      "body": "## なぜ\n主対象は containerlab。sakutei は BMC に届く管理ネットワークとデータネットワークを別系統として扱う設計（sakutei 設計書 §23.4）。いまの containerlab/example.yml は BMC のポートをホストへ公開する形で、管理ネットワークを分けた構成の例が無い。\n\n## 中身\n- 管理ネットワーク（BMC の Redfish/IPMI が届く）とデータネットワーク（VM の NIC）を分けたトポロジー例\n- 各ノードの UUID・MAC を固定する設定例（Systems/1 のストーリーの後）\n- 起動して Redfish と IPMI で電源操作ができる確かめ方を README に書く",
+      "doneWhen": "containerlab で例を deploy し、管理ネットワーク上の別コンテナから各ノードへ Redfish（curl）と IPMI（ipmitool）で電源状態の取得と On/Off ができる。手順が README にある",
+      "resolution": null,
+      "refs": [],
+      "threads": [],
+      "createdAt": "2026-10-20T14:43:14.120Z",
+      "updatedAt": "2026-10-20T14:43:14.120Z",
+      "closedAt": null,
+      "extra": {}
     }
   ]
 }
