@@ -230,7 +230,7 @@
       "number": 13,
       "kind": "task",
       "title": "Systems/1 に MemorySummary と ProcessorSummary を足す",
-      "status": "ready",
+      "status": "in-progress",
       "parent": "systems-1-uuid-mac-cpu",
       "dependsOn": [],
       "milestone": null,
@@ -242,7 +242,7 @@
       "refs": [],
       "threads": [],
       "createdAt": "2026-10-20T14:43:41.139Z",
-      "updatedAt": "2026-10-20T14:43:41.139Z",
+      "updatedAt": "2026-10-20T20:26:21.402Z",
       "closedAt": null,
       "extra": {}
     },
