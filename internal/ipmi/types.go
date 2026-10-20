@@ -48,6 +48,7 @@ const (
 // IPMI App Commands
 const (
 	CmdGetDeviceID                = 0x01
+	CmdGetSystemGUID              = 0x37
 	CmdGetChannelAuthCapabilities = 0x38
 	CmdGetSessionChallenge        = 0x39
 	CmdActivateSession            = 0x3A

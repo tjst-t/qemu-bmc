@@ -17,6 +17,8 @@ func handleAppCommand(msg *IPMIMessage, machine MachineInterface, state *bmc.Sta
 	switch msg.Command {
 	case CmdGetDeviceID:
 		return handleGetDeviceID()
+	case CmdGetSystemGUID:
+		return handleGetSystemGUID(state)
 	case CmdGetChannelAuthCapabilities:
 		return handleGetChannelAuthCapabilities(msg.Data)
 	case CmdGetSessionChallenge:
@@ -64,6 +66,19 @@ func handleGetDeviceID() (CompletionCode, []byte) {
 		0x00, 0x00, 0x00, 0x00, // Aux Firmware Rev
 	}
 	return CompletionCodeOK, data
+}
+
+// handleGetSystemGUID returns the 16-byte system GUID (IPMI encoding).
+// Without a configured GUID the command is reported as unsupported.
+func handleGetSystemGUID(state *bmc.State) (CompletionCode, []byte) {
+	if state == nil {
+		return CompletionCodeInvalidCommand, nil
+	}
+	guid := state.SystemGUID()
+	if len(guid) != 16 {
+		return CompletionCodeInvalidCommand, nil
+	}
+	return CompletionCodeOK, guid
 }
 
 func handleGetChannelAuthCapabilities(reqData []byte) (CompletionCode, []byte) {

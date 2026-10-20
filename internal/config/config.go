@@ -23,6 +23,8 @@ type Config struct {
 	VNCAddr        string // VNC TCP address for noVNC proxy
 	VMMemoryMiB    int    // VM memory in MiB (VM_MEMORY), reported via Redfish; 0 if unparsable
 	VMCPUs         int    // VM CPU count (VM_CPUS), reported via Redfish; 0 if unparsable
+	SystemUUID     string // Fixed system UUID (QEMU -uuid, Redfish UUID, IPMI GUID)
+	SystemUUIDFile string // File where a derived system UUID is persisted
 }
 
 // Load reads configuration from environment variables with defaults
@@ -41,6 +43,8 @@ func Load() *Config {
 		QEMUBinary:     getEnv("QEMU_BINARY", "qemu-system-x86_64"),
 		PowerOnAtStart: getBoolEnv("POWER_ON_AT_START", false),
 		VNCAddr:        getEnv("VNC_ADDR", "localhost:5900"),
+		SystemUUID:     getEnv("SYSTEM_UUID", ""),
+		SystemUUIDFile: getEnv("SYSTEM_UUID_FILE", ""),
 		// entrypoint.sh passes these to QEMU as -m / -smp, so parse them the
 		// same way QEMU does
 		VMMemoryMiB: qemu.ParseMemoryMiB(getEnv("VM_MEMORY", "2048")),

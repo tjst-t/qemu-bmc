@@ -63,6 +63,32 @@ func TestGetSystem_PowerState(t *testing.T) {
 	}
 }
 
+func TestGetSystem_UUID(t *testing.T) {
+	mock := newMockMachine(qmp.StatusRunning)
+	srv := NewServer(mock, "", "", "")
+	srv.SetSystemUUID("12345678-9abc-4def-8123-456789abcdef")
+
+	req := httptest.NewRequest("GET", "/redfish/v1/Systems/1", nil)
+	w := httptest.NewRecorder()
+	srv.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+	var system ComputerSystem
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &system))
+	assert.Equal(t, "12345678-9abc-4def-8123-456789abcdef", system.UUID)
+}
+
+func TestGetSystem_UUIDOmittedWhenUnset(t *testing.T) {
+	mock := newMockMachine(qmp.StatusRunning)
+	srv := NewServer(mock, "", "", "")
+
+	req := httptest.NewRequest("GET", "/redfish/v1/Systems/1", nil)
+	w := httptest.NewRecorder()
+	srv.ServeHTTP(w, req)
+
+	assert.NotContains(t, w.Body.String(), `"UUID"`)
+}
+
 func TestGetSystem_ETag(t *testing.T) {
 	mock := newMockMachine(qmp.StatusRunning)
 	srv := NewServer(mock, "", "", "")

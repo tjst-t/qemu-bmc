@@ -49,6 +49,7 @@ type State struct {
 	users         [maxUsers + 1]userSlot // index 0 unused, 1-15 valid
 	lanConfig     map[uint8][]byte       // parameter number → value
 	channelAccess [16]ChannelAccess      // indexed by channel (0-15)
+	systemGUID    []byte                 // IPMI-encoded system GUID; nil if unset
 }
 
 // NewState creates a new State with a default admin user in slot 2.
@@ -264,4 +265,22 @@ func (s *State) GetChannelInfo(channel uint8) ChannelInfo {
 		SessionSupport:  0x02, // multi-session
 		ActiveSessions:  0,
 	}
+}
+
+// SetSystemGUID sets the 16-byte system GUID returned by Get System GUID,
+// already in IPMI (least-significant byte first) encoding.
+func (s *State) SetSystemGUID(guid []byte) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.systemGUID = append([]byte(nil), guid...)
+}
+
+// SystemGUID returns a copy of the system GUID, or nil if it was not set.
+func (s *State) SystemGUID() []byte {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if s.systemGUID == nil {
+		return nil
+	}
+	return append([]byte(nil), s.systemGUID...)
 }

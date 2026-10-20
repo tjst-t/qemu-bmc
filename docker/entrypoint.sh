@@ -24,6 +24,16 @@ if [ -n "$VM_DISK" ] && [ -f "$VM_DISK" ]; then
     QEMU_ARGS="$QEMU_ARGS -drive file=$VM_DISK,format=qcow2,if=virtio"
 fi
 
+# System UUID: qemu-bmc injects -uuid itself (SYSTEM_UUID, else derived from
+# the hostname). A derived UUID is persisted next to the VM disk so it
+# survives container re-creation when that directory is a mounted volume.
+if [ -z "$SYSTEM_UUID_FILE" ]; then
+    VM_DISK_DIR=$(dirname "${VM_DISK:-/vm/disk.qcow2}")
+    if [ -d "$VM_DISK_DIR" ] && [ -w "$VM_DISK_DIR" ]; then
+        export SYSTEM_UUID_FILE="$VM_DISK_DIR/system-uuid"
+    fi
+fi
+
 # CD-ROM
 if [ -n "$VM_CDROM" ] && [ -f "$VM_CDROM" ]; then
     QEMU_ARGS="$QEMU_ARGS -cdrom $VM_CDROM"
@@ -97,6 +107,8 @@ if [ "${DEBUG:-false}" = "true" ]; then
     echo "REDFISH_PORT: ${REDFISH_PORT:-443}" >&2
     echo "IPMI_PORT: ${IPMI_PORT:-623}" >&2
     echo "VM_BOOT_MODE: ${VM_BOOT_MODE:-bios}" >&2
+    echo "SYSTEM_UUID: ${SYSTEM_UUID:-(derived)}" >&2
+    echo "SYSTEM_UUID_FILE: ${SYSTEM_UUID_FILE:-(none)}" >&2
     echo "========================" >&2
 fi
 

@@ -18,6 +18,7 @@ import (
 	"github.com/tjst-t/qemu-bmc/internal/qemu"
 	"github.com/tjst-t/qemu-bmc/internal/qmp"
 	"github.com/tjst-t/qemu-bmc/internal/redfish"
+	"github.com/tjst-t/qemu-bmc/internal/sysuuid"
 )
 
 var version = "dev"
@@ -39,14 +40,18 @@ func main() {
 	var qmpClient qmp.Client
 	var m *machine.Machine
 	systemInfo := redfish.SystemInfo{MemoryMiB: cfg.VMMemoryMiB, CPUs: cfg.VMCPUs}
+	var systemUUID string
 
 	if len(qemuArgs) > 0 {
 		// Process management mode
 		log.Printf("Process management mode: managing QEMU lifecycle")
 
+		systemUUID = resolveSystemUUID(cfg, qemuArgs)
+
 		cmdArgs, err := qemu.BuildCommandLine(qemuArgs, qemu.BuildOptions{
 			QMPSocketPath: cfg.QMPSocket,
 			SerialAddr:    cfg.SerialAddr,
+			SystemUUID:    systemUUID,
 		})
 		if err != nil {
 			log.Fatalf("Invalid QEMU arguments: %v", err)
@@ -78,11 +83,24 @@ func main() {
 		log.Println("Connected to QMP socket")
 
 		m = machine.New(qmpClient)
+
+		// The external QEMU's UUID is unknown here, so only report one
+		// when explicitly configured (it must match QEMU's -uuid).
+		if cfg.SystemUUID != "" {
+			u, err := sysuuid.Parse(cfg.SystemUUID)
+			if err != nil {
+				log.Fatalf("Invalid SYSTEM_UUID: %v", err)
+			}
+			systemUUID = u.String()
+		}
 	}
 	defer qmpClient.Close()
 
 	// Create BMC state
 	bmcState := bmc.NewState(cfg.IPMIUser, cfg.IPMIPass)
+	if systemUUID != "" {
+		bmcState.SetSystemGUID(sysuuid.MustParse(systemUUID).IPMIGUID())
+	}
 
 	// Start VM IPMI server (only if configured)
 	if cfg.VMIPMIAddr != "" {
@@ -108,6 +126,7 @@ func main() {
 	// Start Redfish server
 	redfishServer := redfish.NewServer(m, cfg.IPMIUser, cfg.IPMIPass, cfg.VNCAddr)
 	redfishServer.SetSystemInfo(systemInfo)
+	redfishServer.SetSystemUUID(systemUUID)
 	addr := fmt.Sprintf(":%s", cfg.RedfishPort)
 	log.Printf("Starting Redfish server on %s", addr)
 
@@ -152,4 +171,28 @@ func main() {
 		// Give process time to exit
 		time.Sleep(500 * time.Millisecond)
 	}
+}
+
+// resolveSystemUUID determines the system UUID for process management mode:
+// SYSTEM_UUID, then -uuid in the QEMU args, then SYSTEM_UUID_FILE, then a
+// UUID derived from the hostname (persisted to SYSTEM_UUID_FILE).
+func resolveSystemUUID(cfg *config.Config, qemuArgs []string) string {
+	explicit := cfg.SystemUUID
+	if explicit == "" {
+		explicit, _ = qemu.ArgValue(qemuArgs, "-uuid")
+	}
+	hostname, err := os.Hostname()
+	if err != nil {
+		log.Printf("WARN: could not determine hostname: %v", err)
+	}
+	u, src, err := sysuuid.Resolve(sysuuid.Options{
+		Explicit: explicit,
+		File:     cfg.SystemUUIDFile,
+		Hostname: hostname,
+	})
+	if err != nil {
+		log.Fatalf("Invalid system UUID: %v", err)
+	}
+	log.Printf("System UUID: %s (source: %s)", u, src)
+	return u.String()
 }

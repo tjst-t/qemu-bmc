@@ -103,6 +103,8 @@ make container-test-all
 | `POWER_ON_AT_START` | `false` | Power on VM automatically at container start |
 | `VM_MEMORY` | `2048` | Legacy mode only: VM memory reported as Systems/1 `MemorySummary.TotalSystemMemoryGiB`. Parsed like QEMU `-m` (`2048` = MiB, `4G`, `512M`, `size=...`); omitted if unparsable. In process management mode the QEMU `-m` argument is used |
 | `VM_CPUS` | `2` | Legacy mode only: CPU count reported as Systems/1 `ProcessorSummary.Count`. Parsed like QEMU `-smp`; omitted if unparsable. In process management mode the QEMU `-smp` argument is used |
+| `SYSTEM_UUID` | (derived) | Fixed system UUID: passed to QEMU as `-uuid`, returned as Redfish `Systems/1` `UUID` and IPMI Get System GUID. If unset (process mode): `-uuid` in QEMU args, else `SYSTEM_UUID_FILE`, else a v5 UUID derived from the hostname (then written to `SYSTEM_UUID_FILE`). Legacy mode reports a UUID only when `SYSTEM_UUID` is set |
+| `SYSTEM_UUID_FILE` | (empty; entrypoint.sh sets `<VM_DISK dir>/system-uuid`) | File holding the persisted derived UUID |
 
 ### Container Configuration (entrypoint.sh)
 
@@ -145,6 +147,7 @@ Middleware: Basic Auth, ETag (If-Match), trailing slash normalization
 | Command | NetFn | Cmd | Description |
 |---------|-------|-----|-------------|
 | Get Device ID | App (0x06) | 0x01 | Static BMC identity |
+| Get System GUID | App | 0x37 | System UUID (IPMI encoding, LSB first) |
 | Get Channel Auth Capabilities | App | 0x38 | Auth type negotiation |
 | Set Session Privilege | App | 0x3B | Privilege level |
 | Close Session | App | 0x3C | Session teardown |

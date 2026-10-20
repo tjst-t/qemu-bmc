@@ -9,7 +9,7 @@ import (
 
 func TestLoad_Defaults(t *testing.T) {
 	// Clear any env vars that might be set
-	for _, key := range []string{"QMP_SOCK", "IPMI_USER", "IPMI_PASS", "REDFISH_PORT", "IPMI_PORT", "SERIAL_ADDR", "TLS_CERT", "TLS_KEY", "VM_BOOT_MODE", "VM_IPMI_ADDR", "QEMU_BINARY", "POWER_ON_AT_START"} {
+	for _, key := range []string{"QMP_SOCK", "IPMI_USER", "IPMI_PASS", "REDFISH_PORT", "IPMI_PORT", "SERIAL_ADDR", "TLS_CERT", "TLS_KEY", "VM_BOOT_MODE", "VM_IPMI_ADDR", "QEMU_BINARY", "POWER_ON_AT_START", "SYSTEM_UUID", "SYSTEM_UUID_FILE"} {
 		os.Unsetenv(key)
 	}
 
@@ -26,6 +26,18 @@ func TestLoad_Defaults(t *testing.T) {
 	assert.Equal(t, "", cfg.VMIPMIAddr)
 	assert.Equal(t, "qemu-system-x86_64", cfg.QEMUBinary)
 	assert.Equal(t, false, cfg.PowerOnAtStart)
+	assert.Equal(t, "", cfg.SystemUUID)
+	assert.Equal(t, "", cfg.SystemUUIDFile)
+}
+
+func TestLoad_SystemUUID(t *testing.T) {
+	os.Setenv("SYSTEM_UUID", "12345678-9abc-4def-8123-456789abcdef")
+	os.Setenv("SYSTEM_UUID_FILE", "/vm/system-uuid")
+	defer os.Unsetenv("SYSTEM_UUID")
+	defer os.Unsetenv("SYSTEM_UUID_FILE")
+	cfg := Load()
+	assert.Equal(t, "12345678-9abc-4def-8123-456789abcdef", cfg.SystemUUID)
+	assert.Equal(t, "/vm/system-uuid", cfg.SystemUUIDFile)
 }
 
 func TestLoad_QEMUBinary_Custom(t *testing.T) {

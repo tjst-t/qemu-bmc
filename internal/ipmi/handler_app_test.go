@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/tjst-t/qemu-bmc/internal/bmc"
 )
 
 func TestHandleGetDeviceID(t *testing.T) {
@@ -32,4 +33,22 @@ func TestHandleSetSessionPrivilege(t *testing.T) {
 func TestHandleSetSessionPrivilege_Empty(t *testing.T) {
 	code, _ := handleSetSessionPrivilege([]byte{})
 	assert.Equal(t, CompletionCodeInvalidField, code)
+}
+
+func TestHandleGetSystemGUID(t *testing.T) {
+	state := bmc.NewState("admin", "password")
+	guid := []byte{0xff, 0xee, 0xdd, 0xcc, 0xbb, 0xaa, 0x99, 0x88, 0x77, 0x66, 0x55, 0x44, 0x33, 0x22, 0x11, 0x00}
+	state.SetSystemGUID(guid)
+
+	code, data := handleAppCommand(&IPMIMessage{TargetLun: NetFnApp << 2, Command: CmdGetSystemGUID}, nil, state)
+	assert.Equal(t, CompletionCodeOK, code)
+	assert.Equal(t, guid, data)
+}
+
+func TestHandleGetSystemGUID_Unset(t *testing.T) {
+	code, _ := handleAppCommand(&IPMIMessage{TargetLun: NetFnApp << 2, Command: CmdGetSystemGUID}, nil, bmc.NewState("admin", "password"))
+	assert.Equal(t, CompletionCodeInvalidCommand, code)
+
+	code, _ = handleAppCommand(&IPMIMessage{TargetLun: NetFnApp << 2, Command: CmdGetSystemGUID}, nil, nil)
+	assert.Equal(t, CompletionCodeInvalidCommand, code)
 }

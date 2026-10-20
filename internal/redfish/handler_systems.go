@@ -42,7 +42,8 @@ func (s *Server) handleGetSystem(w http.ResponseWriter, r *http.Request) {
 		ODataID:   "/redfish/v1/Systems/1",
 		ODataEtag: etag,
 		ID:        "1",
-		Name:      "QEMU Virtual Machine",
+		Name:       "QEMU Virtual Machine",
+		UUID:       s.systemUUID,
 		PowerState: powerState,
 		Boot: BootSource{
 			BootSourceOverrideEnabled: boot.Enabled,

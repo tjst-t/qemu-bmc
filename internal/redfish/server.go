@@ -29,6 +29,7 @@ type Server struct {
 	currentMedia string
 	novncHandler *novnc.Handler
 	systemInfo   SystemInfo
+	systemUUID   string
 }
 
 // SystemInfo is the static VM hardware configuration reported on Systems/1.
@@ -49,6 +50,11 @@ func NewServer(m MachineInterface, user, pass, vncAddr string) *Server {
 	}
 	s.setupRoutes()
 	return s
+}
+
+// SetSystemUUID sets the UUID reported in Systems/1.
+func (s *Server) SetSystemUUID(uuid string) {
+	s.systemUUID = uuid
 }
 
 func (s *Server) setupRoutes() {

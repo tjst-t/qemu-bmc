@@ -330,3 +330,17 @@ func TestGetChannelInfo(t *testing.T) {
 	assert.Equal(t, uint8(5), info5.ChannelNumber)
 	assert.Equal(t, uint8(0x04), info5.ChannelMedium)
 }
+
+func TestState_SystemGUID(t *testing.T) {
+	s := NewState("admin", "password")
+	assert.Nil(t, s.SystemGUID())
+
+	guid := []byte{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16}
+	s.SetSystemGUID(guid)
+	got := s.SystemGUID()
+	assert.Equal(t, guid, got)
+
+	// Returned slice is a copy.
+	got[0] = 0xff
+	assert.Equal(t, byte(1), s.SystemGUID()[0])
+}

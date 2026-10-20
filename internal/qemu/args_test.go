@@ -215,6 +215,63 @@ func TestBuildCommandLine_NoSerialWhenEmpty(t *testing.T) {
 	}
 }
 
+func TestBuildCommandLine_InjectsUUID(t *testing.T) {
+	result, err := BuildCommandLine([]string{"-m", "4096"}, BuildOptions{
+		QMPSocketPath: "/tmp/qmp.sock",
+		SystemUUID:    "12345678-9abc-4def-8123-456789abcdef",
+	})
+	require.NoError(t, err)
+	val, ok := ArgValue(result, "-uuid")
+	assert.True(t, ok)
+	assert.Equal(t, "12345678-9abc-4def-8123-456789abcdef", val)
+}
+
+func TestBuildCommandLine_NoUUIDWhenEmpty(t *testing.T) {
+	result, err := BuildCommandLine([]string{"-m", "4096"}, BuildOptions{
+		QMPSocketPath: "/tmp/qmp.sock",
+	})
+	require.NoError(t, err)
+	assert.NotContains(t, result, "-uuid")
+}
+
+func TestBuildCommandLine_UserUUIDMatching(t *testing.T) {
+	result, err := BuildCommandLine([]string{"-uuid", "12345678-9ABC-4def-8123-456789abcdef"}, BuildOptions{
+		QMPSocketPath: "/tmp/qmp.sock",
+		SystemUUID:    "12345678-9abc-4def-8123-456789abcdef",
+	})
+	require.NoError(t, err)
+	count := 0
+	for _, a := range result {
+		if a == "-uuid" {
+			count++
+		}
+	}
+	assert.Equal(t, 1, count)
+}
+
+func TestBuildCommandLine_UserUUIDConflict(t *testing.T) {
+	_, err := BuildCommandLine([]string{"-uuid", "11111111-1111-4111-8111-111111111111"}, BuildOptions{
+		QMPSocketPath: "/tmp/qmp.sock",
+		SystemUUID:    "12345678-9abc-4def-8123-456789abcdef",
+	})
+	assert.Error(t, err)
+}
+
+// --- ArgValue ---
+
+func TestArgValue(t *testing.T) {
+	args := []string{"-m", "4096", "-uuid", "abc"}
+	val, ok := ArgValue(args, "-uuid")
+	assert.True(t, ok)
+	assert.Equal(t, "abc", val)
+
+	_, ok = ArgValue(args, "-smp")
+	assert.False(t, ok)
+
+	_, ok = ArgValue([]string{"-uuid"}, "-uuid")
+	assert.False(t, ok)
+}
+
 // --- ApplyBootOverride ---
 
 func TestApplyBootOverride_None(t *testing.T) {

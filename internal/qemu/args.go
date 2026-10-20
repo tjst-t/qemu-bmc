@@ -76,10 +76,22 @@ func ApplyDefaults(args []string) []string {
 type BuildOptions struct {
 	QMPSocketPath string
 	SerialAddr    string
+	SystemUUID    string // injected as -uuid unless the user already set it
+}
+
+// ArgValue returns the value following the last occurrence of flag in args.
+func ArgValue(args []string, flag string) (string, bool) {
+	val, found := "", false
+	for i := 0; i+1 < len(args); i++ {
+		if args[i] == flag {
+			val, found = args[i+1], true
+		}
+	}
+	return val, found
 }
 
 // BuildCommandLine validates user args, applies defaults, and injects
-// qemu-bmc-managed arguments (QMP, serial, display).
+// qemu-bmc-managed arguments (QMP, serial, display, UUID).
 func BuildCommandLine(userArgs []string, opts BuildOptions) ([]string, error) {
 	if err := ValidateArgs(userArgs); err != nil {
 		return nil, err
@@ -91,6 +103,17 @@ func BuildCommandLine(userArgs []string, opts BuildOptions) ([]string, error) {
 	args = append(args,
 		"-qmp", fmt.Sprintf("unix:%s,server,nowait", opts.QMPSocketPath),
 	)
+
+	// Inject system UUID
+	if opts.SystemUUID != "" {
+		if userUUID, ok := ArgValue(userArgs, "-uuid"); ok {
+			if !strings.EqualFold(userUUID, opts.SystemUUID) {
+				return nil, fmt.Errorf("argument -uuid %q conflicts with system UUID %q", userUUID, opts.SystemUUID)
+			}
+		} else {
+			args = append(args, "-uuid", opts.SystemUUID)
+		}
+	}
 
 	// Inject display none
 	args = append(args, "-display", "none")

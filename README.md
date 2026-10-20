@@ -231,6 +231,8 @@ ipmitool user enable 3
 | `VM_IPMI_ADDR` | (empty, disabled) | VM IPMI chardev listen address (e.g., `:9002`) |
 | `VNC_ADDR` | `localhost:5900` | QEMU VNC TCP address for noVNC proxy |
 | `POWER_ON_AT_START` | `false` | Power on VM automatically at startup (useful for non-MAAS setups) |
+| `SYSTEM_UUID` | (derived) | Fixed system UUID, passed to QEMU as `-uuid` and reported by Redfish `Systems/1` `UUID` and IPMI `mc guid`. If unset, it is read from `SYSTEM_UUID_FILE`, or derived from the hostname and saved there. Set it (or use a fixed `--hostname` / a mounted `/vm`) to keep it across container re-creation |
+| `SYSTEM_UUID_FILE` | `<VM_DISK dir>/system-uuid` | Where a derived UUID is persisted |
 
 ### Container Configuration
 
@@ -538,6 +540,8 @@ ipmitool user enable 3
 | `VM_IPMI_ADDR` | (空、無効) | VM IPMI chardev リッスンアドレス (例: `:9002`) |
 | `VNC_ADDR` | `localhost:5900` | noVNC プロキシが接続する QEMU VNC アドレス |
 | `POWER_ON_AT_START` | `false` | 起動時に VM を自動的に電源オンにする（MAAS を使わない構成で有用） |
+| `SYSTEM_UUID` | （導出） | システム UUID を固定する。QEMU に `-uuid` で渡し、Redfish `Systems/1` の `UUID` と IPMI `mc guid` で返す。未指定なら `SYSTEM_UUID_FILE` から読み、無ければホスト名から導出してそこへ保存する。コンテナを作り直しても保つには、これを指定するか、`--hostname` を固定するか、`/vm` をマウントする |
+| `SYSTEM_UUID_FILE` | `<VM_DISK のディレクトリ>/system-uuid` | 導出した UUID の保存先 |
 
 ### コンテナ設定
 

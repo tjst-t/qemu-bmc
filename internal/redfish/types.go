@@ -35,6 +35,7 @@ type ComputerSystem struct {
 	ODataEtag    string                `json:"@odata.etag,omitempty"`
 	ID           string                `json:"Id"`
 	Name         string                `json:"Name"`
+	UUID         string                `json:"UUID,omitempty"`
 	PowerState   string                `json:"PowerState"`
 	Boot         BootSource            `json:"Boot"`
 	Actions      ComputerSystemActions `json:"Actions"`
