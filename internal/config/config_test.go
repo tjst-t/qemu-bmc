@@ -9,7 +9,7 @@ import (
 
 func TestLoad_Defaults(t *testing.T) {
 	// Clear any env vars that might be set
-	for _, key := range []string{"QMP_SOCK", "IPMI_USER", "IPMI_PASS", "REDFISH_PORT", "IPMI_PORT", "SERIAL_ADDR", "TLS_CERT", "TLS_KEY", "VM_BOOT_MODE", "VM_IPMI_ADDR", "QEMU_BINARY", "POWER_ON_AT_START", "SYSTEM_UUID", "SYSTEM_UUID_FILE"} {
+	for _, key := range []string{"QMP_SOCK", "IPMI_USER", "IPMI_PASS", "REDFISH_PORT", "IPMI_PORT", "SERIAL_ADDR", "TLS_CERT", "TLS_KEY", "VM_BOOT_MODE", "VM_IPMI_ADDR", "QEMU_BINARY", "POWER_ON_AT_START", "SYSTEM_UUID", "SYSTEM_UUID_FILE", "VM_MACS"} {
 		os.Unsetenv(key)
 	}
 
@@ -28,6 +28,15 @@ func TestLoad_Defaults(t *testing.T) {
 	assert.Equal(t, false, cfg.PowerOnAtStart)
 	assert.Equal(t, "", cfg.SystemUUID)
 	assert.Equal(t, "", cfg.SystemUUIDFile)
+	assert.Nil(t, cfg.VMMACs)
+}
+
+func TestLoad_VMMACs(t *testing.T) {
+	// Entries are per NIC in order; an empty entry means "derive"
+	os.Setenv("VM_MACS", " 52:54:00:11:22:33 ,,02:00:00:00:00:01")
+	defer os.Unsetenv("VM_MACS")
+	cfg := Load()
+	assert.Equal(t, []string{"52:54:00:11:22:33", "", "02:00:00:00:00:01"}, cfg.VMMACs)
 }
 
 func TestLoad_SystemUUID(t *testing.T) {

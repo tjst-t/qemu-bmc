@@ -35,8 +35,9 @@ type Server struct {
 // SystemInfo is the static VM hardware configuration reported on Systems/1.
 // Zero values are treated as unknown and omitted from responses.
 type SystemInfo struct {
-	MemoryMiB int
-	CPUs      int
+	MemoryMiB    int
+	CPUs         int
+	MACAddresses []string // per-NIC MAC, in QEMU command-line order
 }
 
 // NewServer creates a new Redfish server
@@ -75,6 +76,12 @@ func (s *Server) setupRoutes() {
 	s.router.HandleFunc("/redfish/v1/Systems/{id}/", s.handleGetSystem).Methods("GET")
 	s.router.HandleFunc("/redfish/v1/Systems/{id}", s.handlePatchSystem).Methods("PATCH")
 	s.router.HandleFunc("/redfish/v1/Systems/{id}/", s.handlePatchSystem).Methods("PATCH")
+
+	// Ethernet interfaces
+	s.router.HandleFunc("/redfish/v1/Systems/{id}/EthernetInterfaces", s.handleEthernetInterfaceCollection).Methods("GET")
+	s.router.HandleFunc("/redfish/v1/Systems/{id}/EthernetInterfaces/", s.handleEthernetInterfaceCollection).Methods("GET")
+	s.router.HandleFunc("/redfish/v1/Systems/{id}/EthernetInterfaces/{nicid}", s.handleGetEthernetInterface).Methods("GET")
+	s.router.HandleFunc("/redfish/v1/Systems/{id}/EthernetInterfaces/{nicid}/", s.handleGetEthernetInterface).Methods("GET")
 
 	// Actions
 	s.router.HandleFunc("/redfish/v1/Systems/{id}/Actions/ComputerSystem.Reset", s.handleResetAction).Methods("POST")

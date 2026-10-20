@@ -190,6 +190,8 @@ ipmitool user enable 3
 | GET | `/redfish/v1/Systems/1` | Computer system |
 | PATCH | `/redfish/v1/Systems/1` | Boot device override |
 | POST | `/redfish/v1/Systems/1/Actions/ComputerSystem.Reset` | Power control |
+| GET | `/redfish/v1/Systems/1/EthernetInterfaces` | NIC collection |
+| GET | `/redfish/v1/Systems/1/EthernetInterfaces/{n}` | NIC (MACAddress, LinkStatus) |
 | GET | `/redfish/v1/Managers` | Manager collection |
 | GET | `/redfish/v1/Managers/1` | BMC manager |
 | GET | `/redfish/v1/Managers/1/VirtualMedia` | VirtualMedia collection |
@@ -233,6 +235,7 @@ ipmitool user enable 3
 | `POWER_ON_AT_START` | `false` | Power on VM automatically at startup (useful for non-MAAS setups) |
 | `SYSTEM_UUID` | (derived) | Fixed system UUID, passed to QEMU as `-uuid` and reported by Redfish `Systems/1` `UUID` and IPMI `mc guid`. If unset, it is read from `SYSTEM_UUID_FILE`, or derived from the hostname and saved there. Set it (or use a fixed `--hostname` / a mounted `/vm`) to keep it across container re-creation |
 | `SYSTEM_UUID_FILE` | `<VM_DISK dir>/system-uuid` | Where a derived UUID is persisted |
+| `VM_MACS` | (derived) | Comma-separated MAC addresses of the VM NICs, in order (an empty entry is derived). Unset MACs are derived from the system UUID, so they stay fixed per node and do not overlap between nodes. Reported by Redfish `Systems/1/EthernetInterfaces` |
 
 ### Container Configuration
 
@@ -500,6 +503,8 @@ ipmitool user enable 3
 | GET | `/redfish/v1/Systems/1` | コンピュータシステム |
 | PATCH | `/redfish/v1/Systems/1` | ブートデバイス変更 |
 | POST | `/redfish/v1/Systems/1/Actions/ComputerSystem.Reset` | 電源制御 |
+| GET | `/redfish/v1/Systems/1/EthernetInterfaces` | NIC 一覧 |
+| GET | `/redfish/v1/Systems/1/EthernetInterfaces/{n}` | NIC（MACAddress・LinkStatus） |
 | GET | `/redfish/v1/Managers` | マネージャコレクション |
 | GET | `/redfish/v1/Managers/1` | BMC マネージャ |
 | GET | `/redfish/v1/Managers/1/VirtualMedia` | VirtualMedia コレクション |
@@ -542,6 +547,7 @@ ipmitool user enable 3
 | `POWER_ON_AT_START` | `false` | 起動時に VM を自動的に電源オンにする（MAAS を使わない構成で有用） |
 | `SYSTEM_UUID` | （導出） | システム UUID を固定する。QEMU に `-uuid` で渡し、Redfish `Systems/1` の `UUID` と IPMI `mc guid` で返す。未指定なら `SYSTEM_UUID_FILE` から読み、無ければホスト名から導出してそこへ保存する。コンテナを作り直しても保つには、これを指定するか、`--hostname` を固定するか、`/vm` をマウントする |
 | `SYSTEM_UUID_FILE` | `<VM_DISK のディレクトリ>/system-uuid` | 導出した UUID の保存先 |
+| `VM_MACS` | （導出） | VM の NIC の MAC アドレスを順にカンマ区切りで指定する（空の項目は導出）。未指定の MAC はシステム UUID から導出するので、ノードごとに固定され、ノード間で重ならない。Redfish `Systems/1/EthernetInterfaces` で返す |
 
 ### コンテナ設定
 

@@ -76,7 +76,9 @@ func ApplyDefaults(args []string) []string {
 type BuildOptions struct {
 	QMPSocketPath string
 	SerialAddr    string
-	SystemUUID    string // injected as -uuid unless the user already set it
+	SystemUUID    string                 // injected as -uuid unless the user already set it
+	MACAddresses  []string               // per-NIC MACs in command-line order; empty entries use DeriveMAC
+	DeriveMAC     func(index int) string // MAC for a NIC without one; nil leaves it to QEMU
 }
 
 // ArgValue returns the value following the last occurrence of flag in args.
@@ -91,13 +93,19 @@ func ArgValue(args []string, flag string) (string, bool) {
 }
 
 // BuildCommandLine validates user args, applies defaults, and injects
-// qemu-bmc-managed arguments (QMP, serial, display, UUID).
+// qemu-bmc-managed arguments (QMP, serial, display, UUID, NIC MACs).
 func BuildCommandLine(userArgs []string, opts BuildOptions) ([]string, error) {
 	if err := ValidateArgs(userArgs); err != nil {
 		return nil, err
 	}
 
 	args := ApplyDefaults(userArgs)
+
+	// Fix the MAC address of every guest NIC
+	args, err := AssignMACs(args, opts.MACAddresses, opts.DeriveMAC)
+	if err != nil {
+		return nil, err
+	}
 
 	// Inject QMP socket
 	args = append(args,

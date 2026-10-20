@@ -40,8 +40,9 @@ type ComputerSystem struct {
 	Boot         BootSource            `json:"Boot"`
 	Actions      ComputerSystemActions `json:"Actions"`
 
-	MemorySummary    *MemorySummary    `json:"MemorySummary,omitempty"`
-	ProcessorSummary *ProcessorSummary `json:"ProcessorSummary,omitempty"`
+	MemorySummary      *MemorySummary    `json:"MemorySummary,omitempty"`
+	ProcessorSummary   *ProcessorSummary `json:"ProcessorSummary,omitempty"`
+	EthernetInterfaces ODataID           `json:"EthernetInterfaces"`
 }
 
 // MemorySummary describes the system memory
@@ -52,6 +53,34 @@ type MemorySummary struct {
 // ProcessorSummary describes the system processors
 type ProcessorSummary struct {
 	Count int `json:"Count"`
+}
+
+// EthernetInterfaceCollection is a collection of system NICs
+type EthernetInterfaceCollection struct {
+	ODataType    string    `json:"@odata.type"`
+	ODataID      string    `json:"@odata.id"`
+	Name         string    `json:"Name"`
+	MembersCount int       `json:"Members@odata.count"`
+	Members      []ODataID `json:"Members"`
+}
+
+// EthernetInterface represents a system NIC
+type EthernetInterface struct {
+	ODataType           string         `json:"@odata.type"`
+	ODataID             string         `json:"@odata.id"`
+	ODataContext        string         `json:"@odata.context,omitempty"`
+	ID                  string         `json:"Id"`
+	Name                string         `json:"Name"`
+	MACAddress          string         `json:"MACAddress,omitempty"`
+	PermanentMACAddress string         `json:"PermanentMACAddress,omitempty"`
+	LinkStatus          string         `json:"LinkStatus"`
+	Status              ResourceStatus `json:"Status"`
+}
+
+// ResourceStatus is the common Redfish Status object
+type ResourceStatus struct {
+	State  string `json:"State"`
+	Health string `json:"Health"`
 }
 
 // BootSource represents boot source override

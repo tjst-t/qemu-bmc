@@ -52,13 +52,20 @@ func main() {
 			QMPSocketPath: cfg.QMPSocket,
 			SerialAddr:    cfg.SerialAddr,
 			SystemUUID:    systemUUID,
+			MACAddresses:  cfg.VMMACs,
+			// NICs without a configured MAC get one derived from the UUID,
+			// so it is stable per node and differs between nodes
+			DeriveMAC: sysuuid.MustParse(systemUUID).MAC,
 		})
 		if err != nil {
 			log.Fatalf("Invalid QEMU arguments: %v", err)
 		}
 		// The QEMU command line is authoritative for the hardware we report
 		hw := qemu.HardwareFromArgs(cmdArgs)
-		systemInfo = redfish.SystemInfo{MemoryMiB: hw.MemoryMiB, CPUs: hw.CPUs}
+		systemInfo = redfish.SystemInfo{MemoryMiB: hw.MemoryMiB, CPUs: hw.CPUs, MACAddresses: hw.MACAddresses}
+		for i, mac := range hw.MACAddresses {
+			log.Printf("NIC %d MAC: %s", i, mac)
+		}
 
 		qmpClient = qmp.NewDisconnectedClient(cfg.QMPSocket)
 		pm := qemu.NewProcessManager(cfg.QEMUBinary, cmdArgs, qemu.DefaultCommandFactory)
@@ -92,6 +99,19 @@ func main() {
 				log.Fatalf("Invalid SYSTEM_UUID: %v", err)
 			}
 			systemUUID = u.String()
+		}
+
+		// Likewise, NICs are only reported when their MACs are configured
+		// (they must match the external QEMU's NICs).
+		for _, mac := range cfg.VMMACs {
+			if mac == "" {
+				continue
+			}
+			mac, err := qemu.NormalizeMAC(mac)
+			if err != nil {
+				log.Fatalf("Invalid VM_MACS: %v", err)
+			}
+			systemInfo.MACAddresses = append(systemInfo.MACAddresses, mac)
 		}
 	}
 	defer qmpClient.Close()

@@ -133,12 +133,13 @@ print_summary() {
 # --- Container management ---
 
 start_test_container() {
-    local extra_env=""
+    # -e values may contain spaces (e.g. QEMU_EXTRA_ARGS), so keep them in an array
+    local extra_env=()
     local extra_args=""
 
     while [ $# -gt 0 ]; do
         case "$1" in
-            -e) extra_env="$extra_env -e $2"; shift 2 ;;
+            -e) extra_env+=(-e "$2"); shift 2 ;;
             -v) extra_args="$extra_args -v $2"; shift 2 ;;
             --hostname) extra_args="$extra_args --hostname $2"; shift 2 ;;
             --no-kvm) extra_args="$extra_args --device /dev/net/tun:/dev/net/tun"; shift ;;
@@ -168,7 +169,7 @@ start_test_container() {
         -p "${VNC_HOST_PORT}:5900" \
         -e "IPMI_USER=${IPMI_USER}" \
         -e "IPMI_PASS=${IPMI_PASS}" \
-        $extra_env \
+        "${extra_env[@]}" \
         $extra_args \
         "$TEST_IMAGE"
 

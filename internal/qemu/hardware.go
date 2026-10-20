@@ -10,13 +10,16 @@ import (
 type Hardware struct {
 	MemoryMiB int
 	CPUs      int
+	// MACAddresses holds each guest NIC's MAC in command-line order (empty
+	// when not set on the command line).
+	MACAddresses []string
 }
 
-// HardwareFromArgs extracts the memory size (-m) and CPU count (-smp) from
-// QEMU arguments. When a flag appears more than once, the last one wins,
-// matching QEMU's behaviour.
+// HardwareFromArgs extracts the memory size (-m), CPU count (-smp) and NIC
+// MAC addresses from QEMU arguments. When -m or -smp appears more than once,
+// the last one wins, matching QEMU's behaviour.
 func HardwareFromArgs(args []string) Hardware {
-	var hw Hardware
+	hw := Hardware{MACAddresses: MACAddressesFromArgs(args)}
 	for i := 0; i+1 < len(args); i++ {
 		switch args[i] {
 		case "-m":

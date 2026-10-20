@@ -109,6 +109,7 @@ if [ "${DEBUG:-false}" = "true" ]; then
     echo "VM_BOOT_MODE: ${VM_BOOT_MODE:-bios}" >&2
     echo "SYSTEM_UUID: ${SYSTEM_UUID:-(derived)}" >&2
     echo "SYSTEM_UUID_FILE: ${SYSTEM_UUID_FILE:-(none)}" >&2
+    echo "VM_MACS: ${VM_MACS:-(derived)}" >&2
     echo "========================" >&2
 fi
 

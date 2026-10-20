@@ -8,15 +8,6 @@
 #   source /scripts/setup-network.sh
 #   ARGS=$(build_network_args)
 
-# Generate a deterministic MAC address from interface name
-# Prefix: 52:54:00 (QEMU OUI), remaining 3 bytes from md5(ifname)
-generate_mac() {
-    local ifname="$1"
-    local hash
-    hash=$(echo -n "$ifname" | md5sum | cut -c1-6)
-    echo "52:54:00:${hash:0:2}:${hash:2:2}:${hash:4:2}"
-}
-
 # Detect network interfaces for VM passthrough
 # If VM_NETWORKS is set, use those (comma-separated)
 # Otherwise, auto-detect eth2+ (skip eth0=management, eth1=IPMI)
@@ -66,6 +57,8 @@ setup_bridge() {
 
 # Build QEMU network arguments for all detected interfaces
 # Outputs -netdev/-device argument pairs to stdout
+# NIC MAC addresses are not set here: qemu-bmc assigns them (VM_MACS, or
+# derived from the system UUID so they differ between nodes)
 build_network_args() {
     local interfaces
     interfaces=$(detect_interfaces)
@@ -78,14 +71,12 @@ build_network_args() {
     local args=""
     for iface in $interfaces; do
         local tap="tap${idx}"
-        local mac
-        mac=$(generate_mac "$iface")
 
         # Setup bridge (requires NET_ADMIN capability)
         setup_bridge "$iface" "$idx"
 
         args="$args -netdev tap,id=net${idx},ifname=${tap},script=no,downscript=no"
-        args="$args -device virtio-net-pci,netdev=net${idx},mac=${mac}"
+        args="$args -device virtio-net-pci,netdev=net${idx}"
 
         idx=$((idx + 1))
     done

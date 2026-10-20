@@ -57,6 +57,7 @@ func (s *Server) handleGetSystem(w http.ResponseWriter, r *http.Request) {
 				AllowableValues: []string{"On", "ForceOff", "GracefulShutdown", "ForceRestart", "GracefulRestart"},
 			},
 		},
+		EthernetInterfaces: ODataID{ODataID: ethernetInterfacesPath},
 	}
 	if s.systemInfo.MemoryMiB > 0 {
 		system.MemorySummary = &MemorySummary{

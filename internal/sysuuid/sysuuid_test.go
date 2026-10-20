@@ -1,6 +1,7 @@
 package sysuuid
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -117,4 +118,30 @@ func TestResolve_NoFile(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, Derive("node1"), u)
 	assert.Equal(t, SourceHostname, src)
+}
+
+func TestMAC_DeterministicPerUUIDAndIndex(t *testing.T) {
+	a := MustParse("12345678-9abc-4def-8123-456789abcdef")
+	b := MustParse("12345678-9abc-4def-8123-456789abcdee")
+
+	assert.Equal(t, a.MAC(0), a.MAC(0))
+	assert.NotEqual(t, a.MAC(0), a.MAC(1), "NICs of one node differ")
+	assert.NotEqual(t, a.MAC(0), b.MAC(0), "nodes with different UUIDs differ")
+
+	for _, mac := range []string{a.MAC(0), a.MAC(1), b.MAC(0)} {
+		assert.Regexp(t, `^52:54:[0-9a-f]{2}:[0-9a-f]{2}:[0-9a-f]{2}:[0-9a-f]{2}$`, mac)
+	}
+}
+
+func TestMAC_UniqueAcrossDerivedNodes(t *testing.T) {
+	seen := map[string]string{}
+	for i := 0; i < 200; i++ {
+		u := Derive(fmt.Sprintf("node%d", i))
+		for nic := 0; nic < 4; nic++ {
+			mac := u.MAC(nic)
+			key := fmt.Sprintf("node%d/nic%d", i, nic)
+			require.NotContains(t, seen, mac, "%s collides with %s", key, seen[mac])
+			seen[mac] = key
+		}
+	}
 }
