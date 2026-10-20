@@ -207,7 +207,7 @@
       "number": 12,
       "kind": "task",
       "title": "NIC の MAC アドレスを固定し、EthernetInterfaces で返す",
-      "status": "in-progress",
+      "status": "done",
       "parent": "systems-1-uuid-mac-cpu",
       "dependsOn": [
         "uuid-redfish-uuid-ipmi-get-system-guid"
@@ -217,12 +217,12 @@
       "labels": [],
       "body": "VM の NIC の MAC を環境変数で指定でき、未指定なら UUID から導出してノードごとに一意にする（containerlab で並べたときに重ならない）。Redfish に Systems/1/EthernetInterfaces と各 NIC（MACAddress・LinkStatus）を足し、Systems/1 からリンクする。フォークのコードは使わず独自に実装する。",
       "doneWhen": "Systems/1/EthernetInterfaces が NIC ごとの MAC を返し、ゲストの ip link の MAC と一致する。2 ノードで MAC が重ならない",
-      "resolution": null,
+      "resolution": "Factory が取り込みました（factory/nic-mac-ethernetinterfaces）",
       "refs": [],
       "threads": [],
       "createdAt": "2026-10-20T14:43:41.139Z",
-      "updatedAt": "2026-10-20T20:43:14.306Z",
-      "closedAt": null,
+      "updatedAt": "2026-10-20T21:02:33.272Z",
+      "closedAt": "2026-10-20T21:02:33.272Z",
       "extra": {}
     },
     {
