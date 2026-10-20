@@ -142,6 +142,12 @@ start_test_container() {
         esac
     done
 
+    # Pass /dev/kvm through only when the host has it (e.g. CI runners
+    # without KVM); entrypoint.sh falls back to TCG otherwise
+    if [ -e /dev/kvm ]; then
+        extra_args="$extra_args --device /dev/kvm:/dev/kvm"
+    fi
+
     # Stop any existing container
     docker rm -f "$TEST_CONTAINER" 2>/dev/null || true
 
@@ -149,7 +155,6 @@ start_test_container() {
     # shellcheck disable=SC2086
     docker run -d \
         --name "$TEST_CONTAINER" \
-        --device /dev/kvm:/dev/kvm \
         --device /dev/net/tun:/dev/net/tun \
         --cap-add NET_ADMIN \
         --cap-add SYS_ADMIN \
