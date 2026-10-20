@@ -93,7 +93,7 @@
       "number": 8,
       "kind": "task",
       "title": "IPMI の Get Channel Cipher Suites に対応する",
-      "status": "ready",
+      "status": "in-progress",
       "parent": "v0-6-0",
       "dependsOn": [],
       "milestone": null,
@@ -105,7 +105,7 @@
       "refs": [],
       "threads": [],
       "createdAt": "2026-10-20T14:43:40.225Z",
-      "updatedAt": "2026-10-20T14:43:40.225Z",
+      "updatedAt": "2026-10-20T20:01:24.309Z",
       "closedAt": null,
       "extra": {}
     },
