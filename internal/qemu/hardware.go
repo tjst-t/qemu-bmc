@@ -20,19 +20,19 @@ func HardwareFromArgs(args []string) Hardware {
 	for i := 0; i+1 < len(args); i++ {
 		switch args[i] {
 		case "-m":
-			hw.MemoryMiB = parseMemoryMiB(args[i+1])
+			hw.MemoryMiB = ParseMemoryMiB(args[i+1])
 			i++
 		case "-smp":
-			hw.CPUs = parseSMPCPUs(args[i+1])
+			hw.CPUs = ParseSMPCPUs(args[i+1])
 			i++
 		}
 	}
 	return hw
 }
 
-// parseMemoryMiB parses a -m value such as "2048", "4G" or "size=4G,maxmem=8G".
-// A value without a suffix is in MiB.
-func parseMemoryMiB(val string) int {
+// ParseMemoryMiB parses a -m value such as "2048", "4G" or "size=4G,maxmem=8G".
+// A value without a suffix is in MiB. It returns 0 if the value is invalid.
+func ParseMemoryMiB(val string) int {
 	size := ""
 	for i, opt := range strings.Split(val, ",") {
 		if v, ok := strings.CutPrefix(opt, "size="); ok {
@@ -66,10 +66,11 @@ func parseMemoryMiB(val string) int {
 	return int(n * multiplier)
 }
 
-// parseSMPCPUs parses a -smp value such as "4", "cpus=4,sockets=2" or
+// ParseSMPCPUs parses a -smp value such as "4", "cpus=4,sockets=2" or
 // "sockets=2,cores=2,threads=2". Without an explicit count, the CPU count
-// is the product of the topology parameters.
-func parseSMPCPUs(val string) int {
+// is the product of the topology parameters. It returns 0 if the value is
+// invalid.
+func ParseSMPCPUs(val string) int {
 	count := 0
 	topology := 1
 	hasTopology := false

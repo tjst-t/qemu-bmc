@@ -101,8 +101,8 @@ make container-test-all
 | `VM_BOOT_MODE` | `bios` | Default boot mode |
 | `VM_IPMI_ADDR` | (empty, disabled) | VM IPMI chardev listen address (e.g., `:9002`) |
 | `POWER_ON_AT_START` | `false` | Power on VM automatically at container start |
-| `VM_MEMORY` | `2048` | Legacy mode only: VM memory (MiB) reported as Systems/1 `MemorySummary.TotalSystemMemoryGiB`. In process management mode the QEMU `-m` argument is used |
-| `VM_CPUS` | `2` | Legacy mode only: CPU count reported as Systems/1 `ProcessorSummary.Count`. In process management mode the QEMU `-smp` argument is used |
+| `VM_MEMORY` | `2048` | Legacy mode only: VM memory reported as Systems/1 `MemorySummary.TotalSystemMemoryGiB`. Parsed like QEMU `-m` (`2048` = MiB, `4G`, `512M`, `size=...`); omitted if unparsable. In process management mode the QEMU `-m` argument is used |
+| `VM_CPUS` | `2` | Legacy mode only: CPU count reported as Systems/1 `ProcessorSummary.Count`. Parsed like QEMU `-smp`; omitted if unparsable. In process management mode the QEMU `-smp` argument is used |
 
 ### Container Configuration (entrypoint.sh)
 

@@ -104,11 +104,37 @@ func TestLoad_VMHardware_Custom(t *testing.T) {
 }
 
 func TestLoad_VMHardware_Invalid(t *testing.T) {
+	// Unparsable values must not be reported as the 2048/2 defaults, which
+	// would not match the VM; zero means unknown and is omitted by Redfish.
 	os.Setenv("VM_MEMORY", "lots")
 	os.Setenv("VM_CPUS", "-1")
 	defer os.Unsetenv("VM_MEMORY")
 	defer os.Unsetenv("VM_CPUS")
 	cfg := Load()
-	assert.Equal(t, 2048, cfg.VMMemoryMiB)
-	assert.Equal(t, 2, cfg.VMCPUs)
+	assert.Equal(t, 0, cfg.VMMemoryMiB)
+	assert.Equal(t, 0, cfg.VMCPUs)
+}
+
+func TestLoad_VMHardware_QEMUSyntax(t *testing.T) {
+	tests := []struct {
+		memory    string
+		cpus      string
+		memoryMiB int
+		cpuCount  int
+	}{
+		{"4G", "4", 4096, 4},
+		{"512M", "cpus=6,sockets=1", 512, 6},
+		{"size=8G,maxmem=16G", "sockets=2,cores=2", 8192, 4},
+	}
+	for _, tt := range tests {
+		t.Run(tt.memory+"/"+tt.cpus, func(t *testing.T) {
+			os.Setenv("VM_MEMORY", tt.memory)
+			os.Setenv("VM_CPUS", tt.cpus)
+			defer os.Unsetenv("VM_MEMORY")
+			defer os.Unsetenv("VM_CPUS")
+			cfg := Load()
+			assert.Equal(t, tt.memoryMiB, cfg.VMMemoryMiB)
+			assert.Equal(t, tt.cpuCount, cfg.VMCPUs)
+		})
+	}
 }
