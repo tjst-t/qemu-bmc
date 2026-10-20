@@ -7,6 +7,7 @@ TEST_CONTAINER="${TEST_CONTAINER:-qemu-bmc-test}"
 IPMI_HOST="${IPMI_HOST:-127.0.0.1}"
 IPMI_PORT="${IPMI_PORT:-623}"
 REDFISH_PORT="${REDFISH_PORT:-443}"
+VNC_HOST_PORT="${VNC_HOST_PORT:-5900}"
 IPMI_USER="${IPMI_USER:-admin}"
 IPMI_PASS="${IPMI_PASS:-password}"
 EVIDENCE_DIR="${EVIDENCE_DIR:-tests/evidence}"
@@ -43,7 +44,7 @@ assert_contains() {
     local haystack="$1"
     local needle="$2"
     local msg="${3:-Expected output to contain '$needle'}"
-    if echo "$haystack" | grep -qF "$needle"; then
+    if echo "$haystack" | grep -qF -- "$needle"; then
         return 0
     else
         echo -e "${RED}FAIL: $msg${NC}" >&2
@@ -57,7 +58,7 @@ assert_not_contains() {
     local haystack="$1"
     local needle="$2"
     local msg="${3:-Expected output NOT to contain '$needle'}"
-    if ! echo "$haystack" | grep -qF "$needle"; then
+    if ! echo "$haystack" | grep -qF -- "$needle"; then
         return 0
     else
         echo -e "${RED}FAIL: $msg${NC}" >&2
@@ -98,8 +99,9 @@ run_test() {
 
     echo -n "  $test_name ... "
     local output
-    output=$("$test_name" 2>&1)
-    local rc=$?
+    local rc=0
+    # "|| rc=$?" keeps a failing test from aborting runners using set -e
+    output=$("$test_name" 2>&1) || rc=$?
 
     if [ $rc -eq 0 ]; then
         echo -e "${GREEN}PASS${NC}"
@@ -161,7 +163,7 @@ start_test_container() {
         --security-opt apparmor=unconfined \
         -p "${IPMI_PORT}:623/udp" \
         -p "${REDFISH_PORT}:443" \
-        -p "5900:5900" \
+        -p "${VNC_HOST_PORT}:5900" \
         -e "IPMI_USER=${IPMI_USER}" \
         -e "IPMI_PASS=${IPMI_PASS}" \
         $extra_env \
@@ -281,7 +283,7 @@ wait_for_qemu_running() {
     local timeout="${1:-30}"
     local i=0
     while [ $i -lt "$timeout" ]; do
-        if container_exec pgrep -x qemu-system-x86 >/dev/null 2>&1; then
+        if [ -n "$(get_qemu_pid)" ]; then
             return 0
         fi
         sleep 1
@@ -295,7 +297,7 @@ wait_for_qemu_stopped() {
     local timeout="${1:-30}"
     local i=0
     while [ $i -lt "$timeout" ]; do
-        if ! container_exec pgrep -x qemu-system-x86 >/dev/null 2>&1; then
+        if [ -z "$(get_qemu_pid)" ]; then
             return 0
         fi
         sleep 1
@@ -305,8 +307,11 @@ wait_for_qemu_stopped() {
     return 1
 }
 
+# The runtime image has no procps (pgrep), so scan /proc directly
 get_qemu_pid() {
-    container_exec pgrep -x qemu-system-x86 2>/dev/null || echo ""
+    container_exec sh -c 'for d in /proc/[0-9]*; do
+        [ "$(cat "$d/comm" 2>/dev/null)" = "qemu-system-x86" ] && echo "${d#/proc/}" && break
+    done' 2>/dev/null || echo ""
 }
 
 wait_for_ipmi_ready() {

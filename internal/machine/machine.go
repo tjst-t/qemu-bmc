@@ -38,7 +38,10 @@ type Machine struct {
 	qmpClient      qmp.Client
 	processManager ProcessManager // nil = legacy mode
 	bootOverride   BootOverride
-	mu             sync.RWMutex
+	// runningBootTarget is the boot target the current QEMU process was
+	// started with (process management mode only).
+	runningBootTarget string
+	mu                sync.RWMutex
 }
 
 // New creates a new Machine with the given QMP client (legacy mode)
@@ -180,6 +183,9 @@ func (m *Machine) resetProcessMode(resetType string) error {
 		if err := m.processManager.Start(target); err != nil {
 			return fmt.Errorf("starting QEMU: %w", err)
 		}
+		m.mu.Lock()
+		m.runningBootTarget = target
+		m.mu.Unlock()
 
 		if err := m.waitForQMP(30 * time.Second); err != nil {
 			return fmt.Errorf("waiting for QMP: %w", err)
@@ -197,6 +203,14 @@ func (m *Machine) resetProcessMode(resetType string) error {
 		return m.processManager.WaitForExit(30 * time.Second)
 
 	case "ForceRestart":
+		if m.processManager.IsRunning() && m.bootTargetChanged() {
+			// -boot is fixed at QEMU startup, so system_reset would boot the
+			// old device. Restart the process to apply the new boot target.
+			if err := m.processManager.Stop(30 * time.Second); err != nil {
+				return fmt.Errorf("stopping QEMU: %w", err)
+			}
+			return m.resetProcessMode("On")
+		}
 		return m.qmpClient.SystemReset()
 
 	case "GracefulShutdown":
@@ -222,6 +236,20 @@ func (m *Machine) resetProcessMode(resetType string) error {
 	default:
 		return fmt.Errorf("unsupported reset type: %s", resetType)
 	}
+}
+
+// bootTargetChanged reports whether the boot target for the next boot differs
+// from the one the running QEMU process was started with.
+func (m *Machine) bootTargetChanged() bool {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	normalize := func(t string) string {
+		if t == "" {
+			return "None"
+		}
+		return t
+	}
+	return normalize(m.bootOverride.Target) != normalize(m.runningBootTarget)
 }
 
 // waitForQMP polls qmpClient.Connect() until success or timeout.

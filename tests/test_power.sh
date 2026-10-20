@@ -112,7 +112,7 @@ test_power_off_on_cycle() {
 test_qemu_crash_detection() {
     local pid
     pid=$(get_qemu_pid)
-    container_exec kill -9 "$pid" 2>/dev/null || true
+    container_exec sh -c "kill -9 $pid" 2>/dev/null || true
     wait_for_power_state "off" 30
     local state
     state=$(ipmi_cmd power status 2>/dev/null)
@@ -129,7 +129,7 @@ test_power_on_after_crash() {
 }
 
 # --- Run tests ---
-start_test_container
+start_test_container -e "POWER_ON_AT_START=true"
 wait_for_ipmi_ready 60
 
 run_test test_initial_power_on

@@ -404,6 +404,51 @@ func TestProcessMode_Reset_ForceRestart_SystemReset(t *testing.T) {
 	assert.Contains(t, qmpMock.Calls(), "SystemReset")
 }
 
+func TestProcessMode_Reset_ForceRestart_BootOnceRestartsProcess(t *testing.T) {
+	qmpMock := newMockQMPClient(qmp.StatusRunning)
+	pm := newMockProcessManager(false)
+	m := NewWithProcess(qmpMock, pm)
+
+	// Power on with the default boot device
+	require.NoError(t, m.Reset("On"))
+	require.Equal(t, []string{"None"}, pm.startCalls)
+
+	// Once Pxe, then reset while powered on: QEMU must be restarted with Pxe
+	require.NoError(t, m.SetBootOverride(BootOverride{Enabled: "Once", Target: "Pxe", Mode: "UEFI"}))
+	require.NoError(t, m.Reset("ForceRestart"))
+	assert.Equal(t, []string{"None", "Pxe"}, pm.startCalls)
+	assert.Contains(t, pm.calls, "Stop")
+	assert.NotContains(t, qmpMock.Calls(), "SystemReset")
+	assert.True(t, pm.running)
+
+	boot := m.GetBootOverride()
+	assert.Equal(t, "Disabled", boot.Enabled)
+	assert.Equal(t, "None", boot.Target)
+
+	// Next reset must go back to the original boot device
+	require.NoError(t, m.Reset("ForceRestart"))
+	assert.Equal(t, []string{"None", "Pxe", "None"}, pm.startCalls)
+	assert.NotContains(t, qmpMock.Calls(), "SystemReset")
+
+	// Further resets with no override change use system_reset
+	require.NoError(t, m.Reset("ForceRestart"))
+	assert.Equal(t, []string{"None", "Pxe", "None"}, pm.startCalls)
+	assert.Contains(t, qmpMock.Calls(), "SystemReset")
+}
+
+func TestProcessMode_Reset_ForceRestart_ContinuousSameTarget_SystemReset(t *testing.T) {
+	qmpMock := newMockQMPClient(qmp.StatusRunning)
+	pm := newMockProcessManager(false)
+	m := NewWithProcess(qmpMock, pm)
+
+	require.NoError(t, m.SetBootOverride(BootOverride{Enabled: "Continuous", Target: "Pxe", Mode: "UEFI"}))
+	require.NoError(t, m.Reset("On"))
+
+	require.NoError(t, m.Reset("ForceRestart"))
+	assert.Equal(t, []string{"Pxe"}, pm.startCalls)
+	assert.Contains(t, qmpMock.Calls(), "SystemReset")
+}
+
 func TestProcessMode_Reset_GracefulShutdown(t *testing.T) {
 	qmpMock := newMockQMPClient(qmp.StatusRunning)
 	pm := newMockProcessManager(true)

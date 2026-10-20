@@ -56,6 +56,40 @@ test_bootdev_once_reset() {
     assert_contains "$result" "Boot" "Systems/1 should have Boot information"
 }
 
+qemu_cmdline() {
+    container_exec cat /proc/$(get_qemu_pid)/cmdline 2>/dev/null | tr '\0' ' '
+}
+
+test_bootdev_once_pxe_on_reset() {
+    # Start from no override and a QEMU process booted from the default device
+    redfish_patch "/redfish/v1/Systems/1" \
+        '{"Boot":{"BootSourceOverrideTarget":"None","BootSourceOverrideEnabled":"Disabled"}}' \
+        >/dev/null 2>&1
+    ipmi_cmd power cycle >/dev/null 2>&1
+    wait_for_qemu_running 30
+    wait_for_ipmi_ready 30
+    local cmdline
+    cmdline=$(qemu_cmdline)
+    assert_contains "$cmdline" "-boot c" "QEMU should boot from disk before override" || return 1
+
+    # Once Pxe + reset while powered on -> next boot is PXE
+    ipmi_cmd chassis bootdev pxe >/dev/null 2>&1
+    ipmi_cmd power reset >/dev/null 2>&1
+    wait_for_qemu_running 30
+    wait_for_ipmi_ready 30
+    cmdline=$(qemu_cmdline)
+    assert_contains "$cmdline" "-boot n" "QEMU should boot from PXE after reset with Once Pxe" || return 1
+
+    # Following reset (Redfish ForceRestart) -> back to the original device
+    redfish_post "/redfish/v1/Systems/1/Actions/ComputerSystem.Reset" \
+        '{"ResetType":"ForceRestart"}' >/dev/null 2>&1
+    wait_for_qemu_running 30
+    wait_for_ipmi_ready 30
+    cmdline=$(qemu_cmdline)
+    assert_contains "$cmdline" "-boot c" "QEMU should boot from disk again on the next reset" || return 1
+    assert_not_contains "$cmdline" "-boot n" "Once Pxe should not persist past one boot"
+}
+
 test_bootdev_continuous() {
     # Set boot override via Redfish with Continuous
     redfish_patch "/redfish/v1/Systems/1" \
@@ -85,7 +119,7 @@ test_bootdev_redfish_pxe() {
 
 test_bootmode_bios() {
     stop_test_container
-    start_test_container -e "VM_BOOT_MODE=bios"
+    start_test_container -e "VM_BOOT_MODE=bios" -e "POWER_ON_AT_START=true"
     wait_for_qemu_running 30
     local cmdline
     cmdline=$(container_exec cat /proc/$(get_qemu_pid)/cmdline 2>/dev/null | tr '\0' ' ')
@@ -94,7 +128,7 @@ test_bootmode_bios() {
 
 test_bootmode_uefi() {
     stop_test_container
-    start_test_container -e "VM_BOOT_MODE=uefi"
+    start_test_container -e "VM_BOOT_MODE=uefi" -e "POWER_ON_AT_START=true"
     wait_for_qemu_running 30
     local cmdline
     cmdline=$(container_exec cat /proc/$(get_qemu_pid)/cmdline 2>/dev/null | tr '\0' ' ')
@@ -111,6 +145,7 @@ run_test test_bootdev_cdrom
 run_test test_bootdev_bios
 run_test test_bootdev_applied_after_cycle
 run_test test_bootdev_once_reset
+run_test test_bootdev_once_pxe_on_reset
 run_test test_bootdev_continuous
 run_test test_bootdev_redfish_pxe
 run_test test_bootmode_bios
