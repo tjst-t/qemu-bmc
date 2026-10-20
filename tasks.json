@@ -51,7 +51,7 @@
       "number": 6,
       "kind": "task",
       "title": "文書を実態に合わせる（bug 文書の Status・CLAUDE.md の手順・SERIAL_ADDR）",
-      "status": "ready",
+      "status": "in-progress",
       "parent": "v0-6-0",
       "dependsOn": [],
       "milestone": null,
@@ -63,7 +63,7 @@
       "refs": [],
       "threads": [],
       "createdAt": "2026-10-20T14:43:40.225Z",
-      "updatedAt": "2026-10-20T14:43:40.225Z",
+      "updatedAt": "2026-10-20T19:57:08.299Z",
       "closedAt": null,
       "extra": {}
     },
