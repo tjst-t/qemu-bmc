@@ -211,7 +211,13 @@ func (m *Machine) resetProcessMode(resetType string) error {
 			}
 			return m.resetProcessMode("On")
 		}
-		return m.qmpClient.SystemReset()
+		// The running process already has the requested boot target, so
+		// this reset uses it; consume Once so the next reset reverts.
+		if err := m.qmpClient.SystemReset(); err != nil {
+			return err
+		}
+		m.ConsumeBootOnce()
+		return nil
 
 	case "GracefulShutdown":
 		if err := m.qmpClient.SystemPowerdown(); err != nil {

@@ -436,6 +436,31 @@ func TestProcessMode_Reset_ForceRestart_BootOnceRestartsProcess(t *testing.T) {
 	assert.Contains(t, qmpMock.Calls(), "SystemReset")
 }
 
+func TestProcessMode_Reset_ForceRestart_BootOnceSameTarget_ConsumedBySystemReset(t *testing.T) {
+	qmpMock := newMockQMPClient(qmp.StatusRunning)
+	pm := newMockProcessManager(false)
+	m := NewWithProcess(qmpMock, pm)
+
+	// QEMU is running with Pxe (Once consumed at start)
+	require.NoError(t, m.SetBootOverride(BootOverride{Enabled: "Once", Target: "Pxe", Mode: "UEFI"}))
+	require.NoError(t, m.Reset("On"))
+	require.Equal(t, []string{"Pxe"}, pm.startCalls)
+
+	// Once Pxe again: same target, so system_reset boots PXE and consumes Once
+	require.NoError(t, m.SetBootOverride(BootOverride{Enabled: "Once", Target: "Pxe", Mode: "UEFI"}))
+	require.NoError(t, m.Reset("ForceRestart"))
+	assert.Equal(t, []string{"Pxe"}, pm.startCalls)
+	assert.Contains(t, qmpMock.Calls(), "SystemReset")
+
+	boot := m.GetBootOverride()
+	assert.Equal(t, "Disabled", boot.Enabled)
+	assert.Equal(t, "None", boot.Target)
+
+	// Next reset must restart QEMU with the original boot device
+	require.NoError(t, m.Reset("ForceRestart"))
+	assert.Equal(t, []string{"Pxe", "None"}, pm.startCalls)
+}
+
 func TestProcessMode_Reset_ForceRestart_ContinuousSameTarget_SystemReset(t *testing.T) {
 	qmpMock := newMockQMPClient(qmp.StatusRunning)
 	pm := newMockProcessManager(false)
