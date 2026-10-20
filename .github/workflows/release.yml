@@ -37,6 +37,9 @@ jobs:
         with:
           go-version-file: go.mod
 
+      - name: Download noVNC assets (embedded into the binary)
+        run: make download-novnc
+
       - name: Build
         env:
           GOOS: ${{ matrix.goos }}
