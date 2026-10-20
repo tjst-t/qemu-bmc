@@ -72,7 +72,7 @@
       "number": 7,
       "kind": "task",
       "title": "不具合：電源オン中のリセットで起動デバイスの指定が効かない",
-      "status": "ready",
+      "status": "in-progress",
       "parent": "v0-6-0",
       "dependsOn": [],
       "milestone": null,
@@ -84,7 +84,7 @@
       "refs": [],
       "threads": [],
       "createdAt": "2026-10-20T14:43:40.225Z",
-      "updatedAt": "2026-10-20T14:43:40.225Z",
+      "updatedAt": "2026-10-20T19:57:09.316Z",
       "closedAt": null,
       "extra": {}
     },
