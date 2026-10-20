@@ -186,7 +186,7 @@
       "number": 11,
       "kind": "task",
       "title": "システムの UUID を固定し、Redfish の UUID と IPMI の Get System GUID で返す",
-      "status": "ready",
+      "status": "in-progress",
       "parent": "systems-1-uuid-mac-cpu",
       "dependsOn": [],
       "milestone": null,
@@ -198,7 +198,7 @@
       "refs": [],
       "threads": [],
       "createdAt": "2026-10-20T14:43:41.139Z",
-      "updatedAt": "2026-10-20T14:43:41.139Z",
+      "updatedAt": "2026-10-20T20:26:20.261Z",
       "closedAt": null,
       "extra": {}
     },
