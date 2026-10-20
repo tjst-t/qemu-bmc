@@ -84,3 +84,31 @@ func TestLoad_PowerOnAtStart_False(t *testing.T) {
 	cfg := Load()
 	assert.Equal(t, false, cfg.PowerOnAtStart)
 }
+
+func TestLoad_VMHardware_Default(t *testing.T) {
+	os.Unsetenv("VM_MEMORY")
+	os.Unsetenv("VM_CPUS")
+	cfg := Load()
+	assert.Equal(t, 2048, cfg.VMMemoryMiB)
+	assert.Equal(t, 2, cfg.VMCPUs)
+}
+
+func TestLoad_VMHardware_Custom(t *testing.T) {
+	os.Setenv("VM_MEMORY", "8192")
+	os.Setenv("VM_CPUS", "4")
+	defer os.Unsetenv("VM_MEMORY")
+	defer os.Unsetenv("VM_CPUS")
+	cfg := Load()
+	assert.Equal(t, 8192, cfg.VMMemoryMiB)
+	assert.Equal(t, 4, cfg.VMCPUs)
+}
+
+func TestLoad_VMHardware_Invalid(t *testing.T) {
+	os.Setenv("VM_MEMORY", "lots")
+	os.Setenv("VM_CPUS", "-1")
+	defer os.Unsetenv("VM_MEMORY")
+	defer os.Unsetenv("VM_CPUS")
+	cfg := Load()
+	assert.Equal(t, 2048, cfg.VMMemoryMiB)
+	assert.Equal(t, 2, cfg.VMCPUs)
+}

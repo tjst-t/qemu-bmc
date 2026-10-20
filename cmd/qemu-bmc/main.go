@@ -38,6 +38,7 @@ func main() {
 
 	var qmpClient qmp.Client
 	var m *machine.Machine
+	systemInfo := redfish.SystemInfo{MemoryMiB: cfg.VMMemoryMiB, CPUs: cfg.VMCPUs}
 
 	if len(qemuArgs) > 0 {
 		// Process management mode
@@ -50,6 +51,9 @@ func main() {
 		if err != nil {
 			log.Fatalf("Invalid QEMU arguments: %v", err)
 		}
+		// The QEMU command line is authoritative for the hardware we report
+		hw := qemu.HardwareFromArgs(cmdArgs)
+		systemInfo = redfish.SystemInfo{MemoryMiB: hw.MemoryMiB, CPUs: hw.CPUs}
 
 		qmpClient = qmp.NewDisconnectedClient(cfg.QMPSocket)
 		pm := qemu.NewProcessManager(cfg.QEMUBinary, cmdArgs, qemu.DefaultCommandFactory)
@@ -103,6 +107,7 @@ func main() {
 
 	// Start Redfish server
 	redfishServer := redfish.NewServer(m, cfg.IPMIUser, cfg.IPMIPass, cfg.VNCAddr)
+	redfishServer.SetSystemInfo(systemInfo)
 	addr := fmt.Sprintf(":%s", cfg.RedfishPort)
 	log.Printf("Starting Redfish server on %s", addr)
 

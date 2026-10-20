@@ -38,6 +38,19 @@ type ComputerSystem struct {
 	PowerState   string                `json:"PowerState"`
 	Boot         BootSource            `json:"Boot"`
 	Actions      ComputerSystemActions `json:"Actions"`
+
+	MemorySummary    *MemorySummary    `json:"MemorySummary,omitempty"`
+	ProcessorSummary *ProcessorSummary `json:"ProcessorSummary,omitempty"`
+}
+
+// MemorySummary describes the system memory
+type MemorySummary struct {
+	TotalSystemMemoryGiB float64 `json:"TotalSystemMemoryGiB"`
+}
+
+// ProcessorSummary describes the system processors
+type ProcessorSummary struct {
+	Count int `json:"Count"`
 }
 
 // BootSource represents boot source override

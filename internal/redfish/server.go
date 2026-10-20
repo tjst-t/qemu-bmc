@@ -28,6 +28,14 @@ type Server struct {
 	pass         string
 	currentMedia string
 	novncHandler *novnc.Handler
+	systemInfo   SystemInfo
+}
+
+// SystemInfo is the static VM hardware configuration reported on Systems/1.
+// Zero values are treated as unknown and omitted from responses.
+type SystemInfo struct {
+	MemoryMiB int
+	CPUs      int
 }
 
 // NewServer creates a new Redfish server
@@ -94,6 +102,11 @@ func (s *Server) setupRoutes() {
 		http.StripPrefix("/novnc/", s.novncHandler.ServeFiles()),
 	)
 	s.router.HandleFunc("/websockify", s.novncHandler.ServeWebSocket)
+}
+
+// SetSystemInfo sets the VM hardware configuration reported on Systems/1.
+func (s *Server) SetSystemInfo(info SystemInfo) {
+	s.systemInfo = info
 }
 
 // ServeHTTP implements the http.Handler interface

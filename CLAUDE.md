@@ -101,6 +101,8 @@ make container-test-all
 | `VM_BOOT_MODE` | `bios` | Default boot mode |
 | `VM_IPMI_ADDR` | (empty, disabled) | VM IPMI chardev listen address (e.g., `:9002`) |
 | `POWER_ON_AT_START` | `false` | Power on VM automatically at container start |
+| `VM_MEMORY` | `2048` | Legacy mode only: VM memory (MiB) reported as Systems/1 `MemorySummary.TotalSystemMemoryGiB`. In process management mode the QEMU `-m` argument is used |
+| `VM_CPUS` | `2` | Legacy mode only: CPU count reported as Systems/1 `ProcessorSummary.Count`. In process management mode the QEMU `-smp` argument is used |
 
 ### Container Configuration (entrypoint.sh)
 
@@ -124,7 +126,7 @@ make container-test-all
 |--------|------|-------------|
 | GET | `/redfish/v1` | ServiceRoot |
 | GET | `/redfish/v1/Systems` | System collection |
-| GET | `/redfish/v1/Systems/1` | Computer system (PowerState, Boot, Actions) |
+| GET | `/redfish/v1/Systems/1` | Computer system (PowerState, Boot, MemorySummary, ProcessorSummary, Actions) |
 | PATCH | `/redfish/v1/Systems/1` | Boot device override (with ETag support) |
 | POST | `/redfish/v1/Systems/1/Actions/ComputerSystem.Reset` | Power control |
 | GET | `/redfish/v1/Managers` | Manager collection |

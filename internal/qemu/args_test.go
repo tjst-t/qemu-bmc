@@ -274,3 +274,39 @@ func TestApplyBootOverride_AddsWhenMissing(t *testing.T) {
 	assert.Contains(t, result, "-boot")
 	assert.Contains(t, result, "n")
 }
+
+// --- HardwareFromArgs ---
+
+func TestHardwareFromArgs(t *testing.T) {
+	tests := []struct {
+		name      string
+		args      []string
+		memoryMiB int
+		cpus      int
+	}{
+		{"plain MiB and count", []string{"-m", "2048", "-smp", "2"}, 2048, 2},
+		{"G suffix", []string{"-m", "4G", "-smp", "8"}, 4096, 8},
+		{"M suffix", []string{"-m", "512M"}, 512, 0},
+		{"size= option", []string{"-m", "size=8G,slots=2,maxmem=16G"}, 8192, 0},
+		{"T suffix", []string{"-m", "1T"}, 1024 * 1024, 0},
+		{"smp cpus=", []string{"-smp", "cpus=6,sockets=1"}, 0, 6},
+		{"smp count with topology", []string{"-smp", "4,sockets=2,cores=2"}, 0, 4},
+		{"smp topology only", []string{"-smp", "sockets=2,cores=2,threads=2"}, 0, 8},
+		{"missing", []string{"-machine", "q35"}, 0, 0},
+		{"invalid", []string{"-m", "lots", "-smp", "many"}, 0, 0},
+		{"last wins", []string{"-m", "1024", "-m", "3072"}, 3072, 0},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			hw := HardwareFromArgs(tt.args)
+			assert.Equal(t, tt.memoryMiB, hw.MemoryMiB)
+			assert.Equal(t, tt.cpus, hw.CPUs)
+		})
+	}
+}
+
+func TestHardwareFromArgs_Defaults(t *testing.T) {
+	hw := HardwareFromArgs(ApplyDefaults(nil))
+	assert.Equal(t, 2048, hw.MemoryMiB)
+	assert.Equal(t, 2, hw.CPUs)
+}

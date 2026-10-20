@@ -170,3 +170,58 @@ func TestPatchBootDevice(t *testing.T) {
 		assert.Equal(t, "Continuous", system.Boot.BootSourceOverrideEnabled)
 	})
 }
+
+func TestGetSystem_HardwareSummary(t *testing.T) {
+	mock := newMockMachine(qmp.StatusShutdown)
+	srv := NewServer(mock, "", "", "")
+	srv.SetSystemInfo(SystemInfo{MemoryMiB: 3072, CPUs: 4})
+
+	req := httptest.NewRequest("GET", "/redfish/v1/Systems/1", nil)
+	w := httptest.NewRecorder()
+	srv.ServeHTTP(w, req)
+	require.Equal(t, http.StatusOK, w.Code)
+
+	var raw map[string]interface{}
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &raw))
+
+	mem, ok := raw["MemorySummary"].(map[string]interface{})
+	require.True(t, ok, "MemorySummary must be an object")
+	assert.Equal(t, 3.0, mem["TotalSystemMemoryGiB"])
+
+	proc, ok := raw["ProcessorSummary"].(map[string]interface{})
+	require.True(t, ok, "ProcessorSummary must be an object")
+	assert.Equal(t, 4.0, proc["Count"])
+}
+
+func TestGetSystem_HardwareSummary_FractionalGiB(t *testing.T) {
+	mock := newMockMachine(qmp.StatusRunning)
+	srv := NewServer(mock, "", "", "")
+	srv.SetSystemInfo(SystemInfo{MemoryMiB: 1536, CPUs: 1})
+
+	req := httptest.NewRequest("GET", "/redfish/v1/Systems/1", nil)
+	w := httptest.NewRecorder()
+	srv.ServeHTTP(w, req)
+	require.Equal(t, http.StatusOK, w.Code)
+
+	var system ComputerSystem
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &system))
+	require.NotNil(t, system.MemorySummary)
+	assert.Equal(t, 1.5, system.MemorySummary.TotalSystemMemoryGiB)
+	require.NotNil(t, system.ProcessorSummary)
+	assert.Equal(t, 1, system.ProcessorSummary.Count)
+}
+
+func TestGetSystem_HardwareSummary_Unknown(t *testing.T) {
+	mock := newMockMachine(qmp.StatusRunning)
+	srv := NewServer(mock, "", "", "")
+
+	req := httptest.NewRequest("GET", "/redfish/v1/Systems/1", nil)
+	w := httptest.NewRecorder()
+	srv.ServeHTTP(w, req)
+	require.Equal(t, http.StatusOK, w.Code)
+
+	var raw map[string]interface{}
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &raw))
+	assert.NotContains(t, raw, "MemorySummary")
+	assert.NotContains(t, raw, "ProcessorSummary")
+}

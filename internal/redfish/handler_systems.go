@@ -57,6 +57,14 @@ func (s *Server) handleGetSystem(w http.ResponseWriter, r *http.Request) {
 			},
 		},
 	}
+	if s.systemInfo.MemoryMiB > 0 {
+		system.MemorySummary = &MemorySummary{
+			TotalSystemMemoryGiB: float64(s.systemInfo.MemoryMiB) / 1024,
+		}
+	}
+	if s.systemInfo.CPUs > 0 {
+		system.ProcessorSummary = &ProcessorSummary{Count: s.systemInfo.CPUs}
+	}
 
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("ETag", etag)

@@ -1,6 +1,9 @@
 package config
 
-import "os"
+import (
+	"os"
+	"strconv"
+)
 
 // Config holds the application configuration
 type Config struct {
@@ -17,6 +20,8 @@ type Config struct {
 	QEMUBinary     string // QEMU binary path for process management mode
 	PowerOnAtStart bool   // Power on VM at container start
 	VNCAddr        string // VNC TCP address for noVNC proxy
+	VMMemoryMiB    int    // VM memory in MiB (VM_MEMORY), reported via Redfish
+	VMCPUs         int    // VM CPU count (VM_CPUS), reported via Redfish
 }
 
 // Load reads configuration from environment variables with defaults
@@ -35,6 +40,8 @@ func Load() *Config {
 		QEMUBinary:     getEnv("QEMU_BINARY", "qemu-system-x86_64"),
 		PowerOnAtStart: getBoolEnv("POWER_ON_AT_START", false),
 		VNCAddr:        getEnv("VNC_ADDR", "localhost:5900"),
+		VMMemoryMiB:    getPositiveIntEnv("VM_MEMORY", 2048),
+		VMCPUs:         getPositiveIntEnv("VM_CPUS", 2),
 	}
 }
 
@@ -55,4 +62,12 @@ func getBoolEnv(key string, defaultValue bool) bool {
 	default:
 		return defaultValue
 	}
+}
+
+func getPositiveIntEnv(key string, defaultValue int) int {
+	n, err := strconv.Atoi(os.Getenv(key))
+	if err != nil || n <= 0 {
+		return defaultValue
+	}
+	return n
 }
