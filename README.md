@@ -66,6 +66,7 @@ docker run --rm --device /dev/kvm --cap-add NET_ADMIN \
 Connect to an existing QEMU instance via QMP socket:
 
 ```bash
+make download-novnc
 go build -o qemu-bmc ./cmd/qemu-bmc
 
 export QMP_SOCK=/var/run/qemu/qmp.sock
@@ -222,7 +223,7 @@ ipmitool user enable 3
 | `IPMI_PASS` | `password` | Authentication password |
 | `REDFISH_PORT` | `443` | Redfish HTTPS port |
 | `IPMI_PORT` | `623` | IPMI UDP port |
-| `SERIAL_ADDR` | `localhost:9002` | SOL bridge target |
+| `SERIAL_ADDR` | `localhost:9002` | Process management mode only: QEMU guest serial console is exposed as a TCP server at this address. SOL is **not implemented** (qemu-bmc itself does not connect to it). The default port 9002 collides with the `VM_IPMI_ADDR` example — use another port (e.g. `localhost:9003`) when enabling both |
 | `TLS_CERT` | (auto-generated) | TLS certificate path; if unset, a self-signed ECDSA cert is generated automatically |
 | `TLS_KEY` | (auto-generated) | TLS key path; if unset, generated together with `TLS_CERT` |
 | `VM_BOOT_MODE` | `bios` | Default boot mode (`bios` or `uefi`) |
@@ -251,6 +252,9 @@ These variables are used by `docker/entrypoint.sh` to construct QEMU arguments:
 ## Development
 
 ```bash
+# Download noVNC static files (required once before go build/test)
+make download-novnc
+
 # Build
 go build ./cmd/qemu-bmc
 make docker-build
@@ -362,6 +366,7 @@ docker run --rm --device /dev/kvm --cap-add NET_ADMIN \
 既存の QEMU インスタンスに QMP ソケット経由で接続:
 
 ```bash
+make download-novnc
 go build -o qemu-bmc ./cmd/qemu-bmc
 
 export QMP_SOCK=/var/run/qemu/qmp.sock
@@ -518,7 +523,7 @@ ipmitool user enable 3
 | `IPMI_PASS` | `password` | 認証パスワード |
 | `REDFISH_PORT` | `443` | Redfish HTTPS ポート |
 | `IPMI_PORT` | `623` | IPMI UDP ポート |
-| `SERIAL_ADDR` | `localhost:9002` | SOL ブリッジ先 |
+| `SERIAL_ADDR` | `localhost:9002` | プロセス管理モードのみ: QEMU のゲストシリアルコンソールをこのアドレスの TCP サーバーとして公開。SOL は**未実装**（qemu-bmc 自身は接続しない）。既定ポート 9002 は `VM_IPMI_ADDR` の例と重なるため、両方使う場合は別ポート（例: `localhost:9003`）を指定 |
 | `TLS_CERT` | (自動生成) | TLS 証明書パス。未設定時は ECDSA 自己署名証明書を動的生成 |
 | `TLS_KEY` | (自動生成) | TLS 鍵パス。未設定時は `TLS_CERT` と同時に生成 |
 | `VM_BOOT_MODE` | `bios` | デフォルトブートモード (`bios` または `uefi`) |
@@ -547,6 +552,9 @@ ipmitool user enable 3
 ## 開発
 
 ```bash
+# noVNC 静的ファイルの取得（go build/test の前に一度必要）
+make download-novnc
+
 # ビルド
 go build ./cmd/qemu-bmc
 make docker-build

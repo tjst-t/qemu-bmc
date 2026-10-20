@@ -2,7 +2,8 @@
 
 **Date:** 2026-02-20
 **File:** `cmd/qemu-bmc/main.go`
-**Status:** Open
+**Status:** Fixed
+**Fixed in:** f7058b7 (fix: generate self-signed cert when TLS_CERT/TLS_KEY not provided)
 **Severity:** High（Rufio / bmclib など TLS を前提とする Redfish クライアントが接続不可）
 
 ## 症状

@@ -2,7 +2,8 @@
 
 **Date:** 2026-02-19
 **Version:** qemu-bmc v0.5.3
-**Status:** Open
+**Status:** Fixed
+**Fixed in:** aa43617 (fix: correct IPMI 2.0 AES-CBC CPL padding and add outbound sequence number)
 **Severity:** High（MAAS によるノード Commissioning/Power-on が動作しない）
 
 ## 症状

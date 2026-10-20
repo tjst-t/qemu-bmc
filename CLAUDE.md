@@ -46,6 +46,10 @@ integration/                   # Go-based integration tests (legacy mode)
 # Go is not in default PATH in this environment
 export PATH=$PATH:/usr/local/go/bin:$HOME/go/bin
 
+# Download noVNC static files (required once on a fresh clone; go build/test
+# fail with an embed error on internal/novnc/static without them)
+make download-novnc
+
 # Build
 go build ./cmd/qemu-bmc
 
@@ -91,9 +95,9 @@ make container-test-all
 | `IPMI_PASS` | `password` | IPMI/Redfish auth password |
 | `REDFISH_PORT` | `443` | Redfish HTTPS port |
 | `IPMI_PORT` | `623` | IPMI UDP port |
-| `SERIAL_ADDR` | `localhost:9002` | SOL bridge target |
-| `TLS_CERT` | (empty, falls back to HTTP) | TLS certificate path |
-| `TLS_KEY` | (empty) | TLS key path |
+| `SERIAL_ADDR` | `localhost:9002` | Process management mode only: QEMU guest serial console is exposed as a TCP server at this address. SOL is not implemented (nothing in qemu-bmc connects to it). Port 9002 collides with the `VM_IPMI_ADDR` example — use another port when enabling both |
+| `TLS_CERT` | (auto-generated) | TLS certificate path; if unset, a self-signed ECDSA cert is generated automatically |
+| `TLS_KEY` | (auto-generated) | TLS key path; if unset, generated together with `TLS_CERT` |
 | `VM_BOOT_MODE` | `bios` | Default boot mode |
 | `VM_IPMI_ADDR` | (empty, disabled) | VM IPMI chardev listen address (e.g., `:9002`) |
 | `POWER_ON_AT_START` | `false` | Power on VM automatically at container start |
