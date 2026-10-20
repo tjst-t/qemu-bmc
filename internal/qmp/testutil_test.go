@@ -5,9 +5,22 @@ import (
 	"encoding/json"
 	"net"
 	"os"
+	"path/filepath"
 	"sync"
 	"testing"
 )
+
+// testSocketPath returns a UNIX socket path in a short temp directory under /tmp.
+// t.TempDir() follows $TMPDIR, which can exceed the 108-byte sun_path limit.
+func testSocketPath(t *testing.T) string {
+	t.Helper()
+	dir, err := os.MkdirTemp("/tmp", "qmp-test-")
+	if err != nil {
+		t.Fatalf("failed to create temp dir: %v", err)
+	}
+	t.Cleanup(func() { os.RemoveAll(dir) })
+	return filepath.Join(dir, "qmp.sock")
+}
 
 // mockQMPServer simulates a QMP server over a UNIX socket
 type mockQMPServer struct {

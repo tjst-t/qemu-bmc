@@ -1,7 +1,6 @@
 package qmp
 
 import (
-	"path/filepath"
 	"testing"
 	"time"
 
@@ -10,7 +9,7 @@ import (
 )
 
 func TestClient_QueryStatus_PowerOn(t *testing.T) {
-	socketPath := filepath.Join(t.TempDir(), "qmp.sock")
+	socketPath := testSocketPath(t)
 	mockQMP := newMockQMPServer(t, socketPath)
 	mockQMP.SetStatus(StatusRunning)
 	defer mockQMP.Close()
@@ -28,7 +27,7 @@ func TestClient_QueryStatus_PowerOn(t *testing.T) {
 }
 
 func TestClient_QueryStatus_PowerOff(t *testing.T) {
-	socketPath := filepath.Join(t.TempDir(), "qmp.sock")
+	socketPath := testSocketPath(t)
 	mockQMP := newMockQMPServer(t, socketPath)
 	mockQMP.SetStatus(StatusShutdown)
 	defer mockQMP.Close()
@@ -45,7 +44,7 @@ func TestClient_QueryStatus_PowerOff(t *testing.T) {
 }
 
 func TestClient_SystemPowerdown(t *testing.T) {
-	socketPath := filepath.Join(t.TempDir(), "qmp.sock")
+	socketPath := testSocketPath(t)
 	mockQMP := newMockQMPServer(t, socketPath)
 	defer mockQMP.Close()
 
@@ -61,7 +60,7 @@ func TestClient_SystemPowerdown(t *testing.T) {
 }
 
 func TestClient_SystemReset(t *testing.T) {
-	socketPath := filepath.Join(t.TempDir(), "qmp.sock")
+	socketPath := testSocketPath(t)
 	mockQMP := newMockQMPServer(t, socketPath)
 	defer mockQMP.Close()
 
@@ -77,7 +76,7 @@ func TestClient_SystemReset(t *testing.T) {
 }
 
 func TestClient_Quit(t *testing.T) {
-	socketPath := filepath.Join(t.TempDir(), "qmp.sock")
+	socketPath := testSocketPath(t)
 	mockQMP := newMockQMPServer(t, socketPath)
 	defer mockQMP.Close()
 
@@ -93,7 +92,7 @@ func TestClient_Quit(t *testing.T) {
 }
 
 func TestClient_BlockdevChangeMedium(t *testing.T) {
-	socketPath := filepath.Join(t.TempDir(), "qmp.sock")
+	socketPath := testSocketPath(t)
 	mockQMP := newMockQMPServer(t, socketPath)
 	defer mockQMP.Close()
 
@@ -109,7 +108,7 @@ func TestClient_BlockdevChangeMedium(t *testing.T) {
 }
 
 func TestClient_BlockdevRemoveMedium(t *testing.T) {
-	socketPath := filepath.Join(t.TempDir(), "qmp.sock")
+	socketPath := testSocketPath(t)
 	mockQMP := newMockQMPServer(t, socketPath)
 	defer mockQMP.Close()
 
@@ -133,7 +132,7 @@ func TestNewDisconnectedClient_NotConnected(t *testing.T) {
 }
 
 func TestDisconnectedClient_Connect(t *testing.T) {
-	socketPath := filepath.Join(t.TempDir(), "qmp.sock")
+	socketPath := testSocketPath(t)
 	mockQMP := newMockQMPServer(t, socketPath)
 	mockQMP.SetStatus(StatusRunning)
 	defer mockQMP.Close()
@@ -158,7 +157,7 @@ func TestDisconnectedClient_Connect(t *testing.T) {
 }
 
 func TestClient_Close_ThenConnect(t *testing.T) {
-	socketPath := filepath.Join(t.TempDir(), "qmp.sock")
+	socketPath := testSocketPath(t)
 	mockQMP := newMockQMPServer(t, socketPath)
 	mockQMP.SetStatus(StatusRunning)
 	defer mockQMP.Close()
