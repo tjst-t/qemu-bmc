@@ -1,0 +1,31 @@
+qemu-bmc
+Copyright 2026 tjst-t
+
+This product is licensed under the Apache License, Version 2.0
+(see the LICENSE file).
+
+------------------------------------------------------------------------
+Third-party software
+------------------------------------------------------------------------
+
+Binaries and container images built from this repository embed static
+files from the following third-party projects (downloaded at build time
+by `make download-novnc` / docker/Dockerfile into internal/novnc/static/).
+They remain under their own licenses.
+
+noVNC 1.5.0 (https://github.com/novnc/noVNC)
+  Copyright (C) 2022 The noVNC Authors
+  - core/**/*.js, app/*.js           : Mozilla Public License 2.0 (MPL-2.0)
+  - core/des.js                      : BSD-style licenses
+  - *.html, app/styles/*.css         : BSD 2-Clause License
+  - app/styles/Orbitron*             : SIL Open Font License 1.1
+                                       (Copyright 2009 Matt McInerney)
+  - app/images/                      : Creative Commons Attribution-ShareAlike 3.0
+  License texts: https://github.com/novnc/noVNC/blob/v1.5.0/LICENSE.txt
+                 https://www.mozilla.org/MPL/2.0/
+  Source code:   https://github.com/novnc/noVNC/tree/v1.5.0
+
+pako (bundled by noVNC under vendor/pako/)
+  Copyright (C) 2014-2016 by Vitaly Puzrin
+  License: MIT License
+  License text: https://github.com/novnc/noVNC/blob/v1.5.0/vendor/pako/LICENSE

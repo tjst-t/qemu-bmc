@@ -294,7 +294,14 @@ containerlab/                  # containerlab topology example
 
 ## License
 
-TBD
+qemu-bmc is licensed under the [Apache License 2.0](LICENSE).
+
+The binary and container image embed third-party files that keep their own licenses (see [NOTICE](NOTICE)):
+
+| Component | License |
+|-----------|---------|
+| [noVNC](https://github.com/novnc/noVNC) 1.5.0 (`internal/novnc/static/`) | MPL-2.0 (core JS); HTML/CSS: BSD-2-Clause; fonts: OFL-1.1; images: CC BY-SA 3.0 |
+| [pako](https://github.com/nodeca/pako) (bundled in noVNC `vendor/pako/`) | MIT |
 
 ---
 
@@ -594,4 +601,11 @@ containerlab/                  # containerlab トポロジ例
 
 ## ライセンス
 
-TBD
+qemu-bmc は [Apache License 2.0](LICENSE) で提供されます。
+
+バイナリおよびコンテナイメージには、それぞれ独自のライセンスを持つ第三者のファイルが同梱されています（詳細は [NOTICE](NOTICE) を参照）:
+
+| コンポーネント | ライセンス |
+|----------------|------------|
+| [noVNC](https://github.com/novnc/noVNC) 1.5.0 (`internal/novnc/static/`) | MPL-2.0（コア JS）、HTML/CSS: BSD-2-Clause、フォント: OFL-1.1、画像: CC BY-SA 3.0 |
+| [pako](https://github.com/nodeca/pako)（noVNC の `vendor/pako/` に同梱） | MIT |
