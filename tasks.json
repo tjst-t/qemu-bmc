@@ -439,7 +439,7 @@
       "number": 20,
       "kind": "bug",
       "title": "IPMI の Get System Boot Options が「parameter invalid/locked」のビットを立てて返す",
-      "status": "ready",
+      "status": "in-progress",
       "parent": null,
       "dependsOn": [],
       "milestone": null,
@@ -453,7 +453,7 @@
       "refs": [],
       "threads": [],
       "createdAt": "2026-10-21T10:46:02.315Z",
-      "updatedAt": "2026-10-21T10:46:02.315Z",
+      "updatedAt": "2026-10-21T11:10:08.540Z",
       "closedAt": null,
       "extra": {}
     }
