@@ -525,7 +525,7 @@
       "number": 24,
       "kind": "task",
       "title": "VirtualMedia: 空の CD ドライブを常に付け、差した中身を電源オフ中も保持して起動時に付ける",
-      "status": "ready",
+      "status": "in-progress",
       "parent": "redfish-virtualmedia-iso-cd",
       "dependsOn": [],
       "milestone": null,
@@ -537,7 +537,7 @@
       "refs": [],
       "threads": [],
       "createdAt": "2026-10-21T14:51:55.062Z",
-      "updatedAt": "2026-10-21T14:51:55.062Z",
+      "updatedAt": "2026-10-21T14:52:05.978Z",
       "closedAt": null,
       "extra": {}
     },
