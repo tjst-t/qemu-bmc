@@ -1,50 +1,57 @@
+# Two nodes that boot their own disk, BMCs published on the host.
+#
+#   host :8441 (Redfish/noVNC) :6231/udp (IPMI) ── node1 BMC
+#   host :8442 (Redfish/noVNC) :6232/udp (IPMI) ── node2 BMC
+#
+#   node1 VM NIC (eth1) ──────────── node2 VM NIC (eth1)   data network
+#
+# Each node boots containerlab/vm/<node>/disk.qcow2 (create it first, see
+# README.md). Without a disk the VM just sits in the BIOS. Put ISOs in
+# containerlab/iso/ and set VM_CDROM to boot one.
+# For a separate BMC management network, see mgmt-network.yml.
 name: qemu-bmc-lab
 
 topology:
+  defaults:
+    kind: linux
+    image: ghcr.io/tjst-t/qemu-bmc:0.7
+
   nodes:
     node1:
-      kind: linux
-      image: ghcr.io/tjst-t/qemu-bmc:latest
       devices:
-        - /dev/net/tun  # needed for the VM NICs (eth2+ are passed through)
+        - /dev/net/tun  # needed for the VM NIC (eth1 is passed through)
       binds:
-        - ../vm/node1:/vm
-        - ../iso:/iso
+        - vm/node1:/vm
+        - iso:/iso:ro
       ports:
-        - "5901:5900"
-        - "6231:623/udp"
+        - "8441:443"        # Redfish HTTPS + noVNC (https://localhost:8441/novnc/)
+        - "6231:623/udp"    # IPMI
       env:
         VM_MEMORY: "2048"
         VM_CPUS: "2"
         VM_BOOT_MODE: "bios"
+        VM_NETWORKS: "eth1"
         IPMI_USER: "admin"
         IPMI_PASS: "password"
+        # VM_CDROM: "/iso/installer.iso"
 
     node2:
-      kind: linux
-      image: ghcr.io/tjst-t/qemu-bmc:latest
       devices:
-        - /dev/net/tun  # needed for the VM NICs (eth2+ are passed through)
+        - /dev/net/tun
       binds:
-        - ../vm/node2:/vm
-        - ../iso:/iso
+        - vm/node2:/vm
+        - iso:/iso:ro
       ports:
-        - "5902:5900"
+        - "8442:443"
         - "6232:623/udp"
       env:
         VM_MEMORY: "2048"
         VM_CPUS: "2"
-
-    mgmt-switch:
-      kind: linux
-      image: alpine:latest
-      exec:
-        - ip link add br0 type bridge
-        - ip link set br0 up
-        - ip link set eth1 master br0
-        - ip link set eth2 master br0
+        VM_BOOT_MODE: "uefi"
+        VM_NETWORKS: "eth1"
+        IPMI_USER: "admin"
+        IPMI_PASS: "password"
 
   links:
-    - endpoints: ["node1:eth1", "mgmt-switch:eth1"]
-    - endpoints: ["node2:eth1", "mgmt-switch:eth2"]
-    - endpoints: ["node1:eth2", "node2:eth2"]
+    # data network (VM NICs)
+    - endpoints: ["node1:eth1", "node2:eth1"]

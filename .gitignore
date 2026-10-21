@@ -8,3 +8,8 @@ coverage.out
 /internal/novnc/static/*
 !/internal/novnc/static/.gitkeep
 /tests/evidence/
+
+# containerlab example disks and ISOs
+/containerlab/vm/
+/containerlab/iso/
+/containerlab/clab-*/

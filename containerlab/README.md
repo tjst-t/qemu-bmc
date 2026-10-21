@@ -2,8 +2,37 @@
 
 | File | What it shows |
 |------|---------------|
-| `example.yml` | 2 nodes, BMC ports published on the host |
+| `example.yml` | 2 nodes that boot their own disk (or an ISO), BMC (Redfish/noVNC, IPMI) published on the host, VM NICs on a data link |
 | `mgmt-network.yml` | BMC management network separated from the VM data network, with an operator container and fixed UUIDs/MACs |
+
+Both use the published image `ghcr.io/tjst-t/qemu-bmc:0.7` (the latest 0.7.x release). To try a local build, run `make docker-build` and change `image:` to `qemu-bmc:latest`.
+
+## example.yml
+
+```
+  host :8441 (Redfish/noVNC) :6231/udp (IPMI) ── node1 BMC
+  host :8442 (Redfish/noVNC) :6232/udp (IPMI) ── node2 BMC
+
+  node1 VM NIC (eth1) ───────────── node2 VM NIC (eth1)      data network
+```
+
+node1 boots in BIOS mode, node2 in UEFI mode. Each node's `/vm` is `containerlab/vm/<node>/` and `/iso` is `containerlab/iso/` (both ignored by git).
+
+```bash
+mkdir -p containerlab/vm/node1 containerlab/vm/node2 containerlab/iso
+qemu-img create -f qcow2 containerlab/vm/node1/disk.qcow2 20G   # or copy a cloud image
+qemu-img create -f qcow2 containerlab/vm/node2/disk.qcow2 20G
+
+sudo containerlab deploy -t containerlab/example.yml
+
+ipmitool -I lanplus -H 127.0.0.1 -p 6231 -U admin -P password chassis power on
+curl -sk -u admin:password https://localhost:8441/redfish/v1/Systems/1
+# console: https://localhost:8441/novnc/ (same credentials)
+
+sudo containerlab destroy -t containerlab/example.yml --cleanup
+```
+
+To install from an ISO, put it in `containerlab/iso/`, set `VM_CDROM: "/iso/<file>.iso"` on the node, and boot it once from CD (`ipmitool ... chassis bootdev cdrom`, or Redfish `BootSourceOverrideTarget: Cd`).
 
 ## mgmt-network.yml
 
@@ -26,9 +55,6 @@ qemu-bmc listens on all container addresses, so the BMC is also reachable on the
 Requires `/dev/net/tun` and `/dev/kvm` on the host (without KVM QEMU falls back to TCG). The `operator` node installs curl and ipmitool with `apk` at deploy time, so it needs Internet access.
 
 ```bash
-# Build the image used by the topology (qemu-bmc:latest)
-make docker-build
-
 sudo containerlab deploy -t containerlab/mgmt-network.yml
 ```
 
@@ -74,6 +100,14 @@ sudo containerlab destroy -t containerlab/mgmt-network.yml --cleanup
 
 ---
 
+## 日本語
+
+どちらの例も公開イメージ `ghcr.io/tjst-t/qemu-bmc:0.7`（0.7.x の最新）を使います。手元でビルドしたものを試すときは `make docker-build` のあと `image:` を `qemu-bmc:latest` に変えてください。
+
+### example.yml
+
+2 ノードがそれぞれ自分のディスク（または ISO）から起動する構成です。BMC（Redfish・noVNC・IPMI）はホストに公開します（node1：`8441`・`6231/udp`、node2：`8442`・`6232/udp`）。VM の NIC は 2 ノード間のデータリンク（`eth1`）につながります。node1 は BIOS、node2 は UEFI で起動します。各ノードの `/vm` は `containerlab/vm/<ノード名>/`、`/iso` は `containerlab/iso/` です（git の管理外）。手順は上の「example.yml」を見てください。
+
 ## mgmt-network.yml（日本語）
 
 BMC 管理ネットワーク（各ノードの `eth1`、`192.168.100.0/24`）と、VM のデータネットワーク（`eth2`、VM の NIC にパススルー）を分けた構成です。管理ネットワーク上の `operator` コンテナ（curl・ipmitool 入り）から各ノードを Redfish と IPMI で操作します。ホストへのポート公開はしません。各ノードの UUID・MAC は `SYSTEM_UUID`・`VM_MACS` で固定しています。
@@ -85,7 +119,6 @@ qemu-bmc はコンテナの全アドレスで待ち受けるため、containerla
 ホストに `/dev/net/tun` と `/dev/kvm` が必要です（KVM が無ければ TCG で動きます）。`operator` は deploy 時に `apk` で curl と ipmitool を入れるのでインターネット接続が要ります。
 
 ```bash
-make docker-build   # トポロジーが使う qemu-bmc:latest を作る
 sudo containerlab deploy -t containerlab/mgmt-network.yml
 ```
 
