@@ -158,9 +158,9 @@ func handleGetBootOptions(reqData []byte, m MachineInterface) (CompletionCode, [
 	switch paramSelector {
 	case 0: // Set In Progress
 		data := []byte{
-			0x01,             // Parameter version
-			0x80 | 0x00,      // Parameter valid (bit7=1) + selector 0
-			0x00,             // Set complete
+			0x01, // Parameter version
+			0x00, // Parameter selector 0 (bit7=0: not invalid/locked)
+			0x00, // Set complete
 		}
 		return CompletionCodeOK, data
 
@@ -171,8 +171,9 @@ func handleGetBootOptions(reqData []byte, m MachineInterface) (CompletionCode, [
 		// Byte 0: parameter version
 		data[0] = 0x01
 
-		// Byte 1: parameter valid (bit7) + parameter selector (bits 6:0)
-		data[1] = 0x80 | 0x05
+		// Byte 1: parameter selector (bits 6:0); bit7 would mark the
+		// parameter invalid/locked, so it stays clear
+		data[1] = 0x05
 
 		// Byte 2: boot flags valid (bit7) + persistent (bit6) + UEFI (bit5)
 		switch boot.Enabled {
@@ -206,9 +207,9 @@ func handleGetBootOptions(reqData []byte, m MachineInterface) (CompletionCode, [
 	default:
 		// Return OK with parameter valid=0 for unsupported parameters
 		data := []byte{
-			0x01,            // Parameter version
-			paramSelector,   // Parameter valid=0 (bit7=0) + selector
-			0x00,            // Empty data
+			0x01,          // Parameter version
+			paramSelector, // Parameter valid=0 (bit7=0) + selector
+			0x00,          // Empty data
 		}
 		return CompletionCodeOK, data
 	}

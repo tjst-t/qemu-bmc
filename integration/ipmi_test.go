@@ -70,6 +70,7 @@ func TestIPMI_BootDevice(t *testing.T) {
 	require.NoError(t, err, "ipmitool output: %s", out)
 	assert.True(t, strings.Contains(out, "PXE") || strings.Contains(out, "pxe"),
 		"expected PXE in output: %s", out)
+	assert.NotContains(t, out, "invalid/locked")
 }
 
 func TestIPMI_LANPlus(t *testing.T) {

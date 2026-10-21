@@ -69,7 +69,8 @@ test_redfish_bootdev_ipmi_verify() {
     # Verify via IPMI
     local result
     result=$(ipmi_cmd chassis bootparam get 5 2>&1)
-    assert_contains "$result" "CD" "IPMI should show CD-ROM boot after Redfish Cd target"
+    assert_contains "$result" "CD" "IPMI should show CD-ROM boot after Redfish Cd target" || return 1
+    assert_not_contains "$result" "invalid/locked" "IPMI boot parameter 5 should not be marked invalid/locked"
 }
 
 # --- Run tests ---

@@ -107,9 +107,21 @@ func TestGetBootOptions(t *testing.T) {
 	assert.Equal(t, CompletionCodeOK, code)
 	require.Len(t, resp, 7)
 	assert.Equal(t, byte(0x01), resp[0]) // parameter version
-	assert.Equal(t, byte(0x85), resp[1]) // valid + param selector 5
+	// bit7 of byte 2 means "parameter marked invalid/locked"; it must be clear
+	assert.Equal(t, byte(0x05), resp[1]) // param selector 5, not invalid/locked
 	assert.Equal(t, byte(0xA0), resp[2]) // boot flags valid + UEFI
 	assert.Equal(t, byte(0x04), resp[3]) // PXE (0x01 << 2)
+}
+
+func TestGetBootOptions_SetInProgress(t *testing.T) {
+	mock := newIPMIMockMachine(machine.PowerOn)
+	msg := &IPMIMessage{Command: CmdGetBootOptions, Data: []byte{0x00, 0x00, 0x00}}
+	code, resp := handleChassisCommand(msg, mock)
+	assert.Equal(t, CompletionCodeOK, code)
+	require.Len(t, resp, 3)
+	assert.Equal(t, byte(0x01), resp[0]) // parameter version
+	assert.Equal(t, byte(0x00), resp[1]) // param selector 0, not invalid/locked
+	assert.Equal(t, byte(0x00), resp[2]) // set complete
 }
 
 func TestSetBootOptions_PersistentBit_Continuous(t *testing.T) {
