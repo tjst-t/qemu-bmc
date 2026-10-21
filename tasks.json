@@ -597,7 +597,9 @@
       "title": "統合テスト（make container-test-all）をいまの既定に合わせて直す",
       "status": "ready",
       "parent": null,
-      "dependsOn": [],
+      "dependsOn": [
+        "graceful-powerstate-poweringoff-powering"
+      ],
       "milestone": null,
       "priority": "normal",
       "labels": [],
@@ -607,7 +609,7 @@
       "refs": [],
       "threads": [],
       "createdAt": "2026-10-21T14:53:54.030Z",
-      "updatedAt": "2026-10-21T15:13:05.765Z",
+      "updatedAt": "2026-10-21T15:13:17.320Z",
       "closedAt": null,
       "extra": {}
     }
