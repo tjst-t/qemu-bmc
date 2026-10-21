@@ -474,6 +474,87 @@ func TestProcessMode_Reset_ForceRestart_ContinuousSameTarget_SystemReset(t *test
 	assert.Contains(t, qmpMock.Calls(), "SystemReset")
 }
 
+func TestProcessMode_Reset_On_DisabledIgnoresTarget(t *testing.T) {
+	qmpMock := newMockQMPClient(qmp.StatusRunning)
+	pm := newMockProcessManager(false)
+	m := NewWithProcess(qmpMock, pm)
+
+	require.NoError(t, m.SetBootOverride(BootOverride{Enabled: "Disabled", Target: "Pxe", Mode: "UEFI"}))
+	require.NoError(t, m.Reset("On"))
+	assert.Equal(t, []string{"None"}, pm.startCalls)
+
+	// The stored setting is left as-is
+	boot := m.GetBootOverride()
+	assert.Equal(t, "Disabled", boot.Enabled)
+	assert.Equal(t, "Pxe", boot.Target)
+}
+
+func TestProcessMode_Reset_On_ContinuousUsesTarget(t *testing.T) {
+	qmpMock := newMockQMPClient(qmp.StatusRunning)
+	pm := newMockProcessManager(false)
+	m := NewWithProcess(qmpMock, pm)
+
+	require.NoError(t, m.SetBootOverride(BootOverride{Enabled: "Continuous", Target: "Pxe", Mode: "UEFI"}))
+	require.NoError(t, m.Reset("On"))
+	assert.Equal(t, []string{"Pxe"}, pm.startCalls)
+
+	boot := m.GetBootOverride()
+	assert.Equal(t, "Continuous", boot.Enabled)
+	assert.Equal(t, "Pxe", boot.Target)
+}
+
+func TestProcessMode_Reset_ForceRestart_DisabledTargetUsesSystemReset(t *testing.T) {
+	qmpMock := newMockQMPClient(qmp.StatusRunning)
+	pm := newMockProcessManager(false)
+	m := NewWithProcess(qmpMock, pm)
+
+	// Running with the default boot device
+	require.NoError(t, m.Reset("On"))
+	require.Equal(t, []string{"None"}, pm.startCalls)
+
+	// Disabled with a target is not an override: no QEMU restart with Pxe
+	require.NoError(t, m.SetBootOverride(BootOverride{Enabled: "Disabled", Target: "Pxe", Mode: "UEFI"}))
+	require.NoError(t, m.Reset("ForceRestart"))
+	assert.Equal(t, []string{"None"}, pm.startCalls)
+	assert.Contains(t, qmpMock.Calls(), "SystemReset")
+}
+
+func TestProcessMode_Reset_ForceRestart_DisabledAfterContinuousRestartsWithDefault(t *testing.T) {
+	qmpMock := newMockQMPClient(qmp.StatusRunning)
+	pm := newMockProcessManager(false)
+	m := NewWithProcess(qmpMock, pm)
+
+	require.NoError(t, m.SetBootOverride(BootOverride{Enabled: "Continuous", Target: "Pxe", Mode: "UEFI"}))
+	require.NoError(t, m.Reset("On"))
+	require.Equal(t, []string{"Pxe"}, pm.startCalls)
+
+	// Turning the override off (target kept) must restart with the default
+	require.NoError(t, m.SetBootOverride(BootOverride{Enabled: "Disabled", Target: "Pxe", Mode: "UEFI"}))
+	require.NoError(t, m.Reset("ForceRestart"))
+	assert.Equal(t, []string{"Pxe", "None"}, pm.startCalls)
+	assert.NotContains(t, qmpMock.Calls(), "SystemReset")
+}
+
+func TestProcessMode_Reset_GracefulRestart_DisabledIgnoresTarget(t *testing.T) {
+	qmpMock := newMockQMPClient(qmp.StatusRunning)
+	pm := newMockProcessManager(false)
+	m := NewWithProcess(qmpMock, pm)
+
+	require.NoError(t, m.Reset("On"))
+	require.NoError(t, m.SetBootOverride(BootOverride{Enabled: "Disabled", Target: "Pxe", Mode: "UEFI"}))
+
+	// Simulate the guest powering off after the ACPI request
+	exitCh := pm.exitCh
+	go func() {
+		time.Sleep(50 * time.Millisecond)
+		pm.running = false
+		close(exitCh)
+	}()
+
+	require.NoError(t, m.Reset("GracefulRestart"))
+	assert.Equal(t, []string{"None", "None"}, pm.startCalls)
+}
+
 func TestProcessMode_Reset_GracefulShutdown(t *testing.T) {
 	qmpMock := newMockQMPClient(qmp.StatusRunning)
 	pm := newMockProcessManager(true)

@@ -90,6 +90,53 @@ test_bootdev_once_pxe_on_reset() {
     assert_not_contains "$cmdline" "-boot n" "Once Pxe should not persist past one boot"
 }
 
+test_bootdev_disabled_ignores_target() {
+    # Disabled + Pxe is not an override: QEMU must boot the default device (VM_BOOT=c)
+    redfish_patch "/redfish/v1/Systems/1" \
+        '{"Boot":{"BootSourceOverrideTarget":"None","BootSourceOverrideEnabled":"Disabled"}}' \
+        >/dev/null 2>&1
+    redfish_post "/redfish/v1/Systems/1/Actions/ComputerSystem.Reset" \
+        '{"ResetType":"ForceOff"}' >/dev/null 2>&1
+    redfish_patch "/redfish/v1/Systems/1" \
+        '{"Boot":{"BootSourceOverrideTarget":"Pxe","BootSourceOverrideEnabled":"Disabled"}}' \
+        >/dev/null 2>&1
+
+    # Redfish On
+    redfish_post "/redfish/v1/Systems/1/Actions/ComputerSystem.Reset" \
+        '{"ResetType":"On"}' >/dev/null 2>&1
+    wait_for_qemu_running 30
+    wait_for_ipmi_ready 30
+    local cmdline
+    cmdline=$(qemu_cmdline)
+    assert_contains "$cmdline" "-boot c" "Redfish On with Disabled+Pxe should boot from disk" || return 1
+    assert_not_contains "$cmdline" "-boot n" "Redfish On with Disabled+Pxe should not boot PXE" || return 1
+
+    # Redfish ForceRestart
+    redfish_post "/redfish/v1/Systems/1/Actions/ComputerSystem.Reset" \
+        '{"ResetType":"ForceRestart"}' >/dev/null 2>&1
+    wait_for_qemu_running 30
+    wait_for_ipmi_ready 30
+    cmdline=$(qemu_cmdline)
+    assert_contains "$cmdline" "-boot c" "ForceRestart with Disabled+Pxe should boot from disk" || return 1
+
+    # IPMI Set Boot Options with the valid bit clear (Disabled) and device=PXE,
+    # then IPMI power off/on and reset
+    ipmi_cmd raw 0x00 0x08 0x05 0x20 0x04 0x00 0x00 0x00 >/dev/null 2>&1
+    ipmi_cmd power off >/dev/null 2>&1
+    sleep 2
+    ipmi_cmd power on >/dev/null 2>&1
+    wait_for_qemu_running 30
+    wait_for_ipmi_ready 30
+    cmdline=$(qemu_cmdline)
+    assert_contains "$cmdline" "-boot c" "IPMI power on with valid bit clear should boot from disk" || return 1
+    ipmi_cmd power reset >/dev/null 2>&1
+    wait_for_qemu_running 30
+    wait_for_ipmi_ready 30
+    cmdline=$(qemu_cmdline)
+    assert_contains "$cmdline" "-boot c" "IPMI power reset with valid bit clear should boot from disk" || return 1
+    assert_not_contains "$cmdline" "-boot n" "IPMI power reset with valid bit clear should not boot PXE"
+}
+
 test_bootdev_continuous() {
     # Set boot override via Redfish with Continuous
     redfish_patch "/redfish/v1/Systems/1" \
@@ -146,6 +193,7 @@ run_test test_bootdev_bios
 run_test test_bootdev_applied_after_cycle
 run_test test_bootdev_once_reset
 run_test test_bootdev_once_pxe_on_reset
+run_test test_bootdev_disabled_ignores_target
 run_test test_bootdev_continuous
 run_test test_bootdev_redfish_pxe
 run_test test_bootmode_bios

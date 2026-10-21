@@ -177,7 +177,7 @@ func (m *Machine) resetProcessMode(resetType string) error {
 			return nil // already running
 		}
 		m.mu.RLock()
-		target := m.bootOverride.Target
+		target := m.nextBootTarget()
 		m.mu.RUnlock()
 
 		if err := m.processManager.Start(target); err != nil {
@@ -255,7 +255,17 @@ func (m *Machine) bootTargetChanged() bool {
 		}
 		return t
 	}
-	return normalize(m.bootOverride.Target) != normalize(m.runningBootTarget)
+	return normalize(m.nextBootTarget()) != normalize(m.runningBootTarget)
+}
+
+// nextBootTarget returns the boot target for the next boot: the override
+// target when the override is Once or Continuous, otherwise "None" (the
+// default boot device). Callers must hold m.mu.
+func (m *Machine) nextBootTarget() string {
+	if m.bootOverride.Enabled == "Disabled" {
+		return "None"
+	}
+	return m.bootOverride.Target
 }
 
 // waitForQMP polls qmpClient.Connect() until success or timeout.

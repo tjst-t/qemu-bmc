@@ -81,6 +81,20 @@ func TestSetBootOptions_HDD(t *testing.T) {
 	assert.Equal(t, "Hdd", mock.bootOverride.Target)
 }
 
+func TestSetBootOptions_ValidBitClear_Disabled(t *testing.T) {
+	mock := newIPMIMockMachine(machine.PowerOn)
+	// valid bit clear: the device field must not take effect
+	data := []byte{
+		0x05, 0x20, // UEFI only, valid=0
+		0x04, // PXE (0x01 << 2)
+		0x00, 0x00, 0x00,
+	}
+	msg := &IPMIMessage{Command: CmdSetBootOptions, Data: data}
+	code, _ := handleChassisCommand(msg, mock)
+	assert.Equal(t, CompletionCodeOK, code)
+	assert.Equal(t, "Disabled", mock.bootOverride.Enabled)
+}
+
 func TestGetBootOptions(t *testing.T) {
 	mock := newIPMIMockMachine(machine.PowerOn)
 	mock.bootOverride = machine.BootOverride{Enabled: "Once", Target: "Pxe", Mode: "UEFI"}
