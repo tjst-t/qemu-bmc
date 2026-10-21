@@ -416,7 +416,7 @@
       "number": 19,
       "kind": "bug",
       "title": "IPMI の chassis bootdev ... options=persistent が Once 扱いになる（persistent ビットを見ていない）",
-      "status": "ready",
+      "status": "in-progress",
       "parent": null,
       "dependsOn": [],
       "milestone": null,
@@ -430,7 +430,7 @@
       "refs": [],
       "threads": [],
       "createdAt": "2026-10-21T10:26:50.355Z",
-      "updatedAt": "2026-10-21T10:26:50.355Z",
+      "updatedAt": "2026-10-21T10:40:57.033Z",
       "closedAt": null,
       "extra": {}
     }
