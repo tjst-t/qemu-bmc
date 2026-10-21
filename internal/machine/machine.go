@@ -246,10 +246,11 @@ func (m *Machine) getQMPStatusProcess() (qmp.Status, error) {
 //
 // On and ForceRestart while a VirtualMedia image is downloading return at
 // once and run in the background when the download ends (or the media
-// timeout expires), reporting PoweringOn meanwhile, so that the VM boots
-// from the image without blocking the caller (the IPMI server handles one
-// request at a time).
+// timeout, counted from the request, expires), reporting PoweringOn
+// meanwhile, so that the VM boots from the image without blocking the caller
+// (the IPMI server handles one request at a time).
 func (m *Machine) Reset(resetType string) error {
+	mediaDeadline := m.mediaDeadline()
 	m.resetMu.Lock()
 	defer m.resetMu.Unlock()
 	gen := m.resetGen.Add(1)
@@ -262,11 +263,11 @@ func (m *Machine) Reset(resetType string) error {
 			}
 		}
 		m.setTransition(gen, PoweringOn)
-		go m.resetAfterDownload(gen, resetType)
+		go m.resetAfterDownload(gen, resetType, mediaDeadline)
 		return nil
 	}
 
-	err := m.resetDispatch(resetType)
+	err := m.resetDispatch(resetType, mediaDeadline)
 	if err == nil && (resetType == "GracefulShutdown" || resetType == "GracefulRestart") {
 		restart := resetType == "GracefulRestart"
 		m.mu.Lock()
@@ -281,10 +282,10 @@ func (m *Machine) Reset(resetType string) error {
 
 // resetAfterDownload runs power action resetType (Reset call gen) once the
 // VirtualMedia download in progress ends, unless another power action was
-// requested meanwhile.
-func (m *Machine) resetAfterDownload(gen uint64, resetType string) {
+// requested meanwhile. mediaDeadline bounds the wait.
+func (m *Machine) resetAfterDownload(gen uint64, resetType string, mediaDeadline time.Time) {
 	log.Printf("%s: waiting for the VirtualMedia download", resetType)
-	m.waitMediaDownload()
+	m.waitMediaDownload(mediaDeadline)
 
 	m.resetMu.Lock()
 	defer m.resetMu.Unlock()
@@ -293,7 +294,7 @@ func (m *Machine) resetAfterDownload(gen uint64, resetType string) {
 		return
 	}
 	defer m.setTransition(gen, "")
-	if err := m.resetDispatch(resetType); err != nil {
+	if err := m.resetDispatch(resetType, mediaDeadline); err != nil {
 		log.Printf("%s: failed: %v", resetType, err)
 	}
 }
@@ -310,15 +311,17 @@ func (m *Machine) setTransition(gen uint64, state PowerState) {
 }
 
 // resetDispatch runs a power action without touching the transition state.
-// Callers must hold resetMu.
-func (m *Machine) resetDispatch(resetType string) error {
+// On and ForceRestart wait for a VirtualMedia download until mediaDeadline,
+// which is fixed when the power action is requested so that waiting again
+// does not extend it. Callers must hold resetMu.
+func (m *Machine) resetDispatch(resetType string, mediaDeadline time.Time) error {
 	if m.processManager != nil {
-		return m.resetProcessMode(resetType)
+		return m.resetProcessMode(resetType, mediaDeadline)
 	}
-	return m.resetLegacy(resetType)
+	return m.resetLegacy(resetType, mediaDeadline)
 }
 
-func (m *Machine) resetLegacy(resetType string) error {
+func (m *Machine) resetLegacy(resetType string, mediaDeadline time.Time) error {
 	switch resetType {
 	case "On":
 		state, err := m.rawPowerState()
@@ -328,7 +331,7 @@ func (m *Machine) resetLegacy(resetType string) error {
 		if state == PowerOn {
 			return nil // already on, no-op
 		}
-		m.waitMediaDownload()
+		m.waitMediaDownload(mediaDeadline)
 		m.applyMedia()
 		if status, err := m.qmpClient.QueryStatus(); err == nil && status == qmp.StatusShutdown {
 			// The guest powered off (QEMU -no-shutdown); QEMU must be reset
@@ -343,7 +346,7 @@ func (m *Machine) resetLegacy(resetType string) error {
 	case "GracefulShutdown":
 		return m.qmpClient.SystemPowerdown()
 	case "ForceRestart":
-		m.waitMediaDownload()
+		m.waitMediaDownload(mediaDeadline)
 		m.applyMedia()
 		return m.qmpClient.SystemReset()
 	case "GracefulRestart":
@@ -353,13 +356,13 @@ func (m *Machine) resetLegacy(resetType string) error {
 	}
 }
 
-func (m *Machine) resetProcessMode(resetType string) error {
+func (m *Machine) resetProcessMode(resetType string, mediaDeadline time.Time) error {
 	switch resetType {
 	case "On":
 		if m.processManager.IsRunning() {
 			return nil // already running
 		}
-		m.waitMediaDownload()
+		m.waitMediaDownload(mediaDeadline)
 		m.mu.RLock()
 		target := m.nextBootTarget()
 		cdImage := m.insertedPath()
@@ -389,14 +392,14 @@ func (m *Machine) resetProcessMode(resetType string) error {
 		return m.processManager.WaitForExit(30 * time.Second)
 
 	case "ForceRestart":
-		m.waitMediaDownload()
+		m.waitMediaDownload(mediaDeadline)
 		if m.processManager.IsRunning() && m.bootTargetChanged() {
 			// -boot is fixed at QEMU startup, so system_reset would boot the
 			// old device. Restart the process to apply the new boot target.
 			if err := m.processManager.Stop(30 * time.Second); err != nil {
 				return fmt.Errorf("stopping QEMU: %w", err)
 			}
-			return m.resetProcessMode("On")
+			return m.resetProcessMode("On", mediaDeadline)
 		}
 		// The running process already has the requested boot target, so
 		// this reset uses it; consume Once so the next reset reverts.
@@ -438,9 +441,10 @@ func (m *Machine) watchGraceful(gen uint64, resetType string, restart bool, time
 		time.Sleep(m.pollInterval)
 	}
 
+	mediaDeadline := m.mediaDeadline()
 	if restart {
 		// Not holding resetMu, so power actions are not blocked meanwhile
-		m.waitMediaDownload()
+		m.waitMediaDownload(mediaDeadline)
 	}
 	m.resetMu.Lock()
 	defer m.resetMu.Unlock()
@@ -460,10 +464,10 @@ func (m *Machine) watchGraceful(gen uint64, resetType string, restart bool, time
 	if m.processManager != nil {
 		// With -no-shutdown QEMU stays alive after the guest powers off
 		if err = m.processManager.Stop(30 * time.Second); err == nil {
-			err = m.resetProcessMode("On")
+			err = m.resetProcessMode("On", mediaDeadline)
 		}
 	} else {
-		err = m.resetLegacy("On")
+		err = m.resetLegacy("On", mediaDeadline)
 	}
 	if err != nil {
 		log.Printf("%s: powering on failed: %v", resetType, err)

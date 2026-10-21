@@ -1037,9 +1037,12 @@ func TestReset_GracefulRestart_PoweringOffOnOn(t *testing.T) {
 	require.NoError(t, m.Reset("GracefulRestart"))
 	assert.Equal(t, PoweringOff, powerState(t, m))
 
-	// Guest off: the VM is about to be powered back on
+	// Guest off: the VM is about to be powered back on. Hold resetMu so
+	// the watcher cannot power it on before the state is checked.
+	m.resetMu.Lock()
 	mock.setStatus(qmp.StatusShutdown)
 	assert.Equal(t, PoweringOn, powerState(t, m))
+	m.resetMu.Unlock()
 
 	assert.Eventually(t, func() bool {
 		return powerState(t, m) == PowerOn

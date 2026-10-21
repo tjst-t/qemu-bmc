@@ -195,16 +195,22 @@ func (m *Machine) downloadPending() bool {
 	return m.download != nil
 }
 
-// waitMediaDownload waits, up to the media timeout, for a VirtualMedia
-// download in progress so that a power on or reset boots with the image.
-// Reset waits here before taking resetMu; the dispatched power actions
-// check again (holding resetMu) in case another download was started.
-func (m *Machine) waitMediaDownload() {
+// mediaDeadline returns how long a power action requested now waits for a
+// VirtualMedia download: now plus the media timeout.
+func (m *Machine) mediaDeadline() time.Time {
 	m.mu.RLock()
-	timeout := m.vmedia.Timeout
-	m.mu.RUnlock()
-	timer := time.NewTimer(timeout)
-	defer timer.Stop()
+	defer m.mu.RUnlock()
+	return time.Now().Add(m.vmedia.Timeout)
+}
+
+// waitMediaDownload waits, until deadline, for a VirtualMedia download in
+// progress so that a power on or reset boots with the image. Reset waits
+// here before taking resetMu; the dispatched power actions check again
+// (holding resetMu) in case another download was started, with the same
+// deadline so that a download that already timed out is not waited for
+// again.
+func (m *Machine) waitMediaDownload(deadline time.Time) {
+	var timer *time.Timer
 	for {
 		m.mu.RLock()
 		dl, image := m.download, m.media.Image
@@ -212,12 +218,22 @@ func (m *Machine) waitMediaDownload() {
 		if dl == nil {
 			return
 		}
+		remaining := time.Until(deadline)
+		if remaining <= 0 {
+			// Already given up on (and logged) by an earlier wait, or
+			// the deadline passed while waiting for resetMu
+			return
+		}
+		if timer == nil {
+			timer = time.NewTimer(remaining)
+			defer timer.Stop()
+		}
 		log.Printf("VirtualMedia: waiting for the download of %s before powering on", image)
 		select {
 		case <-dl.done:
 			// The media may have been replaced by another download
 		case <-timer.C:
-			log.Printf("VirtualMedia: download of %s not finished after %s, powering on without it", image, timeout)
+			log.Printf("VirtualMedia: download of %s not finished in time, powering on without it", image)
 			return
 		}
 	}

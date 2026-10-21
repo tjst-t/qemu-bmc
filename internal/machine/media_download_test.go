@@ -5,6 +5,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 
@@ -295,6 +296,62 @@ func TestPowerOn_DownloadWaitTimesOut(t *testing.T) {
 	// Finishing later still gets the image attached
 	close(gate)
 	assert.NotEmpty(t, downloadedPath(t, m))
+}
+
+// The power action runs once VMEDIA_TIMEOUT has passed since the request,
+// not after a second full timeout (the dispatched action checks the download
+// again while holding resetMu).
+func TestDownloadWaitTimeout_NotExtended(t *testing.T) {
+	const timeout = 300 * time.Millisecond
+	cases := []struct {
+		name      string
+		resetType string
+		legacy    bool
+		running   bool
+		status    qmp.Status
+		done      func(qmpMock *mockQMPClient, pm *mockProcessManager) bool
+	}{
+		{"process On", "On", false, false, qmp.StatusRunning,
+			func(_ *mockQMPClient, pm *mockProcessManager) bool { return len(pm.StartCalls()) > 0 }},
+		{"process ForceRestart", "ForceRestart", false, true, qmp.StatusRunning,
+			func(q *mockQMPClient, _ *mockProcessManager) bool { return indexOf(q.Calls(), "SystemReset") >= 0 }},
+		{"legacy On", "On", true, false, qmp.StatusPaused,
+			func(q *mockQMPClient, _ *mockProcessManager) bool { return indexOf(q.Calls(), "Cont") >= 0 }},
+		{"legacy ForceRestart", "ForceRestart", true, false, qmp.StatusRunning,
+			func(q *mockQMPClient, _ *mockProcessManager) bool { return indexOf(q.Calls(), "SystemReset") >= 0 }},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			gate := make(chan struct{})
+			srv := isoServer(t, map[string]chan struct{}{"/boot.iso": gate})
+			// Release the download even if the test fails, so the server
+			// can shut down (cleanups run in reverse order)
+			release := sync.OnceFunc(func() { close(gate) })
+			t.Cleanup(release)
+			qmpMock := newMockQMPClient(tc.status)
+			var pm *mockProcessManager
+			if !tc.legacy {
+				pm = newMockProcessManager(tc.running)
+			}
+			m, _ := newDownloadMachine(t, qmpMock, pm)
+			m.SetMediaOptions(MediaOptions{Timeout: timeout})
+
+			require.NoError(t, m.InsertMedia(srv.URL+"/boot.iso", "", ""))
+			start := time.Now()
+			require.NoError(t, m.Reset(tc.resetType))
+			limit := start.Add(timeout * 3 / 2)
+			for !tc.done(qmpMock, pm) {
+				if time.Now().After(limit) {
+					t.Fatalf("%s not carried out within 1.5x VMEDIA_TIMEOUT", tc.resetType)
+				}
+				time.Sleep(2 * time.Millisecond)
+			}
+			assert.GreaterOrEqual(t, time.Since(start), timeout, "waited for the download")
+
+			release()
+			assert.NotEmpty(t, downloadedPath(t, m))
+		})
+	}
 }
 
 func TestPowerOn_FailedDownloadBootsWithoutMedia(t *testing.T) {
