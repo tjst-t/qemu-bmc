@@ -31,6 +31,7 @@ detect_interfaces() {
 # Make sure /dev/net/tun is usable (TAP devices and QEMU -netdev tap need it).
 # Creates the node if it is missing (Docker's default device cgroup allows
 # opening it), otherwise prints an error naming the fix and returns 1.
+# Args: $1=interfaces that need a VM NIC (for the error message)
 ensure_tun_device() {
     local tun="${TUN_DEVICE:-/dev/net/tun}"
     if [ ! -c "$tun" ]; then
@@ -42,7 +43,7 @@ ensure_tun_device() {
     fi
     cat >&2 <<MSG
 ERROR: $tun is not available in the container, so the VM NICs for
-       '$(detect_interfaces | xargs)' cannot be created (QEMU -netdev tap would fail).
+       '$(echo $1)' cannot be created (QEMU -netdev tap would fail).
        Pass the TUN device to the container:
          docker run:     --device /dev/net/tun
          docker compose: devices: ["/dev/net/tun:/dev/net/tun"]
@@ -83,14 +84,23 @@ setup_bridge() {
 # NIC MAC addresses are not set here: qemu-bmc assigns them (VM_MACS, or
 # derived from the system UUID so they differ between nodes)
 build_network_args() {
-    local interfaces
-    interfaces=$(detect_interfaces)
+    local interfaces=""
+    local iface
+    # Skip interfaces that never appeared (e.g. a containerlab link that is
+    # missing); the VM starts without the corresponding NIC
+    for iface in $(detect_interfaces); do
+        if [ ! -e "/sys/class/net/$iface" ]; then
+            echo "WARN: Interface $iface not found, skipping its VM NIC" >&2
+            continue
+        fi
+        interfaces="$interfaces $iface"
+    done
 
     if [ -z "$interfaces" ]; then
         return
     fi
 
-    ensure_tun_device || return 1
+    ensure_tun_device "$interfaces" || return 1
 
     local idx=0
     local args=""
