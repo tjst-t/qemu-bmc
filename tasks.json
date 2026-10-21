@@ -369,7 +369,7 @@
       "number": 17,
       "kind": "bug",
       "title": "GracefulShutdown が最大 2 分 HTTP 応答を返さず、ゲストが止まらなくても 204 を返す",
-      "status": "ready",
+      "status": "in-progress",
       "parent": null,
       "dependsOn": [],
       "milestone": null,
@@ -384,7 +384,7 @@
       "refs": [],
       "threads": [],
       "createdAt": "2026-10-21T09:53:44.598Z",
-      "updatedAt": "2026-10-21T09:53:44.598Z",
+      "updatedAt": "2026-10-21T09:55:12.269Z",
       "closedAt": null,
       "extra": {}
     }
