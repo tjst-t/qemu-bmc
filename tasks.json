@@ -393,7 +393,7 @@
       "number": 18,
       "kind": "bug",
       "title": "IPMI の chassis power soft が何もしない（ゲストに ACPI の電源ボタンを送らない）",
-      "status": "ready",
+      "status": "in-progress",
       "parent": null,
       "dependsOn": [],
       "milestone": null,
@@ -407,7 +407,7 @@
       "refs": [],
       "threads": [],
       "createdAt": "2026-10-21T10:26:47.003Z",
-      "updatedAt": "2026-10-21T10:26:47.003Z",
+      "updatedAt": "2026-10-21T10:40:55.832Z",
       "closedAt": null,
       "extra": {}
     },
