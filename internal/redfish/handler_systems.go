@@ -26,13 +26,12 @@ func (s *Server) handleSystemCollection(w http.ResponseWriter, r *http.Request) 
 }
 
 func (s *Server) handleGetSystem(w http.ResponseWriter, r *http.Request) {
-	status, err := s.machine.GetQMPStatus()
+	powerState, err := s.systemPowerState()
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "InternalError", "failed to get system status")
 		return
 	}
 
-	powerState := mapQMPStatusToRedfish(status)
 	boot := s.machine.GetBootOverride()
 
 	etag := generateETag(powerState, boot)
@@ -78,12 +77,11 @@ func (s *Server) handlePatchSystem(w http.ResponseWriter, r *http.Request) {
 	ifMatch := r.Header.Get("If-Match")
 	if ifMatch != "" {
 		// Get current state to compute the current ETag
-		status, err := s.machine.GetQMPStatus()
+		powerState, err := s.systemPowerState()
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, "InternalError", "failed to get system status")
 			return
 		}
-		powerState := mapQMPStatusToRedfish(status)
 		boot := s.machine.GetBootOverride()
 		currentETag := generateETag(powerState, boot)
 
@@ -124,6 +122,24 @@ func (s *Server) handlePatchSystem(w http.ResponseWriter, r *http.Request) {
 
 	// Return the updated system
 	s.handleGetSystem(w, r)
+}
+
+// systemPowerState returns the Redfish PowerState: PoweringOff/PoweringOn
+// while a graceful power action is in progress, otherwise On or Off from the
+// QMP status.
+func (s *Server) systemPowerState() (string, error) {
+	state, err := s.machine.GetPowerState()
+	if err != nil {
+		return "", err
+	}
+	if state == machine.PoweringOff || state == machine.PoweringOn {
+		return string(state), nil
+	}
+	status, err := s.machine.GetQMPStatus()
+	if err != nil {
+		return "", err
+	}
+	return mapQMPStatusToRedfish(status), nil
 }
 
 // mapQMPStatusToRedfish converts QMP status to Redfish PowerState

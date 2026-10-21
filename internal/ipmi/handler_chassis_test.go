@@ -24,6 +24,16 @@ func TestGetChassisStatus_PowerOff(t *testing.T) {
 	assert.Equal(t, byte(0x00), data[0]&0x01) // power off
 }
 
+func TestGetChassisStatus_TransitionsReportOn(t *testing.T) {
+	for _, state := range []machine.PowerState{machine.PoweringOff, machine.PoweringOn} {
+		mock := newIPMIMockMachine(state)
+		msg := &IPMIMessage{Command: CmdGetChassisStatus}
+		code, data := handleChassisCommand(msg, mock)
+		assert.Equal(t, CompletionCodeOK, code)
+		assert.Equal(t, byte(0x01), data[0]&0x01, string(state))
+	}
+}
+
 func TestChassisControl(t *testing.T) {
 	tests := []struct {
 		name      string

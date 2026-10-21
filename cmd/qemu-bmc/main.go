@@ -125,6 +125,7 @@ func main() {
 		}
 	}
 	defer qmpClient.Close()
+	m.SetGracefulTimeout(cfg.GracefulTimeout)
 
 	// Create BMC state
 	bmcState := bmc.NewState(cfg.IPMIUser, cfg.IPMIPass)

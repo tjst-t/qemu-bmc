@@ -1,8 +1,11 @@
 package config
 
 import (
+	"log"
 	"os"
+	"strconv"
 	"strings"
+	"time"
 
 	"github.com/tjst-t/qemu-bmc/internal/qemu"
 )
@@ -27,6 +30,10 @@ type Config struct {
 	SystemUUID     string   // Fixed system UUID (QEMU -uuid, Redfish UUID, IPMI GUID)
 	SystemUUIDFile string   // File where a derived system UUID is persisted
 	VMMACs         []string // Per-NIC MAC addresses (VM_MACS); empty entries are derived from the system UUID
+
+	// GracefulTimeout bounds how long GracefulShutdown/GracefulRestart
+	// report PoweringOff before going back to On (GRACEFUL_TIMEOUT, seconds)
+	GracefulTimeout time.Duration
 }
 
 // Load reads configuration from environment variables with defaults
@@ -48,6 +55,8 @@ func Load() *Config {
 		SystemUUID:     getEnv("SYSTEM_UUID", ""),
 		SystemUUIDFile: getEnv("SYSTEM_UUID_FILE", ""),
 		VMMACs:         getListEnv("VM_MACS"),
+
+		GracefulTimeout: getSecondsEnv("GRACEFUL_TIMEOUT", 120*time.Second),
 		// entrypoint.sh passes these to QEMU as -m / -smp, so parse them the
 		// same way QEMU does
 		VMMemoryMiB: qemu.ParseMemoryMiB(getEnv("VM_MEMORY", "2048")),
@@ -74,6 +83,21 @@ func getListEnv(key string) []string {
 		items[i] = strings.TrimSpace(items[i])
 	}
 	return items
+}
+
+// getSecondsEnv returns key as a positive number of seconds, or
+// defaultValue if it is unset or invalid.
+func getSecondsEnv(key string, defaultValue time.Duration) time.Duration {
+	value := strings.TrimSpace(os.Getenv(key))
+	if value == "" {
+		return defaultValue
+	}
+	n, err := strconv.Atoi(value)
+	if err != nil || n <= 0 {
+		log.Printf("Invalid %s=%q, using %s", key, value, defaultValue)
+		return defaultValue
+	}
+	return time.Duration(n) * time.Second
 }
 
 func getBoolEnv(key string, defaultValue bool) bool {

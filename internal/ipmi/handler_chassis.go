@@ -31,7 +31,8 @@ func handleGetChassisStatus(m MachineInterface) (CompletionCode, []byte) {
 	}
 
 	var powerByte byte
-	if state == machine.PowerOn {
+	// IPMI has only on/off: a graceful action in progress is still on
+	if state == machine.PowerOn || state == machine.PoweringOff || state == machine.PoweringOn {
 		powerByte = 0x01 // bit 0 = power on
 	}
 

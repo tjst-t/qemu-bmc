@@ -3,13 +3,14 @@ package config
 import (
 	"os"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 )
 
 func TestLoad_Defaults(t *testing.T) {
 	// Clear any env vars that might be set
-	for _, key := range []string{"QMP_SOCK", "IPMI_USER", "IPMI_PASS", "REDFISH_PORT", "IPMI_PORT", "SERIAL_ADDR", "TLS_CERT", "TLS_KEY", "VM_BOOT_MODE", "VM_IPMI_ADDR", "QEMU_BINARY", "POWER_ON_AT_START", "SYSTEM_UUID", "SYSTEM_UUID_FILE", "VM_MACS"} {
+	for _, key := range []string{"QMP_SOCK", "IPMI_USER", "IPMI_PASS", "REDFISH_PORT", "IPMI_PORT", "SERIAL_ADDR", "TLS_CERT", "TLS_KEY", "VM_BOOT_MODE", "VM_IPMI_ADDR", "QEMU_BINARY", "POWER_ON_AT_START", "SYSTEM_UUID", "SYSTEM_UUID_FILE", "VM_MACS", "GRACEFUL_TIMEOUT"} {
 		os.Unsetenv(key)
 	}
 
@@ -29,6 +30,17 @@ func TestLoad_Defaults(t *testing.T) {
 	assert.Equal(t, "", cfg.SystemUUID)
 	assert.Equal(t, "", cfg.SystemUUIDFile)
 	assert.Nil(t, cfg.VMMACs)
+	assert.Equal(t, 120*time.Second, cfg.GracefulTimeout)
+}
+
+func TestLoad_GracefulTimeout(t *testing.T) {
+	defer os.Unsetenv("GRACEFUL_TIMEOUT")
+	os.Setenv("GRACEFUL_TIMEOUT", "10")
+	assert.Equal(t, 10*time.Second, Load().GracefulTimeout)
+	for _, invalid := range []string{"abc", "0", "-5", "1.5"} {
+		os.Setenv("GRACEFUL_TIMEOUT", invalid)
+		assert.Equal(t, 120*time.Second, Load().GracefulTimeout, invalid)
+	}
 }
 
 func TestLoad_VMMACs(t *testing.T) {

@@ -217,6 +217,20 @@ ipmitool user enable 3
 | GET | `/novnc/vnc.html` | Browser-based VNC console |
 | GET | `/websockify` | WebSocket-to-VNC proxy |
 
+### Reset types
+
+`ComputerSystem.Reset` returns 204 as soon as the action is started.
+
+| ResetType | Behavior | `PowerState` |
+|-----------|----------|--------------|
+| `On` | Power on | `On` |
+| `ForceOff` | Power off immediately | `Off` |
+| `ForceRestart` | Hard reset | `On` |
+| `GracefulShutdown` | Press the ACPI power button. The VM is never forced off | `PoweringOff` until the guest powers off, then `Off`. If the guest has not powered off after `GRACEFUL_TIMEOUT` seconds (e.g. it ignores ACPI), back to `On` (logged) |
+| `GracefulRestart` | Press the ACPI power button, then power the VM back on once the guest has powered off | `PoweringOff`, then `PoweringOn` while powering on, then `On`. Back to `On` after `GRACEFUL_TIMEOUT` seconds if the guest does not power off |
+
+Another power action (Redfish or IPMI) during `PoweringOff` / `PoweringOn` ends the graceful action; the state then follows the new action. IPMI `chassis power soft` behaves like `GracefulShutdown`; `chassis power status` reports `PoweringOff` / `PoweringOn` as on.
+
 ## IPMI Commands
 
 | Command | Description |
@@ -246,6 +260,7 @@ ipmitool user enable 3
 | `VM_IPMI_ADDR` | (empty, disabled) | VM IPMI chardev listen address (e.g., `:9002`) |
 | `VNC_ADDR` | `localhost:5900` | QEMU VNC TCP address for noVNC proxy |
 | `POWER_ON_AT_START` | `false` | Power on VM automatically at startup (useful for non-MAAS setups) |
+| `GRACEFUL_TIMEOUT` | `120` | Seconds `GracefulShutdown` / `GracefulRestart` (and IPMI `chassis power soft`) report `PoweringOff` before going back to `On` when the guest does not power off |
 | `SYSTEM_UUID` | (derived) | Fixed system UUID, passed to QEMU as `-uuid` and reported by Redfish `Systems/1` `UUID` and IPMI `mc guid`. If unset, it is read from `SYSTEM_UUID_FILE`, or derived from the hostname and saved there. Set it (or use a fixed `--hostname` / a mounted `/vm`) to keep it across container re-creation |
 | `SYSTEM_UUID_FILE` | `<VM_DISK dir>/system-uuid` | Where a derived UUID is persisted |
 | `VM_MACS` | (derived) | Comma-separated MAC addresses of the VM NICs, in order (an empty entry is derived). Unset MACs are derived from the system UUID, so they stay fixed per node and do not overlap between nodes. Reported by Redfish `Systems/1/EthernetInterfaces` |
@@ -543,6 +558,20 @@ ipmitool user enable 3
 | GET | `/novnc/vnc.html` | ブラウザ VNC コンソール |
 | GET | `/websockify` | WebSocket-to-VNC プロキシ |
 
+### Reset の種類
+
+`ComputerSystem.Reset` は操作を始めたらすぐ 204 を返す。
+
+| ResetType | 動作 | `PowerState` |
+|-----------|------|--------------|
+| `On` | 電源を入れる | `On` |
+| `ForceOff` | すぐに電源を切る | `Off` |
+| `ForceRestart` | ハードリセット | `On` |
+| `GracefulShutdown` | ACPI の電源ボタンを押す。強制的には切らない | ゲストが電源を切るまで `PoweringOff`、切れたら `Off`。`GRACEFUL_TIMEOUT` 秒たっても切れなければ（ACPI に応えないゲストなど）`On` に戻す（ログに出す） |
+| `GracefulRestart` | ACPI の電源ボタンを押し、ゲストが電源を切ったら入れ直す | `PoweringOff` → 入れ直す間 `PoweringOn` → `On`。`GRACEFUL_TIMEOUT` 秒たっても切れなければ `On` に戻す |
+
+`PoweringOff` / `PoweringOn` の間に別の電源操作（Redfish でも IPMI でも）が来たら途中の状態は打ち切り、その操作の結果に従う。IPMI の `chassis power soft` は `GracefulShutdown` と同じ。`chassis power status` は `PoweringOff` / `PoweringOn` を on として返す。
+
 ## IPMI コマンド
 
 | コマンド | 説明 |
@@ -571,6 +600,7 @@ ipmitool user enable 3
 | `VM_IPMI_ADDR` | (空、無効) | VM IPMI chardev リッスンアドレス (例: `:9002`) |
 | `VNC_ADDR` | `localhost:5900` | noVNC プロキシが接続する QEMU VNC アドレス |
 | `POWER_ON_AT_START` | `false` | 起動時に VM を自動的に電源オンにする（MAAS を使わない構成で有用） |
+| `GRACEFUL_TIMEOUT` | `120` | `GracefulShutdown` / `GracefulRestart`（と IPMI `chassis power soft`）でゲストが電源を切らないとき、`PoweringOff` から `On` に戻すまでの秒数 |
 | `SYSTEM_UUID` | （導出） | システム UUID を固定する。QEMU に `-uuid` で渡し、Redfish `Systems/1` の `UUID` と IPMI `mc guid` で返す。未指定なら `SYSTEM_UUID_FILE` から読み、無ければホスト名から導出してそこへ保存する。コンテナを作り直しても保つには、これを指定するか、`--hostname` を固定するか、`/vm` をマウントする |
 | `SYSTEM_UUID_FILE` | `<VM_DISK のディレクトリ>/system-uuid` | 導出した UUID の保存先 |
 | `VM_MACS` | （導出） | VM の NIC の MAC アドレスを順にカンマ区切りで指定する（空の項目は導出）。未指定の MAC はシステム UUID から導出するので、ノードごとに固定され、ノード間で重ならない。Redfish `Systems/1/EthernetInterfaces` で返す |

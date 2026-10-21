@@ -63,6 +63,25 @@ func TestGetSystem_PowerState(t *testing.T) {
 	}
 }
 
+func TestGetSystem_PowerState_Transitions(t *testing.T) {
+	for _, state := range []machine.PowerState{machine.PoweringOff, machine.PoweringOn} {
+		t.Run(string(state), func(t *testing.T) {
+			mock := newMockMachine(qmp.StatusRunning)
+			mock.powerState = state
+			srv := NewServer(mock, "", "", "")
+
+			req := httptest.NewRequest("GET", "/redfish/v1/Systems/1", nil)
+			w := httptest.NewRecorder()
+			srv.ServeHTTP(w, req)
+			require.Equal(t, http.StatusOK, w.Code)
+
+			var system ComputerSystem
+			require.NoError(t, json.Unmarshal(w.Body.Bytes(), &system))
+			assert.Equal(t, string(state), system.PowerState)
+		})
+	}
+}
+
 func TestGetSystem_UUID(t *testing.T) {
 	mock := newMockMachine(qmp.StatusRunning)
 	srv := NewServer(mock, "", "", "")

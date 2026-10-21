@@ -20,6 +20,11 @@ type PowerState string
 const (
 	PowerOn  PowerState = "On"
 	PowerOff PowerState = "Off"
+	// PoweringOff is reported from a GracefulShutdown/GracefulRestart until
+	// the guest powers off (or the graceful timeout expires).
+	PoweringOff PowerState = "PoweringOff"
+	// PoweringOn is reported while a GracefulRestart powers the VM back on.
+	PoweringOn PowerState = "PoweringOn"
 )
 
 // BootOverride represents boot source override settings
@@ -51,9 +56,9 @@ type ProcessManager interface {
 }
 
 const (
-	// gracefulRestartTimeout bounds how long a GracefulRestart waits in the
-	// background for the guest to power off before giving up.
-	gracefulRestartTimeout = 120 * time.Second
+	// DefaultGracefulTimeout bounds how long a GracefulShutdown or
+	// GracefulRestart waits for the guest to power off before giving up.
+	DefaultGracefulTimeout = 120 * time.Second
 	gracefulPollInterval   = 500 * time.Millisecond
 )
 
@@ -77,6 +82,13 @@ type Machine struct {
 	resetMu  sync.Mutex
 	resetGen atomic.Uint64
 
+	// transition is the in-progress state of a graceful power action
+	// (PoweringOff, PoweringOn or "" for none); a PoweringOff is given up
+	// at transitionDeadline. Guarded by mu.
+	transition         PowerState
+	transitionRestart  bool
+	transitionDeadline time.Time
+
 	gracefulTimeout time.Duration
 	pollInterval    time.Duration
 }
@@ -90,7 +102,7 @@ func New(client qmp.Client) *Machine {
 			Target:  "None",
 			Mode:    "UEFI",
 		},
-		gracefulTimeout: gracefulRestartTimeout,
+		gracefulTimeout: DefaultGracefulTimeout,
 		pollInterval:    gracefulPollInterval,
 	}
 }
@@ -105,13 +117,50 @@ func NewWithProcess(client qmp.Client, pm ProcessManager) *Machine {
 			Target:  "None",
 			Mode:    "UEFI",
 		},
-		gracefulTimeout: gracefulRestartTimeout,
+		gracefulTimeout: DefaultGracefulTimeout,
 		pollInterval:    gracefulPollInterval,
 	}
 }
 
-// GetPowerState returns the current power state of the VM
+// SetGracefulTimeout sets how long GracefulShutdown and GracefulRestart wait
+// for the guest to power off before reporting On again.
+func (m *Machine) SetGracefulTimeout(d time.Duration) {
+	m.resetMu.Lock()
+	defer m.resetMu.Unlock()
+	m.gracefulTimeout = d
+}
+
+// GetPowerState returns the current power state of the VM, including the
+// PoweringOff/PoweringOn states of a graceful power action in progress.
 func (m *Machine) GetPowerState() (PowerState, error) {
+	state, err := m.rawPowerState()
+	if err != nil {
+		return "", err
+	}
+
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	switch m.transition {
+	case PoweringOff:
+		if state == PowerOff {
+			if m.transitionRestart {
+				// The watcher is about to power the VM back on
+				return PoweringOn, nil
+			}
+			return PowerOff, nil
+		}
+		if time.Now().After(m.transitionDeadline) {
+			return state, nil // given up; the watcher clears it
+		}
+		return PoweringOff, nil
+	case PoweringOn:
+		return PoweringOn, nil
+	}
+	return state, nil
+}
+
+// rawPowerState returns On or Off from the QEMU state alone.
+func (m *Machine) rawPowerState() (PowerState, error) {
 	if m.processManager != nil {
 		return m.getPowerStateProcess()
 	}
@@ -180,13 +229,44 @@ func (m *Machine) getQMPStatusProcess() (qmp.Status, error) {
 //
 // GracefulShutdown and GracefulRestart only send the ACPI power button event
 // and return; like a physical BMC, the guest powers off afterwards (or not, if
-// it ignores ACPI — the VM is never forced off). GracefulRestart powers the VM
-// back on in the background once the guest has powered off.
+// it ignores ACPI — the VM is never forced off). The power state is
+// PoweringOff until the guest powers off, or On again if it has not within
+// the graceful timeout. GracefulRestart then powers the VM back on in the
+// background, reporting PoweringOn until it is on. Any other power action
+// abandons a graceful action in progress.
 func (m *Machine) Reset(resetType string) error {
 	m.resetMu.Lock()
 	defer m.resetMu.Unlock()
-	m.resetGen.Add(1)
+	gen := m.resetGen.Add(1)
+	m.setTransition(gen, "")
 
+	err := m.resetDispatch(resetType)
+	if err == nil && (resetType == "GracefulShutdown" || resetType == "GracefulRestart") {
+		restart := resetType == "GracefulRestart"
+		m.mu.Lock()
+		m.transition = PoweringOff
+		m.transitionRestart = restart
+		m.transitionDeadline = time.Now().Add(m.gracefulTimeout)
+		m.mu.Unlock()
+		go m.watchGraceful(gen, resetType, restart, m.gracefulTimeout)
+	}
+	return err
+}
+
+// setTransition sets the transition state, unless a newer Reset than gen
+// was requested. gen is the Reset call setting it.
+func (m *Machine) setTransition(gen uint64, state PowerState) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if gen != m.resetGen.Load() {
+		return
+	}
+	m.transition = state
+}
+
+// resetDispatch runs a power action without touching the transition state.
+// Callers must hold resetMu.
+func (m *Machine) resetDispatch(resetType string) error {
 	if m.processManager != nil {
 		return m.resetProcessMode(resetType)
 	}
@@ -196,7 +276,7 @@ func (m *Machine) Reset(resetType string) error {
 func (m *Machine) resetLegacy(resetType string) error {
 	switch resetType {
 	case "On":
-		state, err := m.GetPowerState()
+		state, err := m.rawPowerState()
 		if err != nil {
 			return err
 		}
@@ -218,11 +298,7 @@ func (m *Machine) resetLegacy(resetType string) error {
 	case "ForceRestart":
 		return m.qmpClient.SystemReset()
 	case "GracefulRestart":
-		if err := m.qmpClient.SystemPowerdown(); err != nil {
-			return err
-		}
-		go m.powerOnAfterGuestPowerOff(m.resetGen.Load())
-		return nil
+		return m.qmpClient.SystemPowerdown()
 	default:
 		return fmt.Errorf("unsupported reset type: %s", resetType)
 	}
@@ -284,29 +360,27 @@ func (m *Machine) resetProcessMode(resetType string) error {
 		return m.qmpClient.SystemPowerdown()
 
 	case "GracefulRestart":
-		if err := m.qmpClient.SystemPowerdown(); err != nil {
-			return err
-		}
-		go m.powerOnAfterGuestPowerOff(m.resetGen.Load())
-		return nil
+		return m.qmpClient.SystemPowerdown()
 
 	default:
 		return fmt.Errorf("unsupported reset type: %s", resetType)
 	}
 }
 
-// powerOnAfterGuestPowerOff completes a GracefulRestart: it waits for the
-// guest to power off and then powers the VM on again. It gives up, leaving the
-// VM running, if the guest does not power off in time or another power action
-// (identified by gen) is requested meanwhile.
-func (m *Machine) powerOnAfterGuestPowerOff(gen uint64) {
-	deadline := time.Now().Add(m.gracefulTimeout)
+// watchGraceful follows a GracefulShutdown or GracefulRestart (Reset call
+// gen): it waits for the guest to power off, then ends the PoweringOff state
+// or, for a restart, powers the VM on again while reporting PoweringOn. It
+// gives up, leaving the VM running, if the guest does not power off within
+// the graceful timeout, and stops once another power action is requested.
+func (m *Machine) watchGraceful(gen uint64, resetType string, restart bool, timeout time.Duration) {
+	deadline := time.Now().Add(timeout)
 	for !m.guestPoweredOff() {
 		if m.resetGen.Load() != gen {
 			return
 		}
 		if time.Now().After(deadline) {
-			log.Printf("GracefulRestart: guest did not power off within %s, leaving it running", m.gracefulTimeout)
+			log.Printf("%s: guest did not power off within %s, leaving it running", resetType, timeout)
+			m.setTransition(gen, "")
 			return
 		}
 		time.Sleep(m.pollInterval)
@@ -317,8 +391,15 @@ func (m *Machine) powerOnAfterGuestPowerOff(gen uint64) {
 	if m.resetGen.Load() != gen {
 		return
 	}
+	if !restart {
+		log.Printf("%s: guest powered off", resetType)
+		m.setTransition(gen, "")
+		return
+	}
 
-	log.Printf("GracefulRestart: guest powered off, powering on")
+	log.Printf("%s: guest powered off, powering on", resetType)
+	m.setTransition(gen, PoweringOn)
+	defer m.setTransition(gen, "")
 	var err error
 	if m.processManager != nil {
 		// With -no-shutdown QEMU stays alive after the guest powers off
@@ -329,7 +410,7 @@ func (m *Machine) powerOnAfterGuestPowerOff(gen uint64) {
 		err = m.resetLegacy("On")
 	}
 	if err != nil {
-		log.Printf("GracefulRestart: powering on failed: %v", err)
+		log.Printf("%s: powering on failed: %v", resetType, err)
 	}
 }
 
