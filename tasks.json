@@ -363,6 +363,30 @@
       "updatedAt": "2026-10-21T09:53:40.928Z",
       "closedAt": null,
       "extra": {}
+    },
+    {
+      "id": "gracefulshutdown-2-http-204",
+      "number": 17,
+      "kind": "bug",
+      "title": "GracefulShutdown が最大 2 分 HTTP 応答を返さず、ゲストが止まらなくても 204 を返す",
+      "status": "ready",
+      "parent": null,
+      "dependsOn": [],
+      "milestone": null,
+      "priority": "high",
+      "labels": [
+        "redfish",
+        "sakutei"
+      ],
+      "body": "## 症状（v0.7.0、プロセス管理モードで確認）\nReset の GracefulShutdown は QMP の system_powerdown を送ったあと、QEMU の終了を最大 120 秒待ってから応答する（internal/machine/machine.go の resetProcessMode）。ゲスト OS が ACPI に応えないと、約 2 分後に 204 を返し、電源は On のまま。\n- クライアントの HTTP タイムアウトに当たりやすい（実機の BMC はすぐ応答し、止まるのはその後）\n- 成功の 204 なのに止まっていない。sakutei のように毎周期で観測する相手は、次の周期で PowerState を見て判断できるので、応答は早いほうがよい\n- 旧モード（QMP だけ）では system_powerdown の直後に stop して即座に止めるので、Graceful ではなく ForceOff と同じになっている\n- GracefulRestart も同じく最大 120 秒待つ\n\n## 直す方向\nsystem_powerdown を送ったらすぐ 202/204 を返し、待つのは裏で行う。強制停止はしない（Graceful の意味を保つ）。旧モードの即 stop もやめる。ゲストが ACPI に応えるときに実際に止まることを、小さな Linux ゲストで確かめる。\n\n## 経緯\nsakutei開発の問い合わせ（2026-10-21、優先 1 位が GracefulShutdown）で確かめていて発見。",
+      "doneWhen": "GracefulShutdown と GracefulRestart の POST が数秒以内に返る。ACPI に応えるゲストではしばらくして PowerState が Off（Restart なら On に戻る）になり、応えないゲストでは On のまま（強制停止しない）。旧モードでも同じ。テストがある",
+      "resolution": null,
+      "refs": [],
+      "threads": [],
+      "createdAt": "2026-10-21T09:53:44.598Z",
+      "updatedAt": "2026-10-21T09:53:44.598Z",
+      "closedAt": null,
+      "extra": {}
     }
   ]
 }
