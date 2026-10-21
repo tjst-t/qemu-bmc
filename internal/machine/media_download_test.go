@@ -436,3 +436,16 @@ func TestInsertMedia_InvalidURL(t *testing.T) {
 	assert.ErrorIs(t, m.InsertMedia("http:///boot.iso", "", ""), ErrInvalidMedia)
 	assert.False(t, m.GetMedia().Inserted)
 }
+
+func TestCleanStaleDownloads(t *testing.T) {
+	dir := t.TempDir()
+	for _, f := range []string{"cd1-3.iso", "cd1-123.part", "keep.iso"} {
+		require.NoError(t, os.WriteFile(filepath.Join(dir, f), []byte("x"), 0o644))
+	}
+	m := NewWithProcess(newMockQMPClient(qmp.StatusRunning), newMockProcessManager(false))
+	m.SetMediaOptions(MediaOptions{Dir: dir})
+	m.CleanStaleDownloads()
+
+	left, _ := filepath.Glob(filepath.Join(dir, "*"))
+	assert.Equal(t, []string{filepath.Join(dir, "keep.iso")}, left)
+}

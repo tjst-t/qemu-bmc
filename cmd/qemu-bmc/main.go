@@ -131,6 +131,7 @@ func main() {
 		InsecureTLS: cfg.VMediaInsecureTLS,
 		Timeout:     cfg.VMediaTimeout,
 	})
+	m.CleanStaleDownloads()
 
 	// Create BMC state
 	bmcState := bmc.NewState(cfg.IPMIUser, cfg.IPMIPass)

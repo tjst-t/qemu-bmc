@@ -56,6 +56,22 @@ func (m *Machine) SetMediaOptions(opts MediaOptions) {
 	m.vmedia = opts
 }
 
+// CleanStaleDownloads removes images downloaded by an earlier qemu-bmc run
+// (cd1-*.iso and partial cd1-*.part) from the download directory. Only the
+// current run tracks its download, so leftovers would otherwise pile up in
+// a persistent VMEDIA_DIR. Call it at startup, before any InsertMedia.
+func (m *Machine) CleanStaleDownloads() {
+	m.mu.RLock()
+	dir := m.vmedia.Dir
+	m.mu.RUnlock()
+	for _, pattern := range []string{"cd1-*.iso", "cd1-*.part"} {
+		files, _ := filepath.Glob(filepath.Join(dir, pattern))
+		for _, f := range files {
+			removeMediaFile(f)
+		}
+	}
+}
+
 func isHTTPImage(image string) bool {
 	lower := strings.ToLower(image)
 	return strings.HasPrefix(lower, "http://") || strings.HasPrefix(lower, "https://")

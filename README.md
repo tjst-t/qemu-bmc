@@ -269,7 +269,7 @@ Another power action (Redfish or IPMI) during `PoweringOff` / `PoweringOn` ends 
 | `VNC_ADDR` | `localhost:5900` | QEMU VNC TCP address for noVNC proxy |
 | `POWER_ON_AT_START` | `false` | Power on VM automatically at startup (useful for non-MAAS setups) |
 | `GRACEFUL_TIMEOUT` | `120` | Seconds `GracefulShutdown` / `GracefulRestart` (and IPMI `chassis power soft`) report `PoweringOff` before going back to `On` when the guest does not power off |
-| `VMEDIA_DIR` | `/vm/vmedia` if `/vm` is writable, else `/tmp/vmedia` | Where VirtualMedia HTTP(S) images are downloaded. The previous download is deleted when the medium is replaced or ejected |
+| `VMEDIA_DIR` | `/vm/vmedia` if `/vm` is writable, else `/tmp/vmedia` | Where VirtualMedia HTTP(S) images are downloaded. The previous download is deleted when the medium is replaced or ejected, and leftovers from an earlier run (`cd1-*.iso`) are deleted at startup. In legacy mode the external QEMU must be able to read this directory (same filesystem) |
 | `VMEDIA_INSECURE_TLS` | `true` | Skip certificate verification when downloading HTTPS images |
 | `VMEDIA_TIMEOUT` | `600` | Seconds a power on or reset requested during a VirtualMedia download waits for it before booting without the image |
 | `SYSTEM_UUID` | (derived) | Fixed system UUID, passed to QEMU as `-uuid` and reported by Redfish `Systems/1` `UUID` and IPMI `mc guid`. If unset, it is read from `SYSTEM_UUID_FILE`, or derived from the hostname and saved there. Set it (or use a fixed `--hostname` / a mounted `/vm`) to keep it across container re-creation |
@@ -614,7 +614,7 @@ ipmitool user enable 3
 | `VNC_ADDR` | `localhost:5900` | noVNC プロキシが接続する QEMU VNC アドレス |
 | `POWER_ON_AT_START` | `false` | 起動時に VM を自動的に電源オンにする（MAAS を使わない構成で有用） |
 | `GRACEFUL_TIMEOUT` | `120` | `GracefulShutdown` / `GracefulRestart`（と IPMI `chassis power soft`）でゲストが電源を切らないとき、`PoweringOff` から `On` に戻すまでの秒数 |
-| `VMEDIA_DIR` | `/vm` が書ければ `/vm/vmedia`、無理なら `/tmp/vmedia` | VirtualMedia の HTTP(S) イメージの保存先。差し替え・Eject で前に落としたファイルは消す |
+| `VMEDIA_DIR` | `/vm` が書ければ `/vm/vmedia`、無理なら `/tmp/vmedia` | VirtualMedia の HTTP(S) イメージの保存先。差し替え・Eject で前に落としたファイルは消し、前の起動の残り（`cd1-*.iso`）は起動時に消す。レガシーモードでは外の QEMU がこのディレクトリを読める（同じファイルシステム）必要がある |
 | `VMEDIA_INSECURE_TLS` | `true` | HTTPS のイメージを落とすとき証明書を検証しない |
 | `VMEDIA_TIMEOUT` | `600` | ダウンロード中に電源オン・リセットが来たとき、終わるまで待つ秒数（過ぎたら ISO 無しで起動） |
 | `SYSTEM_UUID` | （導出） | システム UUID を固定する。QEMU に `-uuid` で渡し、Redfish `Systems/1` の `UUID` と IPMI `mc guid` で返す。未指定なら `SYSTEM_UUID_FILE` から読み、無ければホスト名から導出してそこへ保存する。コンテナを作り直しても保つには、これを指定するか、`--hostname` を固定するか、`/vm` をマウントする |
