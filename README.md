@@ -63,7 +63,7 @@ docker run --rm --device /dev/kvm --device /dev/net/tun --cap-add NET_ADMIN \
 
 ### Binary (Legacy Mode)
 
-Connect to an existing QEMU instance via QMP socket:
+Connect to an existing QEMU instance via QMP socket. Start QEMU with `-no-shutdown` (and a QMP socket, e.g. `-qmp unix:/var/run/qemu/qmp.sock,server,nowait`): without it, QEMU exits when the guest powers off (e.g. after `GracefulShutdown`), and qemu-bmc can no longer report the power state or power the VM back on.
 
 ```bash
 make download-novnc
@@ -376,7 +376,7 @@ docker run --rm --device /dev/kvm --device /dev/net/tun --cap-add NET_ADMIN \
 
 ### バイナリ（レガシーモード）
 
-既存の QEMU インスタンスに QMP ソケット経由で接続:
+既存の QEMU インスタンスに QMP ソケット経由で接続する。QEMU は `-no-shutdown`（と `-qmp unix:/var/run/qemu/qmp.sock,server,nowait` などの QMP ソケット）を付けて起動すること。付けないと、ゲストが電源を切ったとき（`GracefulShutdown` のあとなど）に QEMU が終了し、qemu-bmc から電源状態を返せず、電源を入れ直すこともできない:
 
 ```bash
 make download-novnc
