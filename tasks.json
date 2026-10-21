@@ -410,6 +410,29 @@
       "updatedAt": "2026-10-21T10:26:47.003Z",
       "closedAt": null,
       "extra": {}
+    },
+    {
+      "id": "ipmi-chassis-bootdev-options-persistent",
+      "number": 19,
+      "kind": "bug",
+      "title": "IPMI の chassis bootdev ... options=persistent が Once 扱いになる（persistent ビットを見ていない）",
+      "status": "ready",
+      "parent": null,
+      "dependsOn": [],
+      "milestone": null,
+      "priority": "normal",
+      "labels": [
+        "ipmi"
+      ],
+      "body": "## 症状（main の a25e9fb 時点）\n`ipmitool chassis bootdev pxe options=persistent` のあと、Redfish の Boot は Enabled=Once のまま。1 回目のリセットは PXE で起動するが、2 回目はディスクに戻る。\n原因：internal/ipmi/handler_chassis.go の handleSetBootOptions がブートフラグ 1 バイト目の bit 6（persistent）を見ず、bit 7（valid）だけで Once / Disabled を決めている。Get Boot Options も persistent を返していないはずなので合わせて確かめる。\n\n## 直すこと\nbit 7=1 かつ bit 6=1 なら Continuous、bit 6=0 なら Once、bit 7=0 なら Disabled。Get Boot Options でも同じビットを返す。\n\n## 経緯\n2026-10-21、#16・#17 と同じ問題が IPMI 経由にないかを確かめていて発見。",
+      "doneWhen": "options=persistent で設定すると Redfish の BootSourceOverrideEnabled が Continuous になり、何度リセットしてもその起動先で起動する。ipmitool chassis bootparam get 5 でも persistent と読める。ユニットテストがある",
+      "resolution": null,
+      "refs": [],
+      "threads": [],
+      "createdAt": "2026-10-21T10:26:50.355Z",
+      "updatedAt": "2026-10-21T10:26:50.355Z",
+      "closedAt": null,
+      "extra": {}
     }
   ]
 }
