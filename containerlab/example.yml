@@ -14,7 +14,7 @@ name: qemu-bmc-lab
 topology:
   defaults:
     kind: linux
-    image: ghcr.io/tjst-t/qemu-bmc:0.7
+    image: ghcr.io/tjst-t/qemu-bmc:0.8
 
   nodes:
     node1:
