@@ -86,7 +86,7 @@ func (s *Server) handleInsertMedia(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := s.machine.InsertMedia(req.Image); err != nil {
+	if err := s.machine.InsertMedia(req.Image, req.UserName, req.Password); err != nil {
 		log.Printf("VirtualMedia: InsertMedia %q failed: %v", req.Image, err)
 		if errors.Is(err, machine.ErrInvalidMedia) {
 			writeError(w, http.StatusBadRequest, "ActionParameterValueFormatError", err.Error())

@@ -126,6 +126,11 @@ func main() {
 	}
 	defer qmpClient.Close()
 	m.SetGracefulTimeout(cfg.GracefulTimeout)
+	m.SetMediaOptions(machine.MediaOptions{
+		Dir:         cfg.VMediaDir,
+		InsecureTLS: cfg.VMediaInsecureTLS,
+		Timeout:     cfg.VMediaTimeout,
+	})
 
 	// Create BMC state
 	bmcState := bmc.NewState(cfg.IPMIUser, cfg.IPMIPass)

@@ -190,6 +190,9 @@ type VirtualMediaAction struct {
 type InsertMediaRequest struct {
 	Image    string `json:"Image"`
 	Inserted bool   `json:"Inserted"`
+	// UserName and Password authenticate an http(s) Image download
+	UserName string `json:"UserName"`
+	Password string `json:"Password"`
 }
 
 // ChassisCollection is a collection of chassis

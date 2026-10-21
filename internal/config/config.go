@@ -3,8 +3,10 @@ package config
 import (
 	"log"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/tjst-t/qemu-bmc/internal/qemu"
@@ -34,6 +36,14 @@ type Config struct {
 	// GracefulTimeout bounds how long GracefulShutdown/GracefulRestart
 	// report PoweringOff before going back to On (GRACEFUL_TIMEOUT, seconds)
 	GracefulTimeout time.Duration
+
+	// VirtualMedia http(s) images are downloaded to VMediaDir (VMEDIA_DIR),
+	// skipping certificate verification if VMediaInsecureTLS
+	// (VMEDIA_INSECURE_TLS); a power on waits up to VMediaTimeout
+	// (VMEDIA_TIMEOUT, seconds) for a download in progress
+	VMediaDir         string
+	VMediaInsecureTLS bool
+	VMediaTimeout     time.Duration
 }
 
 // Load reads configuration from environment variables with defaults
@@ -57,11 +67,24 @@ func Load() *Config {
 		VMMACs:         getListEnv("VM_MACS"),
 
 		GracefulTimeout: getSecondsEnv("GRACEFUL_TIMEOUT", 120*time.Second),
+
+		VMediaDir:         getEnv("VMEDIA_DIR", defaultVMediaDir("/vm")),
+		VMediaInsecureTLS: getBoolEnv("VMEDIA_INSECURE_TLS", true),
+		VMediaTimeout:     getSecondsEnv("VMEDIA_TIMEOUT", 10*time.Minute),
 		// entrypoint.sh passes these to QEMU as -m / -smp, so parse them the
 		// same way QEMU does
 		VMMemoryMiB: qemu.ParseMemoryMiB(getEnv("VM_MEMORY", "2048")),
 		VMCPUs:      qemu.ParseSMPCPUs(getEnv("VM_CPUS", "2")),
 	}
+}
+
+// defaultVMediaDir returns <base>/vmedia if base is a writable directory,
+// else /tmp/vmedia.
+func defaultVMediaDir(base string) string {
+	if fi, err := os.Stat(base); err == nil && fi.IsDir() && syscall.Access(base, 2 /* W_OK */) == nil {
+		return filepath.Join(base, "vmedia")
+	}
+	return "/tmp/vmedia"
 }
 
 func getEnv(key, defaultValue string) string {

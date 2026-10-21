@@ -2,15 +2,17 @@ package config
 
 import (
 	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestLoad_Defaults(t *testing.T) {
 	// Clear any env vars that might be set
-	for _, key := range []string{"QMP_SOCK", "IPMI_USER", "IPMI_PASS", "REDFISH_PORT", "IPMI_PORT", "SERIAL_ADDR", "TLS_CERT", "TLS_KEY", "VM_BOOT_MODE", "VM_IPMI_ADDR", "QEMU_BINARY", "POWER_ON_AT_START", "SYSTEM_UUID", "SYSTEM_UUID_FILE", "VM_MACS", "GRACEFUL_TIMEOUT"} {
+	for _, key := range []string{"QMP_SOCK", "IPMI_USER", "IPMI_PASS", "REDFISH_PORT", "IPMI_PORT", "SERIAL_ADDR", "TLS_CERT", "TLS_KEY", "VM_BOOT_MODE", "VM_IPMI_ADDR", "QEMU_BINARY", "POWER_ON_AT_START", "SYSTEM_UUID", "SYSTEM_UUID_FILE", "VM_MACS", "GRACEFUL_TIMEOUT", "VMEDIA_DIR", "VMEDIA_INSECURE_TLS", "VMEDIA_TIMEOUT"} {
 		os.Unsetenv(key)
 	}
 
@@ -31,6 +33,30 @@ func TestLoad_Defaults(t *testing.T) {
 	assert.Equal(t, "", cfg.SystemUUIDFile)
 	assert.Nil(t, cfg.VMMACs)
 	assert.Equal(t, 120*time.Second, cfg.GracefulTimeout)
+	assert.Equal(t, defaultVMediaDir("/vm"), cfg.VMediaDir)
+	assert.True(t, cfg.VMediaInsecureTLS)
+	assert.Equal(t, 10*time.Minute, cfg.VMediaTimeout)
+}
+
+func TestLoad_VMedia(t *testing.T) {
+	t.Setenv("VMEDIA_DIR", "/data/iso")
+	t.Setenv("VMEDIA_INSECURE_TLS", "false")
+	t.Setenv("VMEDIA_TIMEOUT", "30")
+	cfg := Load()
+	assert.Equal(t, "/data/iso", cfg.VMediaDir)
+	assert.False(t, cfg.VMediaInsecureTLS)
+	assert.Equal(t, 30*time.Second, cfg.VMediaTimeout)
+}
+
+func TestDefaultVMediaDir(t *testing.T) {
+	dir := t.TempDir()
+	assert.Equal(t, filepath.Join(dir, "vmedia"), defaultVMediaDir(dir))
+	assert.Equal(t, "/tmp/vmedia", defaultVMediaDir(filepath.Join(dir, "missing")))
+	if os.Geteuid() != 0 {
+		readOnly := filepath.Join(dir, "ro")
+		require.NoError(t, os.Mkdir(readOnly, 0o555))
+		assert.Equal(t, "/tmp/vmedia", defaultVMediaDir(readOnly))
+	}
 }
 
 func TestLoad_GracefulTimeout(t *testing.T) {

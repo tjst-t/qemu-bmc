@@ -17,7 +17,7 @@ type MachineInterface interface {
 	GetBootOverride() machine.BootOverride
 	SetBootOverride(override machine.BootOverride) error
 	GetMedia() machine.Media
-	InsertMedia(image string) error
+	InsertMedia(image, username, password string) error
 	EjectMedia() error
 }
 

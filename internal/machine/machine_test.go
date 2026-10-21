@@ -447,7 +447,7 @@ func TestInsertMedia_Legacy_UsesQueryBlock(t *testing.T) {
 	m := New(mock)
 
 	// Legacy mode: the path is in the external QEMU's filesystem
-	require.NoError(t, m.InsertMedia("/iso/boot.iso"))
+	require.NoError(t, m.InsertMedia("/iso/boot.iso", "", ""))
 	assert.Equal(t, []string{"change /machine/unattached/device[23] /iso/boot.iso raw"}, mock.MediumArgs())
 	assert.Equal(t, Media{Image: "/iso/boot.iso", Inserted: true}, m.GetMedia())
 }
@@ -458,7 +458,7 @@ func TestInsertMedia_Legacy_QMPError(t *testing.T) {
 	mock.mediumErr = errors.New("Could not open")
 	m := New(mock)
 
-	assert.Error(t, m.InsertMedia("/iso/boot.iso"))
+	assert.Error(t, m.InsertMedia("/iso/boot.iso", "", ""))
 	assert.False(t, m.GetMedia().Inserted)
 }
 
@@ -467,14 +467,14 @@ func TestInsertMedia_NoCDDrive(t *testing.T) {
 	mock.blocks = q35Blocks[:1]
 	m := New(mock)
 
-	assert.Error(t, m.InsertMedia("/iso/boot.iso"))
+	assert.Error(t, m.InsertMedia("/iso/boot.iso", "", ""))
 	assert.Empty(t, mock.MediumArgs())
 }
 
 func TestInsertMedia_UnsupportedImage(t *testing.T) {
 	m := New(newMockQMPClient(qmp.StatusRunning))
-	for _, image := range []string{"http://example.com/boot.iso", "boot.iso", "file://host/boot.iso", "file:boot.iso"} {
-		err := m.InsertMedia(image)
+	for _, image := range []string{"boot.iso", "http://", "ftp://example.com/boot.iso", "file://host/boot.iso", "file:boot.iso"} {
+		err := m.InsertMedia(image, "", "")
 		assert.ErrorIs(t, err, ErrInvalidMedia, image)
 	}
 }
@@ -485,7 +485,7 @@ func TestInsertMedia_PoweredOff_KeptAndAttachedOnStart(t *testing.T) {
 	pm := newMockProcessManager(false)
 	m := NewWithProcess(qmpMock, pm)
 
-	require.NoError(t, m.InsertMedia("file://"+iso))
+	require.NoError(t, m.InsertMedia("file://"+iso, "", ""))
 	assert.Empty(t, qmpMock.Calls(), "no QMP while QEMU is not running")
 	assert.Equal(t, Media{Image: "file://" + iso, Inserted: true}, m.GetMedia())
 
@@ -501,9 +501,9 @@ func TestInsertMedia_PoweredOff_KeptAndAttachedOnStart(t *testing.T) {
 func TestInsertMedia_PoweredOff_MissingFile(t *testing.T) {
 	m := NewWithProcess(newMockQMPClient(qmp.StatusRunning), newMockProcessManager(false))
 
-	err := m.InsertMedia("/nonexistent/boot.iso")
+	err := m.InsertMedia("/nonexistent/boot.iso", "", "")
 	assert.ErrorIs(t, err, ErrInvalidMedia)
-	err = m.InsertMedia(t.TempDir())
+	err = m.InsertMedia(t.TempDir(), "", "")
 	assert.ErrorIs(t, err, ErrInvalidMedia, "directory")
 	assert.False(t, m.GetMedia().Inserted)
 }
@@ -514,7 +514,7 @@ func TestInsertMedia_Running_ChangesMedium(t *testing.T) {
 	qmpMock.blocks = []qmp.BlockInfo{{Device: "vmedia0", QDev: "vmedia-cd0", Removable: true}}
 	m := NewWithProcess(qmpMock, newMockProcessManager(true))
 
-	require.NoError(t, m.InsertMedia(iso))
+	require.NoError(t, m.InsertMedia(iso, "", ""))
 	assert.Equal(t, []string{"change vmedia-cd0 " + iso + " raw"}, qmpMock.MediumArgs())
 	assert.True(t, m.GetMedia().Inserted)
 }
@@ -552,7 +552,7 @@ func TestPowerOn_SyncsUserCDDrive(t *testing.T) {
 	// A user-defined CD drive does not get the image on the command line
 	qmpMock.blocks = []qmp.BlockInfo{{Device: "cd", QDev: "mycd", Removable: true}}
 	m := NewWithProcess(qmpMock, newMockProcessManager(false))
-	require.NoError(t, m.InsertMedia(iso))
+	require.NoError(t, m.InsertMedia(iso, "", ""))
 
 	require.NoError(t, m.Reset("On"))
 	assert.Equal(t, []string{"change mycd " + iso + " raw"}, qmpMock.MediumArgs())
@@ -856,7 +856,13 @@ func TestProcessMode_Reset_GracefulShutdown_ReturnsWithoutWaiting(t *testing.T) 
 	start := time.Now()
 	require.NoError(t, m.Reset("GracefulShutdown"))
 	assert.Less(t, time.Since(start), time.Second)
-	assert.Equal(t, []string{"SystemPowerdown"}, qmpMock.Calls())
+	// The background watcher may already have polled QueryStatus
+	calls := qmpMock.Calls()
+	require.NotEmpty(t, calls)
+	assert.Equal(t, "SystemPowerdown", calls[0])
+	for _, c := range calls[1:] {
+		assert.Equal(t, "QueryStatus", c)
+	}
 	assert.Empty(t, pm.Calls()) // no wait, no Stop/Kill
 
 	// Powering off until the guest honors ACPI

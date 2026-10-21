@@ -71,9 +71,16 @@ type Machine struct {
 	// started with (process management mode only).
 	runningBootTarget string
 	// media is the virtual CD state, kept while QEMU is not running and
-	// applied when it starts. mediaPath is the local path of media.Image.
+	// applied when it starts. mediaPath is the local path of media.Image
+	// ("" while an http(s) image is downloading); mediaFile is the file
+	// downloaded for it, removed once the media is replaced or ejected.
+	// mediaGen counts media changes; download is the download in progress.
 	media     Media
 	mediaPath string
+	mediaFile string
+	mediaGen  uint64
+	download  *mediaDownload
+	vmedia    MediaOptions
 	mu        sync.RWMutex
 
 	// resetMu serializes power actions, including the deferred power-on of
@@ -104,6 +111,7 @@ func New(client qmp.Client) *Machine {
 		},
 		gracefulTimeout: DefaultGracefulTimeout,
 		pollInterval:    gracefulPollInterval,
+		vmedia:          defaultMediaOptions(),
 	}
 }
 
@@ -119,6 +127,7 @@ func NewWithProcess(client qmp.Client, pm ProcessManager) *Machine {
 		},
 		gracefulTimeout: DefaultGracefulTimeout,
 		pollInterval:    gracefulPollInterval,
+		vmedia:          defaultMediaOptions(),
 	}
 }
 
@@ -234,11 +243,28 @@ func (m *Machine) getQMPStatusProcess() (qmp.Status, error) {
 // the graceful timeout. GracefulRestart then powers the VM back on in the
 // background, reporting PoweringOn until it is on. Any other power action
 // abandons a graceful action in progress.
+//
+// On and ForceRestart while a VirtualMedia image is downloading return at
+// once and run in the background when the download ends (or the media
+// timeout expires), reporting PoweringOn meanwhile, so that the VM boots
+// from the image without blocking the caller (the IPMI server handles one
+// request at a time).
 func (m *Machine) Reset(resetType string) error {
 	m.resetMu.Lock()
 	defer m.resetMu.Unlock()
 	gen := m.resetGen.Add(1)
 	m.setTransition(gen, "")
+
+	if (resetType == "On" || resetType == "ForceRestart") && m.downloadPending() {
+		if resetType == "On" {
+			if state, err := m.rawPowerState(); err == nil && state == PowerOn {
+				return nil // already on, no-op
+			}
+		}
+		m.setTransition(gen, PoweringOn)
+		go m.resetAfterDownload(gen, resetType)
+		return nil
+	}
 
 	err := m.resetDispatch(resetType)
 	if err == nil && (resetType == "GracefulShutdown" || resetType == "GracefulRestart") {
@@ -251,6 +277,25 @@ func (m *Machine) Reset(resetType string) error {
 		go m.watchGraceful(gen, resetType, restart, m.gracefulTimeout)
 	}
 	return err
+}
+
+// resetAfterDownload runs power action resetType (Reset call gen) once the
+// VirtualMedia download in progress ends, unless another power action was
+// requested meanwhile.
+func (m *Machine) resetAfterDownload(gen uint64, resetType string) {
+	log.Printf("%s: waiting for the VirtualMedia download", resetType)
+	m.waitMediaDownload()
+
+	m.resetMu.Lock()
+	defer m.resetMu.Unlock()
+	if m.resetGen.Load() != gen {
+		log.Printf("%s: abandoned, another power action was requested", resetType)
+		return
+	}
+	defer m.setTransition(gen, "")
+	if err := m.resetDispatch(resetType); err != nil {
+		log.Printf("%s: failed: %v", resetType, err)
+	}
 }
 
 // setTransition sets the transition state, unless a newer Reset than gen
@@ -283,6 +328,8 @@ func (m *Machine) resetLegacy(resetType string) error {
 		if state == PowerOn {
 			return nil // already on, no-op
 		}
+		m.waitMediaDownload()
+		m.applyMedia()
 		if status, err := m.qmpClient.QueryStatus(); err == nil && status == qmp.StatusShutdown {
 			// The guest powered off (QEMU -no-shutdown); QEMU must be reset
 			// before it can run again.
@@ -296,6 +343,8 @@ func (m *Machine) resetLegacy(resetType string) error {
 	case "GracefulShutdown":
 		return m.qmpClient.SystemPowerdown()
 	case "ForceRestart":
+		m.waitMediaDownload()
+		m.applyMedia()
 		return m.qmpClient.SystemReset()
 	case "GracefulRestart":
 		return m.qmpClient.SystemPowerdown()
@@ -310,6 +359,7 @@ func (m *Machine) resetProcessMode(resetType string) error {
 		if m.processManager.IsRunning() {
 			return nil // already running
 		}
+		m.waitMediaDownload()
 		m.mu.RLock()
 		target := m.nextBootTarget()
 		cdImage := m.insertedPath()
@@ -339,6 +389,7 @@ func (m *Machine) resetProcessMode(resetType string) error {
 		return m.processManager.WaitForExit(30 * time.Second)
 
 	case "ForceRestart":
+		m.waitMediaDownload()
 		if m.processManager.IsRunning() && m.bootTargetChanged() {
 			// -boot is fixed at QEMU startup, so system_reset would boot the
 			// old device. Restart the process to apply the new boot target.
@@ -349,6 +400,7 @@ func (m *Machine) resetProcessMode(resetType string) error {
 		}
 		// The running process already has the requested boot target, so
 		// this reset uses it; consume Once so the next reset reverts.
+		m.applyMedia()
 		if err := m.qmpClient.SystemReset(); err != nil {
 			return err
 		}
@@ -386,6 +438,10 @@ func (m *Machine) watchGraceful(gen uint64, resetType string, restart bool, time
 		time.Sleep(m.pollInterval)
 	}
 
+	if restart {
+		// Not holding resetMu, so power actions are not blocked meanwhile
+		m.waitMediaDownload()
+	}
 	m.resetMu.Lock()
 	defer m.resetMu.Unlock()
 	if m.resetGen.Load() != gen {
@@ -526,18 +582,25 @@ func (m *Machine) GetMedia() Media {
 // QEMU command line (e.g. -cdrom) as inserted.
 func (m *Machine) SetInitialMedia(image string) {
 	m.mu.Lock()
-	defer m.mu.Unlock()
+	var old string
 	if image == "" {
-		m.media, m.mediaPath = Media{}, ""
-		return
+		old = m.replaceMediaLocked(Media{}, "", "")
+	} else {
+		old = m.replaceMediaLocked(Media{Image: image, Inserted: true}, image, "")
 	}
-	m.media, m.mediaPath = Media{Image: image, Inserted: true}, image
+	m.mu.Unlock()
+	removeMediaFile(old)
 }
 
-// InsertMedia inserts an image into the virtual CD drive. Only local paths
-// ("/..." or "file://...") are supported. In process management mode the
+// InsertMedia inserts an image into the virtual CD drive: a local path
+// ("/..." or "file://...") or an http(s) URL. A URL is downloaded in the
+// background (username/password, if set, are sent as Basic auth) and
+// InsertMedia returns without waiting for it. In process management mode the
 // image is kept while QEMU is not running and attached when it starts.
-func (m *Machine) InsertMedia(image string) error {
+func (m *Machine) InsertMedia(image, username, password string) error {
+	if isHTTPImage(image) {
+		return m.insertURL(image, username, password)
+	}
 	path, err := m.resolveImage(image)
 	if err != nil {
 		return err
@@ -554,25 +617,30 @@ func (m *Machine) InsertMedia(image string) error {
 	}
 
 	m.mu.Lock()
-	defer m.mu.Unlock()
-	m.media, m.mediaPath = Media{Image: image, Inserted: true}, path
+	old := m.replaceMediaLocked(Media{Image: image, Inserted: true}, path, "")
+	m.mu.Unlock()
+	removeMediaFile(old)
 	return nil
 }
 
-// EjectMedia ejects the virtual CD drive's image.
+// EjectMedia ejects the virtual CD drive's image, abandoning a download in
+// progress.
 func (m *Machine) EjectMedia() error {
+	// Clear the state first so that a power on waiting for the download
+	// (holding resetMu) goes ahead
+	m.mu.Lock()
+	old := m.replaceMediaLocked(Media{}, "", "")
+	m.mu.Unlock()
+
 	m.resetMu.Lock()
 	defer m.resetMu.Unlock()
+	defer removeMediaFile(old)
 
 	if m.qemuRunning() {
 		if err := m.ejectMedium(); err != nil {
 			return fmt.Errorf("ejecting media: %w", err)
 		}
 	}
-
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	m.media, m.mediaPath = Media{}, ""
 	return nil
 }
 
@@ -589,7 +657,7 @@ func (m *Machine) resolveImage(image string) (string, error) {
 		}
 		path = u.Path
 	default:
-		return "", fmt.Errorf("%w: unsupported image %q: only local paths (/... or file://...) are supported", ErrInvalidMedia, image)
+		return "", fmt.Errorf("%w: unsupported image %q: only http(s) URLs and local paths (/... or file://...) are supported", ErrInvalidMedia, image)
 	}
 
 	// In legacy mode the path refers to the external QEMU's filesystem
@@ -675,9 +743,9 @@ func (m *Machine) ejectMedium() error {
 	return m.qmpClient.BlockdevCloseTray(id)
 }
 
-// syncMedia makes a freshly started QEMU hold the expected CD image. The
-// managed CD drive already got it on the command line; this covers a
-// user-defined CD drive.
+// syncMedia makes QEMU hold the expected CD image ("" = empty). At power on
+// the managed CD drive already got it on the command line; this covers a
+// user-defined CD drive and media changed while QEMU runs.
 func (m *Machine) syncMedia(path string) {
 	_, current, err := m.findCDDrive()
 	if err != nil {
@@ -693,6 +761,6 @@ func (m *Machine) syncMedia(path string) {
 		err = m.changeMedium(path)
 	}
 	if err != nil {
-		log.Printf("VirtualMedia: applying media at power on: %v", err)
+		log.Printf("VirtualMedia: applying media: %v", err)
 	}
 }

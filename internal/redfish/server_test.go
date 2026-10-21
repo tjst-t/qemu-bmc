@@ -15,14 +15,15 @@ import (
 
 // mockMachine implements MachineInterface for testing
 type mockMachine struct {
-	powerState   machine.PowerState
-	qmpStatus    qmp.Status
-	bootOverride machine.BootOverride
-	calls        []string
-	lastMedia    string
-	media        machine.Media
-	mediaErr     error
-	resetErr     error
+	powerState    machine.PowerState
+	qmpStatus     qmp.Status
+	bootOverride  machine.BootOverride
+	calls         []string
+	lastMediaCred string
+	lastMedia     string
+	media         machine.Media
+	mediaErr      error
+	resetErr      error
 }
 
 func newMockMachine(status qmp.Status) *mockMachine {
@@ -86,8 +87,9 @@ func (m *mockMachine) GetMedia() machine.Media {
 	return m.media
 }
 
-func (m *mockMachine) InsertMedia(image string) error {
+func (m *mockMachine) InsertMedia(image, username, password string) error {
 	m.lastMedia = image
+	m.lastMediaCred = username + ":" + password
 	m.calls = append(m.calls, "InsertMedia")
 	if m.mediaErr != nil {
 		return m.mediaErr

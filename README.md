@@ -114,6 +114,12 @@ curl -k -u admin:password -X PATCH \
   -d '{"Boot": {"BootSourceOverrideEnabled": "Once", "BootSourceOverrideTarget": "Cd"}}' \
   https://localhost/redfish/v1/Systems/1
 
+# Or let qemu-bmc download an ISO over HTTP(S) (UserName/Password are optional, sent as Basic auth)
+curl -k -u admin:password -X POST \
+  -H 'Content-Type: application/json' \
+  -d '{"Image": "http://192.168.0.10/boot.iso", "UserName": "user", "Password": "secret"}' \
+  https://localhost/redfish/v1/Managers/1/VirtualMedia/CD1/Actions/VirtualMedia.InsertMedia
+
 # Eject it
 curl -k -u admin:password -X POST \
   https://localhost/redfish/v1/Managers/1/VirtualMedia/CD1/Actions/VirtualMedia.EjectMedia
@@ -122,7 +128,9 @@ curl -k -u admin:password -X POST \
 #### VirtualMedia
 
 - In process management mode (the container), the VM always has a CD drive. It is empty unless `VM_CDROM` is set, in which case that ISO is the initially inserted medium.
-- `Image` must be a path inside the container: `/iso/boot.iso` or `file:///iso/boot.iso` (bind-mount the ISO, e.g. `-v ./iso:/iso:ro`). HTTP(S) URLs are not supported yet. A missing `Image`, a nonexistent file or an unsupported scheme returns `400`; InsertMedia and EjectMedia return `204 No Content` on success.
+- `Image` is a path inside the container, `/iso/boot.iso` or `file:///iso/boot.iso` (bind-mount the ISO, e.g. `-v ./iso:/iso:ro`), or an `http://` / `https://` URL. A missing `Image`, a nonexistent file or an unsupported scheme returns `400`; InsertMedia and EjectMedia return `204 No Content` on success.
+- An HTTP(S) image is downloaded by qemu-bmc into `VMEDIA_DIR`, then attached (QEMU in the image cannot read URLs itself). InsertMedia returns `204` without waiting for the download; meanwhile `GET` already reports the URL as `Image` with `Inserted: true`. `UserName` / `Password` in the InsertMedia request are sent as HTTP Basic auth. Certificates are not verified unless `VMEDIA_INSECURE_TLS=false` (self-signed servers are common).
+- A power on or reset (Redfish `On` / `ForceRestart`, IPMI `chassis power on` / `cycle` / `reset`) during a download is carried out once the download finishes (at most `VMEDIA_TIMEOUT` later), so the VM boots from the ISO. The request itself returns at once; the power state is `PoweringOn` meanwhile, and another power action (e.g. `ForceOff`) cancels it. If the download fails (e.g. `404`), the medium is ejected (`Inserted: false`) and the reason is logged. A download finishing while the VM runs is attached over QMP. Inserting another image or ejecting abandons the download and deletes the previously downloaded file.
 - The medium is kept by qemu-bmc while the VM is powered off and attached when QEMU starts; while the VM is running it is swapped live over QMP.
 - Boot target `Cd` (Redfish `BootSourceOverrideTarget`, IPMI `chassis bootdev cdrom`) boots the inserted ISO in both BIOS and UEFI mode (the CD drive gets `bootindex=0`, which OVMF requires).
 - `GET .../VirtualMedia/CD1` reports `Image`, `ImageName`, `Inserted`, `ConnectedVia` (`URI` / `NotConnected`), `WriteProtected` (always `true`) and `MediaTypes`.
@@ -209,7 +217,7 @@ ipmitool user enable 3
 | GET | `/redfish/v1/Managers/1` | BMC manager |
 | GET | `/redfish/v1/Managers/1/VirtualMedia` | VirtualMedia collection |
 | GET | `/redfish/v1/Managers/1/VirtualMedia/CD1` | VirtualMedia resource |
-| POST | `.../VirtualMedia.InsertMedia` | Insert an ISO (container path; 204) |
+| POST | `.../VirtualMedia.InsertMedia` | Insert an ISO (container path or HTTP(S) URL; 204) |
 | POST | `.../VirtualMedia.EjectMedia` | Eject media (204) |
 | GET | `/redfish/v1/Chassis` | Chassis collection |
 | GET | `/redfish/v1/Chassis/1` | Chassis resource |
@@ -261,6 +269,9 @@ Another power action (Redfish or IPMI) during `PoweringOff` / `PoweringOn` ends 
 | `VNC_ADDR` | `localhost:5900` | QEMU VNC TCP address for noVNC proxy |
 | `POWER_ON_AT_START` | `false` | Power on VM automatically at startup (useful for non-MAAS setups) |
 | `GRACEFUL_TIMEOUT` | `120` | Seconds `GracefulShutdown` / `GracefulRestart` (and IPMI `chassis power soft`) report `PoweringOff` before going back to `On` when the guest does not power off |
+| `VMEDIA_DIR` | `/vm/vmedia` if `/vm` is writable, else `/tmp/vmedia` | Where VirtualMedia HTTP(S) images are downloaded. The previous download is deleted when the medium is replaced or ejected |
+| `VMEDIA_INSECURE_TLS` | `true` | Skip certificate verification when downloading HTTPS images |
+| `VMEDIA_TIMEOUT` | `600` | Seconds a power on or reset requested during a VirtualMedia download waits for it before booting without the image |
 | `SYSTEM_UUID` | (derived) | Fixed system UUID, passed to QEMU as `-uuid` and reported by Redfish `Systems/1` `UUID` and IPMI `mc guid`. If unset, it is read from `SYSTEM_UUID_FILE`, or derived from the hostname and saved there. Set it (or use a fixed `--hostname` / a mounted `/vm`) to keep it across container re-creation |
 | `SYSTEM_UUID_FILE` | `<VM_DISK dir>/system-uuid` | Where a derived UUID is persisted |
 | `VM_MACS` | (derived) | Comma-separated MAC addresses of the VM NICs, in order (an empty entry is derived). Unset MACs are derived from the system UUID, so they stay fixed per node and do not overlap between nodes. Reported by Redfish `Systems/1/EthernetInterfaces` |
@@ -463,7 +474,9 @@ curl -k -u admin:password -X POST \
 #### VirtualMedia
 
 - プロセス管理モード（コンテナ）では、VM に CD ドライブが常に付く。`VM_CDROM` が無ければ空、あればその ISO が最初に差さった状態になる。
-- `Image` はコンテナ内のパス（`/iso/boot.iso` または `file:///iso/boot.iso`）。ISO はバインドマウントする（例: `-v ./iso:/iso:ro`）。HTTP(S) の URL はまだ使えない。`Image` が空・ファイルが無い・未対応の形式なら `400`。InsertMedia・EjectMedia は成功すると `204 No Content`。
+- `Image` はコンテナ内のパス（`/iso/boot.iso` または `file:///iso/boot.iso`。ISO はバインドマウントする（例: `-v ./iso:/iso:ro`））か、`http://` / `https://` の URL。`Image` が空・ファイルが無い・未対応の形式なら `400`。InsertMedia・EjectMedia は成功すると `204 No Content`。
+- HTTP(S) の URL は qemu-bmc が `VMEDIA_DIR` へダウンロードしてから差す（イメージの QEMU は URL を直接読めない）。InsertMedia はダウンロードを待たずに `204` を返し、ダウンロード中も `GET` は `Image` に URL、`Inserted: true` を返す。InsertMedia の `UserName` / `Password` は HTTP の Basic 認証に使う。自己署名のサーバが多いので、`VMEDIA_INSECURE_TLS=false` にしない限り証明書は検証しない。
+- ダウンロード中に電源オン・リセット（Redfish の `On` / `ForceRestart`、IPMI の `chassis power on` / `cycle` / `reset`）が来たら、ダウンロードが終わってから（最大 `VMEDIA_TIMEOUT` 待つ）実行するので、ISO から起動できる。要求そのものはすぐ返り、その間の電源状態は `PoweringOn`。別の電源操作（`ForceOff` など）が来たら取りやめる。ダウンロードに失敗したら（`404` など）中身を外し（`Inserted: false`）、理由をログに出す。VM が動いている間に終わったら QMP で差す。別のイメージを差す・Eject すると、ダウンロードはやめ、前に落としたファイルは消す。
 - 差した中身は電源オフ中も qemu-bmc が覚えていて、QEMU を起動するときに付ける。VM が動いていれば QMP でその場で差し替える。
 - 起動先 `Cd`（Redfish の `BootSourceOverrideTarget`、IPMI の `chassis bootdev cdrom`）で、差した ISO から起動する。BIOS・UEFI のどちらでも動く（UEFI（OVMF）のため CD ドライブに `bootindex=0` を付ける）。
 - `GET .../VirtualMedia/CD1` は `Image`・`ImageName`・`Inserted`・`ConnectedVia`（`URI` / `NotConnected`）・`WriteProtected`（常に `true`）・`MediaTypes` を返す。
@@ -550,7 +563,7 @@ ipmitool user enable 3
 | GET | `/redfish/v1/Managers/1` | BMC マネージャ |
 | GET | `/redfish/v1/Managers/1/VirtualMedia` | VirtualMedia コレクション |
 | GET | `/redfish/v1/Managers/1/VirtualMedia/CD1` | VirtualMedia リソース |
-| POST | `.../VirtualMedia.InsertMedia` | ISO を差す（コンテナ内のパス、204） |
+| POST | `.../VirtualMedia.InsertMedia` | ISO を差す（コンテナ内のパスか HTTP(S) の URL、204） |
 | POST | `.../VirtualMedia.EjectMedia` | メディア取り出し（204） |
 | GET | `/redfish/v1/Chassis` | シャーシコレクション |
 | GET | `/redfish/v1/Chassis/1` | シャーシリソース |
@@ -601,6 +614,9 @@ ipmitool user enable 3
 | `VNC_ADDR` | `localhost:5900` | noVNC プロキシが接続する QEMU VNC アドレス |
 | `POWER_ON_AT_START` | `false` | 起動時に VM を自動的に電源オンにする（MAAS を使わない構成で有用） |
 | `GRACEFUL_TIMEOUT` | `120` | `GracefulShutdown` / `GracefulRestart`（と IPMI `chassis power soft`）でゲストが電源を切らないとき、`PoweringOff` から `On` に戻すまでの秒数 |
+| `VMEDIA_DIR` | `/vm` が書ければ `/vm/vmedia`、無理なら `/tmp/vmedia` | VirtualMedia の HTTP(S) イメージの保存先。差し替え・Eject で前に落としたファイルは消す |
+| `VMEDIA_INSECURE_TLS` | `true` | HTTPS のイメージを落とすとき証明書を検証しない |
+| `VMEDIA_TIMEOUT` | `600` | ダウンロード中に電源オン・リセットが来たとき、終わるまで待つ秒数（過ぎたら ISO 無しで起動） |
 | `SYSTEM_UUID` | （導出） | システム UUID を固定する。QEMU に `-uuid` で渡し、Redfish `Systems/1` の `UUID` と IPMI `mc guid` で返す。未指定なら `SYSTEM_UUID_FILE` から読み、無ければホスト名から導出してそこへ保存する。コンテナを作り直しても保つには、これを指定するか、`--hostname` を固定するか、`/vm` をマウントする |
 | `SYSTEM_UUID_FILE` | `<VM_DISK のディレクトリ>/system-uuid` | 導出した UUID の保存先 |
 | `VM_MACS` | （導出） | VM の NIC の MAC アドレスを順にカンマ区切りで指定する（空の項目は導出）。未指定の MAC はシステム UUID から導出するので、ノードごとに固定され、ノード間で重ならない。Redfish `Systems/1/EthernetInterfaces` で返す |

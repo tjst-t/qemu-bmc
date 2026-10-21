@@ -121,6 +121,17 @@ func TestInsertVirtualMedia(t *testing.T) {
 	assert.Equal(t, "/iso/boot.iso", mock.LastInsertedMedia())
 }
 
+func TestInsertVirtualMedia_URLWithCredentials(t *testing.T) {
+	mock := newMockMachine(qmp.StatusRunning)
+	srv := NewServer(mock, "", "", "")
+
+	w := postMediaAction(srv, "InsertMedia",
+		`{"Image": "https://example.com/boot.iso", "Inserted": true, "UserName": "user", "Password": "secret", "TransferProtocolType": "HTTPS"}`)
+	assert.Equal(t, http.StatusNoContent, w.Code)
+	assert.Equal(t, "https://example.com/boot.iso", mock.LastInsertedMedia())
+	assert.Equal(t, "user:secret", mock.lastMediaCred)
+}
+
 func TestInsertVirtualMedia_TrailingSlash(t *testing.T) {
 	srv := NewServer(newMockMachine(qmp.StatusRunning), "", "", "")
 
