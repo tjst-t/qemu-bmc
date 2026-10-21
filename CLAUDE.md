@@ -29,6 +29,8 @@ tests/                         # Bash-based container integration tests (82 test
   test_*.sh                    # Test categories (container, ipmi, redfish, power, boot, etc.)
 containerlab/
   example.yml                  # 2-node containerlab topology example
+  mgmt-network.yml             # Separate BMC mgmt / VM data networks + operator container
+  README.md                    # Deploy and verification steps
 integration/                   # Go-based integration tests (legacy mode)
 ```
 

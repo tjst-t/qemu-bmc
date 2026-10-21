@@ -295,7 +295,7 @@ docker/
   entrypoint.sh                # Environment variables → QEMU args
   setup-network.sh             # TAP/bridge network setup
 tests/                         # Bash-based container integration tests
-containerlab/                  # containerlab topology example
+containerlab/                  # containerlab topology examples (see containerlab/README.md)
 ```
 
 ## License
@@ -607,7 +607,7 @@ docker/
   entrypoint.sh                # 環境変数 → QEMU 引数変換
   setup-network.sh             # TAP/ブリッジネットワーク設定
 tests/                         # Bash ベースのコンテナ統合テスト
-containerlab/                  # containerlab トポロジ例
+containerlab/                  # containerlab トポロジ例 (containerlab/README.md 参照)
 ```
 
 ## ライセンス

@@ -1,0 +1,73 @@
+# BMC management network and VM data network kept separate.
+#
+#   operator (curl, ipmitool) 192.168.100.10 ─┐
+#   node1 BMC (eth1)          192.168.100.11 ─┼─ mgmt-switch (br0)   management network
+#   node2 BMC (eth1)          192.168.100.12 ─┘
+#
+#   node1 VM NIC (eth2) ──────────── node2 VM NIC (eth2)               data network
+#
+# eth1 carries only the BMC (Redfish HTTPS :443, IPMI UDP :623); qemu-bmc
+# itself does not use it for the VM. eth2 is passed through to the VM
+# (VM_NETWORKS) and has no IP in the container. See README.md.
+name: qemu-bmc-mgmt
+
+topology:
+  defaults:
+    kind: linux
+
+  nodes:
+    node1:
+      # Built from this repository with `make docker-build`
+      image: qemu-bmc:latest
+      devices:
+        - /dev/net/tun  # needed for the VM NIC (eth2 is passed through)
+      env:
+        VM_MEMORY: "512"
+        VM_CPUS: "1"
+        IPMI_USER: "admin"
+        IPMI_PASS: "password"
+        VM_NETWORKS: "eth2"  # wait for eth2, never pass eth1 (BMC) to the VM
+        SYSTEM_UUID: "6f1b7c52-0e1a-4d2b-9c11-000000000001"
+        VM_MACS: "52:54:00:00:01:01"
+      exec:
+        - ip addr add 192.168.100.11/24 dev eth1
+
+    node2:
+      image: qemu-bmc:latest
+      devices:
+        - /dev/net/tun
+      env:
+        VM_MEMORY: "512"
+        VM_CPUS: "1"
+        IPMI_USER: "admin"
+        IPMI_PASS: "password"
+        VM_NETWORKS: "eth2"
+        SYSTEM_UUID: "6f1b7c52-0e1a-4d2b-9c11-000000000002"
+        VM_MACS: "52:54:00:00:02:01"
+      exec:
+        - ip addr add 192.168.100.12/24 dev eth1
+
+    # L2 switch for the management network
+    mgmt-switch:
+      image: alpine:latest
+      exec:
+        - ip link add br0 type bridge
+        - ip link set br0 up
+        - ip link set eth1 master br0
+        - ip link set eth2 master br0
+        - ip link set eth3 master br0
+
+    # Operator host on the management network (installs curl and ipmitool)
+    operator:
+      image: alpine:latest
+      exec:
+        - ip addr add 192.168.100.10/24 dev eth1
+        - apk add --no-cache curl ipmitool
+
+  links:
+    # management network
+    - endpoints: ["operator:eth1", "mgmt-switch:eth1"]
+    - endpoints: ["node1:eth1", "mgmt-switch:eth2"]
+    - endpoints: ["node2:eth1", "mgmt-switch:eth3"]
+    # data network (VM NICs)
+    - endpoints: ["node1:eth2", "node2:eth2"]
