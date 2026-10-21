@@ -321,7 +321,7 @@
       "number": 15,
       "kind": "bug",
       "title": "VM_NETWORKS を使うと /dev/net/tun が無くて QEMU が起動しない（README の docker run 例に --device /dev/net/tun が無い）",
-      "status": "ready",
+      "status": "in-progress",
       "parent": null,
       "dependsOn": [],
       "milestone": null,
@@ -335,7 +335,7 @@
       "refs": [],
       "threads": [],
       "createdAt": "2026-10-20T21:07:53.819Z",
-      "updatedAt": "2026-10-20T21:07:53.819Z",
+      "updatedAt": "2026-10-21T06:25:10.234Z",
       "closedAt": null,
       "extra": {}
     }
