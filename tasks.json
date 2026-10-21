@@ -477,6 +477,27 @@
       "updatedAt": "2026-10-21T14:41:19.055Z",
       "closedAt": "2026-10-21T14:41:19.055Z",
       "extra": {}
+    },
+    {
+      "id": "containerlab-0-7-example-yml",
+      "number": 22,
+      "kind": "task",
+      "title": "containerlab の例を公開イメージ 0.7 にして example.yml を整理",
+      "status": "done",
+      "parent": null,
+      "dependsOn": [],
+      "milestone": null,
+      "priority": "normal",
+      "labels": [],
+      "body": "mgmt-network.yml・example.yml を ghcr.io/tjst-t/qemu-bmc:0.7 に。example.yml はノードごとのディスク起動（BIOS と UEFI）・Redfish/noVNC と IPMI をホストに公開・データリンクを VM へ、に作り直した（0ab01bf）。v0.7.2 に入れる。",
+      "doneWhen": "containerlab deploy -t containerlab/example.yml で両ノードの Redfish・IPMI・noVNC が応え、node1 が Debian を起動する（確認済み）",
+      "resolution": null,
+      "refs": [],
+      "threads": [],
+      "createdAt": "2026-10-21T14:41:23.090Z",
+      "updatedAt": "2026-10-21T14:41:23.090Z",
+      "closedAt": "2026-10-21T14:41:23.090Z",
+      "extra": {}
     }
   ]
 }
