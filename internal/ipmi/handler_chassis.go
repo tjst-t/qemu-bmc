@@ -64,8 +64,11 @@ func handleChassisControl(reqData []byte, m MachineInterface) (CompletionCode, [
 		}
 	case ChassisControlHardReset:
 		err = m.Reset("ForceRestart")
-	case ChassisControlPulse, ChassisControlSoftOff:
-		// No-op for virtual BMC
+	case ChassisControlSoftOff:
+		// ACPI power button only; the guest is never forced off
+		err = m.Reset("GracefulShutdown")
+	case ChassisControlPulse:
+		// Diagnostic interrupt (NMI) is not supported; accept as no-op
 		log.Printf("IPMI: chassis control 0x%02x (no-op)", control)
 	default:
 		return CompletionCodeInvalidField, nil

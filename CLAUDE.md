@@ -158,7 +158,7 @@ Middleware: Basic Auth, ETag (If-Match), trailing slash normalization
 | Close Session | App | 0x3C | Session teardown |
 | Get Channel Cipher Suites | App | 0x54 | Cipher suite list (suite 3 only) |
 | Get Chassis Status | Chassis (0x00) | 0x01 | Power state query |
-| Chassis Control | Chassis | 0x02 | Power on/off/cycle/reset |
+| Chassis Control | Chassis | 0x02 | Power on/off/cycle/reset, soft off (ACPI power button, never forced); diag pulse is a no-op |
 | Chassis Identify | Chassis | 0x04 | Identify LED (log only) |
 | Set Boot Options | Chassis | 0x08 | Boot device override |
 | Get Boot Options | Chassis | 0x09 | Boot device query |

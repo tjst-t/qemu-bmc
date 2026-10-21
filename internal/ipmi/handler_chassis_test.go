@@ -35,6 +35,8 @@ func TestChassisControl(t *testing.T) {
 		{"PowerOn", ChassisControlPowerUp, machine.PowerOff, []string{"On"}},
 		{"PowerCycle", ChassisControlPowerCycle, machine.PowerOn, []string{"ForceOff", "On"}},
 		{"HardReset", ChassisControlHardReset, machine.PowerOn, []string{"ForceRestart"}},
+		{"SoftOff", ChassisControlSoftOff, machine.PowerOn, []string{"GracefulShutdown"}},
+		{"Pulse", ChassisControlPulse, machine.PowerOn, nil},
 	}
 
 	for _, tt := range tests {
