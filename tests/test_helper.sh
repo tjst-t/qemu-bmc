@@ -11,6 +11,9 @@ VNC_HOST_PORT="${VNC_HOST_PORT:-5900}"
 IPMI_USER="${IPMI_USER:-admin}"
 IPMI_PASS="${IPMI_PASS:-password}"
 EVIDENCE_DIR="${EVIDENCE_DIR:-tests/evidence}"
+# Upper bound (seconds) for a single docker exec / curl, so a hung command
+# cannot stall the whole run
+CMD_TIMEOUT="${CMD_TIMEOUT:-30}"
 
 # --- Test state ---
 TESTS_TOTAL=0
@@ -132,9 +135,11 @@ print_summary() {
 
 # --- Container management ---
 
+# The VM powers on with the container (POWER_ON_AT_START=true) because most
+# tests inspect the QEMU process; a later "-e POWER_ON_AT_START=false" wins.
 start_test_container() {
     # -e values may contain spaces (e.g. QEMU_EXTRA_ARGS), so keep them in an array
-    local extra_env=()
+    local extra_env=(-e "POWER_ON_AT_START=true")
     local extra_args=""
 
     while [ $# -gt 0 ]; do
@@ -183,7 +188,7 @@ stop_test_container() {
 }
 
 container_exec() {
-    docker exec "$TEST_CONTAINER" "$@"
+    timeout "$CMD_TIMEOUT" docker exec "$TEST_CONTAINER" "$@"
 }
 
 wait_for_container_running() {
@@ -205,22 +210,22 @@ wait_for_container_running() {
 # --- IPMI helpers ---
 
 ipmi_cmd() {
-    ipmitool -I lanplus -H "$IPMI_HOST" -p "$IPMI_PORT" \
+    timeout "$CMD_TIMEOUT" ipmitool -I lanplus -H "$IPMI_HOST" -p "$IPMI_PORT" \
         -U "$IPMI_USER" -P "$IPMI_PASS" "$@"
 }
 
 ipmi_cmd_lan() {
-    ipmitool -I lan -H "$IPMI_HOST" -p "$IPMI_PORT" \
+    timeout "$CMD_TIMEOUT" ipmitool -I lan -H "$IPMI_HOST" -p "$IPMI_PORT" \
         -U "$IPMI_USER" -P "$IPMI_PASS" "$@"
 }
 
 ipmi_cmd_wrong_pass() {
-    ipmitool -I lanplus -H "$IPMI_HOST" -p "$IPMI_PORT" \
+    timeout "$CMD_TIMEOUT" ipmitool -I lanplus -H "$IPMI_HOST" -p "$IPMI_PORT" \
         -U "$IPMI_USER" -P "wrongpassword" "$@" 2>&1
 }
 
 ipmi_cmd_wrong_user() {
-    ipmitool -I lanplus -H "$IPMI_HOST" -p "$IPMI_PORT" \
+    timeout "$CMD_TIMEOUT" ipmitool -I lanplus -H "$IPMI_HOST" -p "$IPMI_PORT" \
         -U "wronguser" -P "$IPMI_PASS" "$@" 2>&1
 }
 
@@ -228,14 +233,14 @@ ipmi_cmd_wrong_user() {
 
 redfish_get() {
     local path="$1"
-    curl -sk -u "${IPMI_USER}:${IPMI_PASS}" \
+    curl -sk --max-time "$CMD_TIMEOUT" -u "${IPMI_USER}:${IPMI_PASS}" \
         "https://${IPMI_HOST}:${REDFISH_PORT}${path}"
 }
 
 redfish_post() {
     local path="$1"
     local data="$2"
-    curl -sk -u "${IPMI_USER}:${IPMI_PASS}" \
+    curl -sk --max-time "$CMD_TIMEOUT" -u "${IPMI_USER}:${IPMI_PASS}" \
         -X POST -H "Content-Type: application/json" \
         -d "$data" \
         "https://${IPMI_HOST}:${REDFISH_PORT}${path}"
@@ -244,7 +249,7 @@ redfish_post() {
 redfish_patch() {
     local path="$1"
     local data="$2"
-    curl -sk -u "${IPMI_USER}:${IPMI_PASS}" \
+    curl -sk --max-time "$CMD_TIMEOUT" -u "${IPMI_USER}:${IPMI_PASS}" \
         -X PATCH -H "Content-Type: application/json" \
         -d "$data" \
         "https://${IPMI_HOST}:${REDFISH_PORT}${path}"
@@ -252,13 +257,13 @@ redfish_patch() {
 
 redfish_get_no_auth() {
     local path="$1"
-    curl -sk -o /dev/null -w "%{http_code}" \
+    curl -sk --max-time "$CMD_TIMEOUT" -o /dev/null -w "%{http_code}" \
         "https://${IPMI_HOST}:${REDFISH_PORT}${path}"
 }
 
 redfish_get_status() {
     local path="$1"
-    curl -sk -u "${IPMI_USER}:${IPMI_PASS}" \
+    curl -sk --max-time "$CMD_TIMEOUT" -u "${IPMI_USER}:${IPMI_PASS}" \
         -o /dev/null -w "%{http_code}" \
         "https://${IPMI_HOST}:${REDFISH_PORT}${path}"
 }
@@ -310,11 +315,29 @@ wait_for_qemu_stopped() {
     return 1
 }
 
-# The runtime image has no procps (pgrep), so scan /proc directly
-get_qemu_pid() {
+# Prints the PID of the first container process whose comm is $1 (comm is
+# truncated to 15 chars). The runtime image has no procps (pgrep), so scan /proc
+get_container_pid() {
     container_exec sh -c 'for d in /proc/[0-9]*; do
-        [ "$(cat "$d/comm" 2>/dev/null)" = "qemu-system-x86" ] && echo "${d#/proc/}" && break
-    done' 2>/dev/null || echo ""
+        [ "$(cat "$d/comm" 2>/dev/null)" = "$1" ] && echo "${d#/proc/}" && break
+    done' sh "$1" 2>/dev/null || echo ""
+}
+
+get_qemu_pid() {
+    get_container_pid qemu-system-x86
+}
+
+# Prints the QEMU command line with arguments separated by $1 (default space).
+# Fails when QEMU is not running instead of reading /proc//cmdline
+qemu_cmdline() {
+    local sep="${1:- }"
+    local pid
+    pid=$(get_qemu_pid)
+    if [ -z "$pid" ]; then
+        echo "QEMU is not running" >&2
+        return 1
+    fi
+    container_exec cat "/proc/$pid/cmdline" 2>/dev/null | tr '\0' "$sep"
 }
 
 wait_for_ipmi_ready() {

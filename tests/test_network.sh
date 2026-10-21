@@ -8,7 +8,7 @@ test_no_network_default() {
     start_test_container
     wait_for_qemu_running 30
     local cmdline
-    cmdline=$(container_exec cat /proc/$(get_qemu_pid)/cmdline 2>/dev/null | tr '\0' ' ')
+    cmdline=$(qemu_cmdline) || return 1
     assert_contains "$cmdline" "nic none" "Default should use -nic none"
 }
 
@@ -109,7 +109,7 @@ test_qemu_network_args() {
     start_test_container
     wait_for_qemu_running 30
     local cmdline
-    cmdline=$(container_exec cat /proc/$(get_qemu_pid)/cmdline 2>/dev/null | tr '\0' ' ')
+    cmdline=$(qemu_cmdline) || return 1
     # In basic environment, should have nic none
     assert_contains "$cmdline" "nic" "QEMU should have network argument"
 }

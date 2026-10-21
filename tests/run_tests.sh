@@ -63,6 +63,12 @@ if [ ${#REQUESTED_CATEGORIES[@]} -eq 0 ]; then
     usage
 fi
 
+# Remove the test container however the run ends (failure, Ctrl-C)
+if [ "$CLEANUP" = true ]; then
+    trap 'echo ""; echo "Cleaning up..."; stop_test_container >/dev/null' EXIT
+    trap 'exit 130' INT TERM
+fi
+
 # Build image if requested
 if [ "$BUILD" = true ]; then
     echo "Building test image..."
@@ -95,12 +101,5 @@ for category in "${REQUESTED_CATEGORIES[@]}"; do
         OVERALL_RC=1
     fi
 done
-
-# Cleanup
-if [ "$CLEANUP" = true ]; then
-    echo ""
-    echo "Cleaning up..."
-    stop_test_container
-fi
 
 exit $OVERALL_RC

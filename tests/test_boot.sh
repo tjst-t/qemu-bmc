@@ -35,7 +35,7 @@ test_bootdev_applied_after_cycle() {
     wait_for_qemu_running 30
     sleep 2
     local cmdline
-    cmdline=$(container_exec cat /proc/$(get_qemu_pid)/cmdline 2>/dev/null | tr '\0' ' ')
+    cmdline=$(qemu_cmdline) || return 1
     assert_contains "$cmdline" "-boot" "QEMU should have -boot parameter after cycle"
 }
 
@@ -54,10 +54,6 @@ test_bootdev_once_reset() {
     result=$(redfish_get "/redfish/v1/Systems/1")
     # After boot-once is consumed, it should be "Disabled" or "Once" depending on implementation
     assert_contains "$result" "Boot" "Systems/1 should have Boot information"
-}
-
-qemu_cmdline() {
-    container_exec cat /proc/$(get_qemu_pid)/cmdline 2>/dev/null | tr '\0' ' '
 }
 
 test_bootdev_once_pxe_on_reset() {
@@ -156,7 +152,7 @@ test_bootdev_continuous() {
 
 test_bootdev_redfish_pxe() {
     local status
-    status=$(curl -sk -u "${IPMI_USER}:${IPMI_PASS}" \
+    status=$(curl -sk --max-time "$CMD_TIMEOUT" -u "${IPMI_USER}:${IPMI_PASS}" \
         -X PATCH -H "Content-Type: application/json" \
         -d '{"Boot":{"BootSourceOverrideTarget":"Pxe"}}' \
         -o /dev/null -w "%{http_code}" \
@@ -169,7 +165,7 @@ test_bootmode_bios() {
     start_test_container -e "VM_BOOT_MODE=bios" -e "POWER_ON_AT_START=true"
     wait_for_qemu_running 30
     local cmdline
-    cmdline=$(container_exec cat /proc/$(get_qemu_pid)/cmdline 2>/dev/null | tr '\0' ' ')
+    cmdline=$(qemu_cmdline) || return 1
     assert_contains "$cmdline" "sga" "BIOS mode should include SGA device"
 }
 
@@ -178,7 +174,7 @@ test_bootmode_uefi() {
     start_test_container -e "VM_BOOT_MODE=uefi" -e "POWER_ON_AT_START=true"
     wait_for_qemu_running 30
     local cmdline
-    cmdline=$(container_exec cat /proc/$(get_qemu_pid)/cmdline 2>/dev/null | tr '\0' ' ')
+    cmdline=$(qemu_cmdline) || return 1
     assert_contains "$cmdline" "pflash" "UEFI mode should include pflash drives"
 }
 

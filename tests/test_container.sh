@@ -24,18 +24,18 @@ test_qemu_process_running() {
     local pid
     pid=$(get_qemu_pid)
     [ -n "$pid" ]
-    assert_success $? "QEMU process should be running"
+    assert_success $? "QEMU process should be running (POWER_ON_AT_START=true)"
 }
 
 test_no_supervisord() {
     local result
-    result=$(container_exec pgrep -x supervisord 2>&1 || true)
+    result=$(get_container_pid supervisord)
     assert_equals "" "$result" "supervisord should not be running"
 }
 
 test_no_ipmi_sim() {
     local result
-    result=$(container_exec pgrep -x ipmi_sim 2>&1 || true)
+    result=$(get_container_pid ipmi_sim)
     assert_equals "" "$result" "ipmi_sim should not be running"
 }
 

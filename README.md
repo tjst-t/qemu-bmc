@@ -313,7 +313,7 @@ go vet ./...
 
 # Container integration tests
 make container-test         # Quick smoke tests
-make container-test-all     # All 82 tests (9 categories)
+make container-test-all     # All 88 tests (9 categories)
 ```
 
 ## Architecture

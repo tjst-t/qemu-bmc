@@ -3,7 +3,7 @@
 
 test_default_memory() {
     local cmdline
-    cmdline=$(container_exec cat /proc/$(get_qemu_pid)/cmdline 2>/dev/null | tr '\0' ' ')
+    cmdline=$(qemu_cmdline) || return 1
     assert_contains "$cmdline" "-m 2048" "Default memory should be 2048"
 }
 
@@ -12,13 +12,13 @@ test_custom_memory() {
     start_test_container -e "VM_MEMORY=4096"
     wait_for_qemu_running 30
     local cmdline
-    cmdline=$(container_exec cat /proc/$(get_qemu_pid)/cmdline 2>/dev/null | tr '\0' ' ')
+    cmdline=$(qemu_cmdline) || return 1
     assert_contains "$cmdline" "-m 4096" "Custom memory should be 4096"
 }
 
 test_default_cpus() {
     local cmdline
-    cmdline=$(container_exec cat /proc/$(get_qemu_pid)/cmdline 2>/dev/null | tr '\0' ' ')
+    cmdline=$(qemu_cmdline) || return 1
     assert_contains "$cmdline" "-smp 2" "Default CPUs should be 2"
 }
 
@@ -27,7 +27,7 @@ test_custom_cpus() {
     start_test_container -e "VM_CPUS=4"
     wait_for_qemu_running 30
     local cmdline
-    cmdline=$(container_exec cat /proc/$(get_qemu_pid)/cmdline 2>/dev/null | tr '\0' ' ')
+    cmdline=$(qemu_cmdline) || return 1
     assert_contains "$cmdline" "-smp 4" "Custom CPUs should be 4"
 }
 
@@ -38,7 +38,7 @@ test_kvm_enabled() {
         return 0
     fi
     local cmdline
-    cmdline=$(container_exec cat /proc/$(get_qemu_pid)/cmdline 2>/dev/null | tr '\0' ' ')
+    cmdline=$(qemu_cmdline) || return 1
     assert_contains "$cmdline" "accel=kvm" "KVM should be enabled when /dev/kvm is available"
 }
 
@@ -56,12 +56,13 @@ test_kvm_fallback_tcg() {
         -p "${REDFISH_PORT}:443" \
         -e "IPMI_USER=${IPMI_USER}" \
         -e "IPMI_PASS=${IPMI_PASS}" \
+        -e "POWER_ON_AT_START=true" \
         -e "ENABLE_KVM=true" \
         "$TEST_IMAGE"
     wait_for_container_running 30
     wait_for_qemu_running 60
     local cmdline
-    cmdline=$(container_exec cat /proc/$(get_qemu_pid)/cmdline 2>/dev/null | tr '\0' ' ')
+    cmdline=$(qemu_cmdline) || return 1
     assert_contains "$cmdline" "accel=tcg" "Should fallback to TCG without /dev/kvm"
 }
 
@@ -70,7 +71,7 @@ test_custom_vnc_port() {
     start_test_container -e "VNC_PORT=5901"
     wait_for_qemu_running 30
     local cmdline
-    cmdline=$(container_exec cat /proc/$(get_qemu_pid)/cmdline 2>/dev/null | tr '\0' ' ')
+    cmdline=$(qemu_cmdline) || return 1
     assert_contains "$cmdline" "-vnc :1" "VNC_PORT=5901 should produce -vnc :1"
 }
 
@@ -78,7 +79,7 @@ test_disk_attached() {
     # Create a dummy disk in a temp directory
     local tmpdir
     tmpdir=$(mktemp -d)
-    docker run --rm -v "$tmpdir:/mnt" "$TEST_IMAGE" qemu-img create -f qcow2 /mnt/test.qcow2 1G 2>/dev/null || \
+    timeout 60 docker run --rm -v "$tmpdir:/mnt" --entrypoint qemu-img "$TEST_IMAGE" create -f qcow2 /mnt/test.qcow2 1G 2>/dev/null || \
     qemu-img create -f qcow2 "$tmpdir/test.qcow2" 1G 2>/dev/null || \
     truncate -s 1G "$tmpdir/test.qcow2"
 
@@ -94,12 +95,13 @@ test_disk_attached() {
         -p "${REDFISH_PORT}:443" \
         -e "IPMI_USER=${IPMI_USER}" \
         -e "IPMI_PASS=${IPMI_PASS}" \
+        -e "POWER_ON_AT_START=true" \
         -e "VM_DISK=/vm/test.qcow2" \
         "$TEST_IMAGE"
     wait_for_container_running 30
     wait_for_qemu_running 30
     local cmdline
-    cmdline=$(container_exec cat /proc/$(get_qemu_pid)/cmdline 2>/dev/null | tr '\0' ' ')
+    cmdline=$(qemu_cmdline) || return 1
     assert_contains "$cmdline" "-drive" "Disk should be attached with -drive"
     rm -rf "$tmpdir"
 }
@@ -110,7 +112,7 @@ test_disk_missing_no_error() {
     wait_for_container_running 30
     wait_for_qemu_running 30
     local cmdline
-    cmdline=$(container_exec cat /proc/$(get_qemu_pid)/cmdline 2>/dev/null | tr '\0' ' ')
+    cmdline=$(qemu_cmdline) || return 1
     assert_not_contains "$cmdline" "disk.qcow2" "Missing disk should not add a disk -drive"
 }
 
@@ -131,12 +133,13 @@ test_cdrom_attached() {
         -p "${REDFISH_PORT}:443" \
         -e "IPMI_USER=${IPMI_USER}" \
         -e "IPMI_PASS=${IPMI_PASS}" \
+        -e "POWER_ON_AT_START=true" \
         -e "VM_CDROM=/iso/test.iso" \
         "$TEST_IMAGE"
     wait_for_container_running 30
     wait_for_qemu_running 30
     local cmdline
-    cmdline=$(container_exec cat /proc/$(get_qemu_pid)/cmdline 2>/dev/null | tr '\0' ' ')
+    cmdline=$(qemu_cmdline) || return 1
     # qemu-bmc turns -cdrom into its VirtualMedia CD drive holding the ISO
     assert_contains "$cmdline" "media=cdrom,readonly=on,format=raw,file=/iso/test.iso" "CD-ROM should hold VM_CDROM"
     rm -rf "$tmpdir"
@@ -147,7 +150,7 @@ test_boot_device_default() {
     start_test_container
     wait_for_qemu_running 30
     local cmdline
-    cmdline=$(container_exec cat /proc/$(get_qemu_pid)/cmdline 2>/dev/null | tr '\0' ' ')
+    cmdline=$(qemu_cmdline) || return 1
     assert_contains "$cmdline" "-boot" "Default boot device should be set"
 }
 
@@ -163,12 +166,13 @@ test_custom_ipmi_credentials() {
         -p "${REDFISH_PORT}:443" \
         -e "IPMI_USER=testuser" \
         -e "IPMI_PASS=testpass123" \
+        -e "POWER_ON_AT_START=true" \
         "$TEST_IMAGE"
     wait_for_container_running 30
     wait_for_qemu_running 30
     sleep 3
     local result
-    result=$(ipmitool -I lanplus -H "$IPMI_HOST" -p "$IPMI_PORT" \
+    result=$(timeout "$CMD_TIMEOUT" ipmitool -I lanplus -H "$IPMI_HOST" -p "$IPMI_PORT" \
         -U testuser -P testpass123 mc info 2>&1)
     assert_contains "$result" "Device ID" "Custom IPMI credentials should work"
 }
@@ -178,7 +182,7 @@ test_qemu_extra_args() {
     start_test_container -e "QEMU_EXTRA_ARGS=-device virtio-rng-pci"
     wait_for_qemu_running 30
     local cmdline
-    cmdline=$(container_exec cat /proc/$(get_qemu_pid)/cmdline 2>/dev/null | tr '\0' ' ')
+    cmdline=$(qemu_cmdline) || return 1
     assert_contains "$cmdline" "virtio-rng-pci" "Extra QEMU args should be passed"
 }
 
@@ -204,7 +208,7 @@ ipmi_system_guid() {
 
 # Prints the -uuid value on the QEMU command line
 qemu_cmdline_uuid() {
-    container_exec cat /proc/$(get_qemu_pid)/cmdline 2>/dev/null | tr '\0' '\n' | sed -n '/^-uuid$/{n;p;}'
+    qemu_cmdline '\n' | sed -n '/^-uuid$/{n;p;}'
 }
 
 test_system_uuid_explicit() {
@@ -256,7 +260,7 @@ test_system_uuid_persisted_in_volume() {
     assert_equals "$first" "$(redfish_system_uuid)" "Persisted UUID should survive re-creation"
     assert_equals "$first" "$(qemu_cmdline_uuid)" "QEMU -uuid should match persisted UUID"
     stop_test_container
-    docker run --rm -v "$tmpdir:/vm" --entrypoint rm "$TEST_IMAGE" -f /vm/system-uuid 2>/dev/null || true
+    timeout 60 docker run --rm -v "$tmpdir:/vm" --entrypoint rm "$TEST_IMAGE" -f /vm/system-uuid 2>/dev/null || true
     rm -rf "$tmpdir"
 }
 

@@ -28,7 +28,7 @@ test_redfish_systems() {
 
 test_redfish_power_off() {
     local status
-    status=$(curl -sk -u "${IPMI_USER}:${IPMI_PASS}" \
+    status=$(curl -sk --max-time "$CMD_TIMEOUT" -u "${IPMI_USER}:${IPMI_PASS}" \
         -X POST -H "Content-Type: application/json" \
         -d '{"ResetType":"ForceOff"}' \
         -o /dev/null -w "%{http_code}" \
@@ -39,7 +39,7 @@ test_redfish_power_off() {
 
 test_redfish_power_on() {
     local status
-    status=$(curl -sk -u "${IPMI_USER}:${IPMI_PASS}" \
+    status=$(curl -sk --max-time "$CMD_TIMEOUT" -u "${IPMI_USER}:${IPMI_PASS}" \
         -X POST -H "Content-Type: application/json" \
         -d '{"ResetType":"On"}' \
         -o /dev/null -w "%{http_code}" \
