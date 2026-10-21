@@ -571,7 +571,7 @@
       "number": 25,
       "kind": "task",
       "title": "VirtualMedia: http(s) の URL を qemu-bmc が落としてから差す",
-      "status": "ready",
+      "status": "in-progress",
       "parent": "redfish-virtualmedia-iso-cd",
       "dependsOn": [
         "virtualmedia-cd",
@@ -586,7 +586,7 @@
       "refs": [],
       "threads": [],
       "createdAt": "2026-10-21T14:51:55.062Z",
-      "updatedAt": "2026-10-21T15:12:35.430Z",
+      "updatedAt": "2026-10-21T15:32:16.760Z",
       "closedAt": null,
       "extra": {}
     },
