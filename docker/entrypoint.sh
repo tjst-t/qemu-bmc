@@ -81,7 +81,10 @@ if [ -n "$VM_NETWORKS" ]; then
         timeout=30
         for i in $(seq 1 $timeout); do
             [ -e "/sys/class/net/$iface" ] && break
-            [ "$i" -eq "$timeout" ] && echo "WARN: Interface $iface not found after ${timeout}s, starting the VM without its NIC" >&2
+            if [ "$i" -eq "$timeout" ]; then
+                echo "ERROR: Interface $iface (VM_NETWORKS) not found after ${timeout}s, not starting the VM" >&2
+                exit 1
+            fi
             sleep 1
         done
     done
