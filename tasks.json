@@ -449,11 +449,11 @@
       ],
       "body": "`ipmitool chassis bootparam get 5` が「Boot parameter 5 is invalid/locked」と表示する（v0.7.0 から。d5c7ec9 での変更による退行ではない）。値（Boot Flag Valid、persistent か次回だけか、起動デバイス）は正しく読める。\n原因：internal/ipmi/handler_chassis.go の Get Boot Options の応答で `data[1] = 0x80 | 0x05` としている。IPMI 仕様では応答データ 2 バイト目の bit 7 は「parameter marked invalid / locked」なので、0x05 だけにすべき。他のパラメータ（line 162 付近）も同じ書き方なので合わせて確かめる。\n2026-10-21、#19 の確認中に発見。",
       "doneWhen": "ipmitool chassis bootparam get 5 が invalid/locked を表示せず、値は従来どおり読める。MAAS（ipmi-config / ipmipower）での起動先設定が引き続き通る",
-      "resolution": "Factory が取り込みました（factory/ipmi-get-system-boot-options-parameter-i）",
+      "resolution": "0864fd6 で修正（未リリース、main のみ）。ipmitool chassis bootparam get 5 が「valid/unlocked」と表示し、persistent・次回だけ・起動デバイスは従来どおり読める。FreeIPMI 1.6.13 の ipmi-config（--driver-type=LAN_2_0 -W opensesspriv、MAAS と同じ形）で Chassis_Boot_Flags の checkout と Boot_Device=PXE の commit が通り、Redfish でも Once Pxe と見える。MAAS そのものでは未確認。",
       "refs": [],
       "threads": [],
       "createdAt": "2026-10-21T10:46:02.315Z",
-      "updatedAt": "2026-10-21T11:11:43.335Z",
+      "updatedAt": "2026-10-21T11:14:11.279Z",
       "closedAt": "2026-10-21T11:11:43.335Z",
       "extra": {}
     }
