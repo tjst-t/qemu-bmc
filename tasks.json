@@ -345,7 +345,7 @@
       "number": 16,
       "kind": "bug",
       "title": "BootSourceOverrideEnabled=Disabled でも BootSourceOverrideTarget の起動先が使われる",
-      "status": "ready",
+      "status": "in-progress",
       "parent": null,
       "dependsOn": [],
       "milestone": null,
@@ -360,7 +360,7 @@
       "refs": [],
       "threads": [],
       "createdAt": "2026-10-21T09:53:40.928Z",
-      "updatedAt": "2026-10-21T09:53:40.928Z",
+      "updatedAt": "2026-10-21T09:55:11.168Z",
       "closedAt": null,
       "extra": {}
     },
