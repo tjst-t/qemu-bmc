@@ -102,10 +102,14 @@ func handleSetBootOptions(reqData []byte, m MachineInterface) (CompletionCode, [
 			Mode: "UEFI",
 		}
 
-		// Byte 1, bit 7: valid
+		// Byte 1, bit 7: valid; bit 6: persistent (all future boots)
 		// Byte 2, bits 5:2: boot device
 		if bootFlags[0]&0x80 != 0 {
-			override.Enabled = "Once"
+			if bootFlags[0]&0x40 != 0 {
+				override.Enabled = "Continuous"
+			} else {
+				override.Enabled = "Once"
+			}
 		} else {
 			override.Enabled = "Disabled"
 		}
@@ -170,9 +174,12 @@ func handleGetBootOptions(reqData []byte, m MachineInterface) (CompletionCode, [
 		// Byte 1: parameter valid (bit7) + parameter selector (bits 6:0)
 		data[1] = 0x80 | 0x05
 
-		// Byte 2: boot flags valid (bit7) + UEFI (bit5)
-		if boot.Enabled != "Disabled" {
+		// Byte 2: boot flags valid (bit7) + persistent (bit6) + UEFI (bit5)
+		switch boot.Enabled {
+		case "Once":
 			data[2] = 0x80 // valid
+		case "Continuous":
+			data[2] = 0x80 | 0x40 // valid + persistent
 		}
 		if boot.Mode == "UEFI" {
 			data[2] |= 0x20 // UEFI

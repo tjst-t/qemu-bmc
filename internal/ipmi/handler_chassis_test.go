@@ -111,3 +111,65 @@ func TestGetBootOptions(t *testing.T) {
 	assert.Equal(t, byte(0xA0), resp[2]) // boot flags valid + UEFI
 	assert.Equal(t, byte(0x04), resp[3]) // PXE (0x01 << 2)
 }
+
+func TestSetBootOptions_PersistentBit_Continuous(t *testing.T) {
+	mock := newIPMIMockMachine(machine.PowerOn)
+	// ipmitool chassis bootdev pxe options=persistent,efiboot
+	data := []byte{
+		0x05,
+		0xE0, // valid(0x80) + persistent(0x40) + UEFI(0x20)
+		0x04, // PXE (0x01 << 2)
+		0x00, 0x00, 0x00,
+	}
+	msg := &IPMIMessage{Command: CmdSetBootOptions, Data: data}
+	code, _ := handleChassisCommand(msg, mock)
+	assert.Equal(t, CompletionCodeOK, code)
+	assert.Equal(t, "Continuous", mock.bootOverride.Enabled)
+	assert.Equal(t, "Pxe", mock.bootOverride.Target)
+	assert.Equal(t, "UEFI", mock.bootOverride.Mode)
+}
+
+func TestSetBootOptions_PersistentBitWithoutValid_Disabled(t *testing.T) {
+	mock := newIPMIMockMachine(machine.PowerOn)
+	data := []byte{0x05, 0x40, 0x04, 0x00, 0x00, 0x00}
+	msg := &IPMIMessage{Command: CmdSetBootOptions, Data: data}
+	code, _ := handleChassisCommand(msg, mock)
+	assert.Equal(t, CompletionCodeOK, code)
+	assert.Equal(t, "Disabled", mock.bootOverride.Enabled)
+}
+
+func TestGetBootOptions_PersistentBit(t *testing.T) {
+	tests := []struct {
+		enabled string
+		want    byte
+	}{
+		{"Once", 0xA0},
+		{"Continuous", 0xE0},
+		{"Disabled", 0x20},
+	}
+	for _, tt := range tests {
+		t.Run(tt.enabled, func(t *testing.T) {
+			mock := newIPMIMockMachine(machine.PowerOn)
+			mock.bootOverride = machine.BootOverride{Enabled: tt.enabled, Target: "Pxe", Mode: "UEFI"}
+			msg := &IPMIMessage{Command: CmdGetBootOptions, Data: []byte{0x05, 0x00, 0x00}}
+			code, resp := handleChassisCommand(msg, mock)
+			assert.Equal(t, CompletionCodeOK, code)
+			require.Len(t, resp, 7)
+			assert.Equal(t, tt.want, resp[2])
+		})
+	}
+}
+
+func TestBootOptions_PersistentRoundTrip(t *testing.T) {
+	mock := newIPMIMockMachine(machine.PowerOn)
+	set := &IPMIMessage{Command: CmdSetBootOptions, Data: []byte{0x05, 0xC0, 0x04, 0x00, 0x00, 0x00}}
+	code, _ := handleChassisCommand(set, mock)
+	require.Equal(t, CompletionCodeOK, code)
+
+	get := &IPMIMessage{Command: CmdGetBootOptions, Data: []byte{0x05, 0x00, 0x00}}
+	code, resp := handleChassisCommand(get, mock)
+	require.Equal(t, CompletionCodeOK, code)
+	require.Len(t, resp, 7)
+	assert.Equal(t, byte(0xC0), resp[2]) // valid + persistent, Legacy
+	assert.Equal(t, byte(0x04), resp[3])
+}
