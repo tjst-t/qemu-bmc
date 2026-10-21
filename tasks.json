@@ -563,6 +563,27 @@
       "updatedAt": "2026-10-21T14:51:55.062Z",
       "closedAt": null,
       "extra": {}
+    },
+    {
+      "id": "make-container-test-all",
+      "number": 26,
+      "kind": "task",
+      "title": "統合テスト（make container-test-all）をいまの既定に合わせて直す",
+      "status": "backlog",
+      "parent": null,
+      "dependsOn": [],
+      "milestone": null,
+      "priority": "normal",
+      "labels": [],
+      "body": "2026-10-21 に全件を初めて流したところ、container・entrypoint の分類から多数が落ちた。製品の退行ではなくテストが古い:\n- テストはコンテナ起動と同時に QEMU が起きる前提だが、いまは POWER_ON_AT_START の既定が false（電源オンを待つ）。QEMU の引数を見るテストは \"QEMU did not start within 30s\" で落ちる → 起動時に POWER_ON_AT_START=true を渡すか、テストで電源オンしてから見る\n- pgrep を docker exec で使っているがイメージに procps が無い → /proc を読む形にする（イメージは太らせない）\n- 失敗の一覧は全件が終わってから追記する\n落ちるテストは 30〜60 秒待つので全体が長い。直したあとは全件が通ること。",
+      "doneWhen": "make container-test-all が全件 PASS（このサーバ baremetal で）",
+      "resolution": null,
+      "refs": [],
+      "threads": [],
+      "createdAt": "2026-10-21T14:53:54.030Z",
+      "updatedAt": "2026-10-21T14:53:54.030Z",
+      "closedAt": null,
+      "extra": {}
     }
   ]
 }
