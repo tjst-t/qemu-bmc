@@ -456,6 +456,27 @@
       "updatedAt": "2026-10-21T11:14:11.279Z",
       "closedAt": "2026-10-21T11:11:43.335Z",
       "extra": {}
+    },
+    {
+      "id": "vm-boot-mode-bios-bootsourceoverridemode",
+      "number": 21,
+      "kind": "bug",
+      "title": "VM_BOOT_MODE=bios でも BootSourceOverrideMode が UEFI と報告される",
+      "status": "done",
+      "parent": null,
+      "dependsOn": [],
+      "milestone": null,
+      "priority": "normal",
+      "labels": [],
+      "body": "起動時の bootOverride.Mode が常に UEFI だったため、SeaBIOS で動く BIOS ノードでも Redfish は UEFI、IPMI の boot flags は EFI と報告していた。containerlab/example.yml の node1（bios）で見つけた。プロセス管理モードでは VM_BOOT_MODE から初期値を決めるように直した（5cd73e7）。v0.7.2 に入れる。",
+      "doneWhen": "VM_BOOT_MODE=bios のコンテナで Systems/1 の BootSourceOverrideMode が Legacy、ipmitool chassis bootparam get 5 が legacy と出る（containerlab で確認済み）",
+      "resolution": null,
+      "refs": [],
+      "threads": [],
+      "createdAt": "2026-10-21T14:41:19.055Z",
+      "updatedAt": "2026-10-21T14:41:19.055Z",
+      "closedAt": "2026-10-21T14:41:19.055Z",
+      "extra": {}
     }
   ]
 }
