@@ -278,7 +278,8 @@
       "status": "ready",
       "parent": "containerlab-bmc",
       "dependsOn": [
-        "systems-1-uuid-mac-cpu"
+        "uuid-redfish-uuid-ipmi-get-system-guid",
+        "nic-mac-ethernetinterfaces"
       ],
       "milestone": null,
       "priority": "normal",
@@ -289,7 +290,7 @@
       "refs": [],
       "threads": [],
       "createdAt": "2026-10-20T14:43:42.014Z",
-      "updatedAt": "2026-10-20T14:43:42.014Z",
+      "updatedAt": "2026-10-21T07:34:27.095Z",
       "closedAt": null,
       "extra": {}
     },
