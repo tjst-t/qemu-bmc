@@ -546,7 +546,7 @@
       "number": 27,
       "kind": "task",
       "title": "Graceful 系の間 PowerState を PoweringOff / PoweringOn にし、止まらなければ一定時間で On に戻す",
-      "status": "ready",
+      "status": "in-progress",
       "parent": null,
       "dependsOn": [
         "virtualmedia-cd"
@@ -562,7 +562,7 @@
       ],
       "threads": [],
       "createdAt": "2026-10-21T14:54:50.554Z",
-      "updatedAt": "2026-10-21T14:54:50.554Z",
+      "updatedAt": "2026-10-21T15:09:59.366Z",
       "closedAt": null,
       "extra": {}
     },
