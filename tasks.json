@@ -439,7 +439,7 @@
       "number": 20,
       "kind": "bug",
       "title": "IPMI の Get System Boot Options が「parameter invalid/locked」のビットを立てて返す",
-      "status": "in-progress",
+      "status": "done",
       "parent": null,
       "dependsOn": [],
       "milestone": null,
@@ -449,12 +449,12 @@
       ],
       "body": "`ipmitool chassis bootparam get 5` が「Boot parameter 5 is invalid/locked」と表示する（v0.7.0 から。d5c7ec9 での変更による退行ではない）。値（Boot Flag Valid、persistent か次回だけか、起動デバイス）は正しく読める。\n原因：internal/ipmi/handler_chassis.go の Get Boot Options の応答で `data[1] = 0x80 | 0x05` としている。IPMI 仕様では応答データ 2 バイト目の bit 7 は「parameter marked invalid / locked」なので、0x05 だけにすべき。他のパラメータ（line 162 付近）も同じ書き方なので合わせて確かめる。\n2026-10-21、#19 の確認中に発見。",
       "doneWhen": "ipmitool chassis bootparam get 5 が invalid/locked を表示せず、値は従来どおり読める。MAAS（ipmi-config / ipmipower）での起動先設定が引き続き通る",
-      "resolution": null,
+      "resolution": "Factory が取り込みました（factory/ipmi-get-system-boot-options-parameter-i）",
       "refs": [],
       "threads": [],
       "createdAt": "2026-10-21T10:46:02.315Z",
-      "updatedAt": "2026-10-21T11:10:08.540Z",
-      "closedAt": null,
+      "updatedAt": "2026-10-21T11:11:43.335Z",
+      "closedAt": "2026-10-21T11:11:43.335Z",
       "extra": {}
     }
   ]
