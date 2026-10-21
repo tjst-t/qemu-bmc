@@ -1,7 +1,9 @@
 package qemu
 
 import (
+	"fmt"
 	"os/exec"
+	"sync"
 	"testing"
 	"time"
 
@@ -152,4 +154,35 @@ func TestProcessManager_Restart_AfterStop(t *testing.T) {
 	require.NoError(t, pm.Start(""))
 	defer pm.Kill()
 	assert.True(t, pm.IsRunning())
+}
+
+func TestProcessManager_Start_LogsQEMUStderr(t *testing.T) {
+	var mu sync.Mutex
+	var lines []string
+	factory := func(binary string, args []string) *exec.Cmd {
+		return exec.Command("sh", "-c", "echo 'could not open /dev/net/tun' >&2; printf 'partial' >&2; exit 1")
+	}
+	pm := NewProcessManager("qemu-system-x86_64", nil, factory)
+	pm.(*processManager).logf = func(format string, v ...any) {
+		mu.Lock()
+		defer mu.Unlock()
+		lines = append(lines, fmt.Sprintf(format, v...))
+	}
+	require.NoError(t, pm.Start(""))
+	require.NoError(t, pm.WaitForExit(5*time.Second))
+
+	mu.Lock()
+	defer mu.Unlock()
+	assert.Contains(t, lines, "qemu: could not open /dev/net/tun")
+	assert.Contains(t, lines, "qemu: partial")
+	assert.Contains(t, lines, "QEMU process exited: exit status 1")
+}
+
+func TestLineLogger_SplitsLines(t *testing.T) {
+	var lines []string
+	l := &lineLogger{logf: func(format string, v ...any) { lines = append(lines, fmt.Sprintf(format, v...)) }}
+	l.Write([]byte("a\nb"))
+	l.Write([]byte("c\r\n\n"))
+	l.Flush()
+	assert.Equal(t, []string{"qemu: a", "qemu: bc"}, lines)
 }

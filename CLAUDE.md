@@ -119,7 +119,7 @@ make container-test-all
 | `VM_CDROM` | (empty) | CD-ROM ISO path |
 | `VM_BOOT` | `c` | Boot device (c=disk, d=cdrom, n=network) |
 | `VM_BOOT_MENU_TIMEOUT` | `0` | Boot menu timeout in ms (0=disabled) |
-| `VM_NETWORKS` | (empty) | Comma-separated host interfaces for TAP passthrough |
+| `VM_NETWORKS` | (empty) | Comma-separated host interfaces for TAP passthrough (default: eth2+). Needs `/dev/net/tun` (`--device /dev/net/tun`); entrypoint creates it with mknod if missing, else exits with an error |
 | `QEMU_EXTRA_ARGS` | (empty) | Additional QEMU arguments |
 | `DEBUG` | `false` | Enable debug output |
 

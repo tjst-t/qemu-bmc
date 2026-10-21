@@ -5,6 +5,8 @@ topology:
     node1:
       kind: linux
       image: ghcr.io/tjst-t/qemu-bmc:latest
+      devices:
+        - /dev/net/tun  # needed for the VM NICs (eth2+ are passed through)
       binds:
         - ../vm/node1:/vm
         - ../iso:/iso
@@ -21,6 +23,8 @@ topology:
     node2:
       kind: linux
       image: ghcr.io/tjst-t/qemu-bmc:latest
+      devices:
+        - /dev/net/tun  # needed for the VM NICs (eth2+ are passed through)
       binds:
         - ../vm/node2:/vm
         - ../iso:/iso

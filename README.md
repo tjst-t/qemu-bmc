@@ -54,7 +54,7 @@ curl -k -u admin:password https://localhost/redfish/v1/Systems/1
 
 ```bash
 docker build -t qemu-bmc -f docker/Dockerfile .
-docker run --rm --device /dev/kvm --cap-add NET_ADMIN \
+docker run --rm --device /dev/kvm --device /dev/net/tun --cap-add NET_ADMIN \
   -p 5900:5900 -p 623:623/udp -p 443:443 \
   -v ./vm:/vm \
   -e VM_MEMORY=4096 -e VM_CPUS=4 \
@@ -251,7 +251,7 @@ These variables are used by `docker/entrypoint.sh` to construct QEMU arguments:
 | `VM_CDROM` | (empty) | CD-ROM ISO path |
 | `VM_BOOT` | `c` | Boot device (c=disk, d=cdrom, n=network) |
 | `VM_BOOT_MENU_TIMEOUT` | `0` | Boot menu timeout in ms (0=disabled) |
-| `VM_NETWORKS` | (empty) | Comma-separated host interfaces for TAP passthrough (waits up to 30s for interfaces to appear, useful for containerlab) |
+| `VM_NETWORKS` | (empty) | Comma-separated host interfaces for TAP passthrough (waits up to 30s for interfaces to appear, useful for containerlab). Without it, eth2+ are passed through. Requires `/dev/net/tun` (`--device /dev/net/tun`) and `NET_ADMIN`; the container exits with an error if the TUN device is unusable |
 | `QEMU_EXTRA_ARGS` | (empty) | Additional QEMU arguments |
 | `DEBUG` | `false` | Enable debug output |
 
@@ -367,7 +367,7 @@ curl -k -u admin:password https://localhost/redfish/v1/Systems/1
 
 ```bash
 docker build -t qemu-bmc -f docker/Dockerfile .
-docker run --rm --device /dev/kvm --cap-add NET_ADMIN \
+docker run --rm --device /dev/kvm --device /dev/net/tun --cap-add NET_ADMIN \
   -p 5900:5900 -p 623:623/udp -p 443:443 \
   -v ./vm:/vm \
   -e VM_MEMORY=4096 -e VM_CPUS=4 \
@@ -563,7 +563,7 @@ ipmitool user enable 3
 | `VM_CDROM` | (空) | CD-ROM ISO パス |
 | `VM_BOOT` | `c` | ブートデバイス (c=ディスク, d=CD-ROM, n=ネットワーク) |
 | `VM_BOOT_MENU_TIMEOUT` | `0` | ブートメニュータイムアウト (ms、0=無効) |
-| `VM_NETWORKS` | (空) | TAP パススルー用ホストインターフェース (カンマ区切り、インターフェース出現まで最大30秒待機、containerlab 対応) |
+| `VM_NETWORKS` | (空) | TAP パススルー用ホストインターフェース (カンマ区切り、インターフェース出現まで最大30秒待機、containerlab 対応)。未指定時は eth2 以降をパススルー。`/dev/net/tun` (`--device /dev/net/tun`) と `NET_ADMIN` が必要で、TUN デバイスが使えないとエラーで終了する |
 | `QEMU_EXTRA_ARGS` | (空) | 追加 QEMU 引数 |
 | `DEBUG` | `false` | デバッグ出力を有効化 |
 

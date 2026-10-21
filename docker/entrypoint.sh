@@ -87,7 +87,10 @@ if [ -n "$VM_NETWORKS" ]; then
     done
 fi
 
-NET_ARGS=$(build_network_args 2>/dev/null || true)
+if ! NET_ARGS=$(build_network_args); then
+    echo "ERROR: network setup failed, not starting the VM" >&2
+    exit 1
+fi
 if [ -n "$NET_ARGS" ]; then
     QEMU_ARGS="$QEMU_ARGS $NET_ARGS"
 else

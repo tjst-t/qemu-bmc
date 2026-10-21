@@ -2,6 +2,7 @@ package qemu
 
 import (
 	"fmt"
+	"log"
 	"os/exec"
 	"sync"
 	"syscall"
@@ -31,6 +32,8 @@ type processManager struct {
 	baseArgs   []string
 	cmdFactory CommandFactory
 	cmd        *exec.Cmd
+	stderr     *lineLogger
+	logf       func(format string, v ...any)
 	running    bool
 	exitCh     chan struct{}
 	mu         sync.RWMutex
@@ -42,6 +45,7 @@ func NewProcessManager(binary string, baseArgs []string, factory CommandFactory)
 		binary:     binary,
 		baseArgs:   baseArgs,
 		cmdFactory: factory,
+		logf:       log.Printf,
 		exitCh:     make(chan struct{}),
 	}
 }
@@ -57,6 +61,11 @@ func (p *processManager) Start(bootTarget string) error {
 	args := ApplyBootOverride(p.baseArgs, bootTarget)
 	p.cmd = p.cmdFactory(p.binary, args)
 	p.cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	p.stderr = nil
+	if p.cmd.Stderr == nil {
+		p.stderr = &lineLogger{logf: p.logf}
+		p.cmd.Stderr = p.stderr
+	}
 
 	if err := p.cmd.Start(); err != nil {
 		return fmt.Errorf("starting QEMU process: %w", err)
@@ -70,7 +79,13 @@ func (p *processManager) Start(bootTarget string) error {
 }
 
 func (p *processManager) monitor() {
-	p.cmd.Wait()
+	err := p.cmd.Wait()
+	if p.stderr != nil {
+		p.stderr.Flush()
+	}
+	if err != nil {
+		p.logf("QEMU process exited: %v", err)
+	}
 	p.mu.Lock()
 	p.running = false
 	ch := p.exitCh
