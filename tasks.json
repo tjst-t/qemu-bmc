@@ -574,7 +574,8 @@
       "status": "ready",
       "parent": "redfish-virtualmedia-iso-cd",
       "dependsOn": [
-        "virtualmedia-cd"
+        "virtualmedia-cd",
+        "graceful-powerstate-poweringoff-powering"
       ],
       "milestone": null,
       "priority": "normal",
@@ -585,7 +586,7 @@
       "refs": [],
       "threads": [],
       "createdAt": "2026-10-21T14:51:55.062Z",
-      "updatedAt": "2026-10-21T14:51:55.062Z",
+      "updatedAt": "2026-10-21T15:12:35.430Z",
       "closedAt": null,
       "extra": {}
     },
