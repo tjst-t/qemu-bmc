@@ -546,7 +546,7 @@
       "number": 27,
       "kind": "task",
       "title": "Graceful 系の間 PowerState を PoweringOff / PoweringOn にし、止まらなければ一定時間で On に戻す",
-      "status": "in-progress",
+      "status": "done",
       "parent": null,
       "dependsOn": [
         "virtualmedia-cd"
@@ -556,14 +556,14 @@
       "labels": [],
       "body": "## なぜ\nsakutei開発の要望（2026-10-21 の回答）。いまは GracefulShutdown・GracefulRestart を 204 ですぐ返し、ゲストが止まるまで PowerState は On のまま。sakutei は PoweringOff・PoweringOn を「作業中（converging）」として扱い、その間は同じ操作を重ねず待つ。ゲストが ACPI に応えないとき PoweringOff が続くと sakutei が待ち続けるので、一定時間で On に戻してほしい（戻す時間は環境変数で）。Redfish の Task（202）は要らない。\n\n## 作るもの（internal/machine が中心。#24 と同じファイルを触るので #24 の後に）\n- Machine に途中の状態を持たせる。GetPowerState が返す値に PoweringOff・PoweringOn を足す（machine.PowerState の定数）\n- GracefulShutdown（Redfish）・chassis power soft（IPMI）：ACPI の電源ボタンを送ったら PoweringOff。ゲストが止まったら Off。新しい環境変数 GRACEFUL_TIMEOUT（秒、既定 120）を過ぎても止まらなければ On に戻し、ログに出す。強制停止はしない（いまのまま）\n- GracefulRestart：止まるまで PoweringOff → 止まったら起こし直す間 PoweringOn → 起きたら On。止まらなければ GRACEFUL_TIMEOUT で On に戻す（いまの gracefulRestartTimeout 120 秒をこの環境変数に置き換える）\n- 途中で別の電源操作（On・ForceOff・ForceRestart など。Redfish でも IPMI でも）が来たら途中の状態は打ち切り、その操作の結果に従う（いまの resetGen の仕組みに合わせる）\n- 途中の状態はポーリング（GET）だけで正しく進むこと（裏で見張る goroutine でも、GET のたびに判定でもよい）。プロセス管理モードとレガシーモードの両方\n- Redfish の Systems/1 の PowerState にそのまま出す。IPMI の chassis power status は on/off しか無いので、PoweringOff・PoweringOn は on として返す\n- 単体テスト（模擬の時計か短い timeout で：PoweringOff→Off、PoweringOff→timeout→On、GracefulRestart の PoweringOff→PoweringOn→On、途中で ForceOff）。README（英語・日本語）の Reset の説明と環境変数の表を直す",
       "doneWhen": "go test ./... と go vet が通る。make docker-build したイメージで、Debian ゲスト（/tmp/guest/debian-12-nocloud-amd64.qcow2）に GracefulShutdown → GET が PoweringOff のあと Off、GracefulRestart → PoweringOff/PoweringOn のあと On、OS 無しの VM に GracefulShutdown（GRACEFUL_TIMEOUT=10）→ 約10秒で On に戻る",
-      "resolution": null,
+      "resolution": "Factory が取り込みました（factory/graceful-powerstate-poweringoff-powering）",
       "refs": [
         "sakutei開発 Base Thread の回答 2026-10-21"
       ],
       "threads": [],
       "createdAt": "2026-10-21T14:54:50.554Z",
-      "updatedAt": "2026-10-21T15:09:59.366Z",
-      "closedAt": null,
+      "updatedAt": "2026-10-21T15:28:02.446Z",
+      "closedAt": "2026-10-21T15:28:02.446Z",
       "extra": {}
     },
     {
