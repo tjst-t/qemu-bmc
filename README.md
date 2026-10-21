@@ -104,16 +104,29 @@ curl -k -u admin:password -X PATCH \
   -d '{"Boot": {"BootSourceOverrideEnabled": "Once", "BootSourceOverrideTarget": "Pxe"}}' \
   https://localhost/redfish/v1/Systems/1
 
-# Mount VirtualMedia
+# Insert an ISO into the virtual CD drive (path inside the container), boot from it once
 curl -k -u admin:password -X POST \
   -H 'Content-Type: application/json' \
-  -d '{"Image": "http://example.com/boot.iso", "Inserted": true}' \
+  -d '{"Image": "/iso/boot.iso", "Inserted": true}' \
   https://localhost/redfish/v1/Managers/1/VirtualMedia/CD1/Actions/VirtualMedia.InsertMedia
+curl -k -u admin:password -X PATCH \
+  -H 'Content-Type: application/json' \
+  -d '{"Boot": {"BootSourceOverrideEnabled": "Once", "BootSourceOverrideTarget": "Cd"}}' \
+  https://localhost/redfish/v1/Systems/1
 
-# Unmount VirtualMedia
+# Eject it
 curl -k -u admin:password -X POST \
   https://localhost/redfish/v1/Managers/1/VirtualMedia/CD1/Actions/VirtualMedia.EjectMedia
 ```
+
+#### VirtualMedia
+
+- In process management mode (the container), the VM always has a CD drive. It is empty unless `VM_CDROM` is set, in which case that ISO is the initially inserted medium.
+- `Image` must be a path inside the container: `/iso/boot.iso` or `file:///iso/boot.iso` (bind-mount the ISO, e.g. `-v ./iso:/iso:ro`). HTTP(S) URLs are not supported yet. A missing `Image`, a nonexistent file or an unsupported scheme returns `400`; InsertMedia and EjectMedia return `204 No Content` on success.
+- The medium is kept by qemu-bmc while the VM is powered off and attached when QEMU starts; while the VM is running it is swapped live over QMP.
+- Boot target `Cd` (Redfish `BootSourceOverrideTarget`, IPMI `chassis bootdev cdrom`) boots the inserted ISO in both BIOS and UEFI mode (the CD drive gets `bootindex=0`, which OVMF requires).
+- `GET .../VirtualMedia/CD1` reports `Image`, `ImageName`, `Inserted`, `ConnectedVia` (`URI` / `NotConnected`), `WriteProtected` (always `true`) and `MediaTypes`.
+- Legacy mode (external QEMU) only changes the medium over QMP; the path refers to the external QEMU's filesystem. The CD drive is located with `query-block` (first removable drive) in both modes.
 
 ### IPMI
 
@@ -196,8 +209,8 @@ ipmitool user enable 3
 | GET | `/redfish/v1/Managers/1` | BMC manager |
 | GET | `/redfish/v1/Managers/1/VirtualMedia` | VirtualMedia collection |
 | GET | `/redfish/v1/Managers/1/VirtualMedia/CD1` | VirtualMedia resource |
-| POST | `.../VirtualMedia.InsertMedia` | Insert media |
-| POST | `.../VirtualMedia.EjectMedia` | Eject media |
+| POST | `.../VirtualMedia.InsertMedia` | Insert an ISO (container path; 204) |
+| POST | `.../VirtualMedia.EjectMedia` | Eject media (204) |
 | GET | `/redfish/v1/Chassis` | Chassis collection |
 | GET | `/redfish/v1/Chassis/1` | Chassis resource |
 | GET | `/novnc/` | Redirect to noVNC UI |
@@ -248,7 +261,7 @@ These variables are used by `docker/entrypoint.sh` to construct QEMU arguments:
 | `ENABLE_KVM` | `true` | Use KVM acceleration (falls back to TCG) |
 | `VNC_PORT` | `5900` | VNC display port |
 | `VM_DISK` | `/vm/disk.qcow2` | VM disk image path |
-| `VM_CDROM` | (empty) | CD-ROM ISO path |
+| `VM_CDROM` | (empty) | ISO initially inserted in the VirtualMedia CD drive (the drive exists, empty, without it) |
 | `VM_BOOT` | `c` | Boot device (c=disk, d=cdrom, n=network) |
 | `VM_BOOT_MENU_TIMEOUT` | `0` | Boot menu timeout in ms (0=disabled) |
 | `VM_NETWORKS` | (empty) | Comma-separated host interfaces for TAP passthrough (waits up to 30s for interfaces to appear, useful for containerlab; the container exits with an error if one does not appear). Without it, eth2+ are passed through. Requires `/dev/net/tun` (`--device /dev/net/tun`) and `NET_ADMIN`; the container exits with an error if the TUN device is unusable |
@@ -417,16 +430,29 @@ curl -k -u admin:password -X PATCH \
   -d '{"Boot": {"BootSourceOverrideEnabled": "Once", "BootSourceOverrideTarget": "Pxe"}}' \
   https://localhost/redfish/v1/Systems/1
 
-# VirtualMedia マウント
+# 仮想 CD ドライブに ISO を差し（コンテナ内のパス）、一度だけ CD から起動する
 curl -k -u admin:password -X POST \
   -H 'Content-Type: application/json' \
-  -d '{"Image": "http://example.com/boot.iso", "Inserted": true}' \
+  -d '{"Image": "/iso/boot.iso", "Inserted": true}' \
   https://localhost/redfish/v1/Managers/1/VirtualMedia/CD1/Actions/VirtualMedia.InsertMedia
+curl -k -u admin:password -X PATCH \
+  -H 'Content-Type: application/json' \
+  -d '{"Boot": {"BootSourceOverrideEnabled": "Once", "BootSourceOverrideTarget": "Cd"}}' \
+  https://localhost/redfish/v1/Systems/1
 
-# VirtualMedia アンマウント
+# 取り出す
 curl -k -u admin:password -X POST \
   https://localhost/redfish/v1/Managers/1/VirtualMedia/CD1/Actions/VirtualMedia.EjectMedia
 ```
+
+#### VirtualMedia
+
+- プロセス管理モード（コンテナ）では、VM に CD ドライブが常に付く。`VM_CDROM` が無ければ空、あればその ISO が最初に差さった状態になる。
+- `Image` はコンテナ内のパス（`/iso/boot.iso` または `file:///iso/boot.iso`）。ISO はバインドマウントする（例: `-v ./iso:/iso:ro`）。HTTP(S) の URL はまだ使えない。`Image` が空・ファイルが無い・未対応の形式なら `400`。InsertMedia・EjectMedia は成功すると `204 No Content`。
+- 差した中身は電源オフ中も qemu-bmc が覚えていて、QEMU を起動するときに付ける。VM が動いていれば QMP でその場で差し替える。
+- 起動先 `Cd`（Redfish の `BootSourceOverrideTarget`、IPMI の `chassis bootdev cdrom`）で、差した ISO から起動する。BIOS・UEFI のどちらでも動く（UEFI（OVMF）のため CD ドライブに `bootindex=0` を付ける）。
+- `GET .../VirtualMedia/CD1` は `Image`・`ImageName`・`Inserted`・`ConnectedVia`（`URI` / `NotConnected`）・`WriteProtected`（常に `true`）・`MediaTypes` を返す。
+- レガシーモード（外部の QEMU）は QMP で差し替えるだけ。パスは外部 QEMU 側のファイルシステムのもの。どちらのモードも CD ドライブは `query-block` で探す（最初の取り外し可能なドライブ）。
 
 ### IPMI
 
@@ -509,8 +535,8 @@ ipmitool user enable 3
 | GET | `/redfish/v1/Managers/1` | BMC マネージャ |
 | GET | `/redfish/v1/Managers/1/VirtualMedia` | VirtualMedia コレクション |
 | GET | `/redfish/v1/Managers/1/VirtualMedia/CD1` | VirtualMedia リソース |
-| POST | `.../VirtualMedia.InsertMedia` | メディア挿入 |
-| POST | `.../VirtualMedia.EjectMedia` | メディア取り出し |
+| POST | `.../VirtualMedia.InsertMedia` | ISO を差す（コンテナ内のパス、204） |
+| POST | `.../VirtualMedia.EjectMedia` | メディア取り出し（204） |
 | GET | `/redfish/v1/Chassis` | シャーシコレクション |
 | GET | `/redfish/v1/Chassis/1` | シャーシリソース |
 | GET | `/novnc/` | noVNC UI へリダイレクト |
@@ -560,7 +586,7 @@ ipmitool user enable 3
 | `ENABLE_KVM` | `true` | KVM アクセラレーション使用 (TCG にフォールバック) |
 | `VNC_PORT` | `5900` | VNC ディスプレイポート |
 | `VM_DISK` | `/vm/disk.qcow2` | VM ディスクイメージパス |
-| `VM_CDROM` | (空) | CD-ROM ISO パス |
+| `VM_CDROM` | (空) | VirtualMedia の CD ドライブに最初から差しておく ISO（無くても空の CD ドライブは付く） |
 | `VM_BOOT` | `c` | ブートデバイス (c=ディスク, d=CD-ROM, n=ネットワーク) |
 | `VM_BOOT_MENU_TIMEOUT` | `0` | ブートメニュータイムアウト (ms、0=無効) |
 | `VM_NETWORKS` | (空) | TAP パススルー用ホストインターフェース (カンマ区切り、インターフェース出現まで最大30秒待機、containerlab 対応。現れなければエラーで終了する)。未指定時は eth2 以降をパススルー。`/dev/net/tun` (`--device /dev/net/tun`) と `NET_ADMIN` が必要で、TUN デバイスが使えないとエラーで終了する |

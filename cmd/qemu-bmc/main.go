@@ -70,6 +70,11 @@ func main() {
 		qmpClient = qmp.NewDisconnectedClient(cfg.QMPSocket)
 		pm := qemu.NewProcessManager(cfg.QEMUBinary, cmdArgs, qemu.DefaultCommandFactory)
 		m = machine.NewWithProcess(qmpClient, pm)
+		// VM_CDROM (-cdrom) is the initial VirtualMedia content
+		if image := qemu.InitialCDImage(cmdArgs); image != "" {
+			log.Printf("VirtualMedia: initial image %s", image)
+			m.SetInitialMedia(image)
+		}
 		// Report the firmware QEMU is started with (entrypoint.sh picks
 		// OVMF only for VM_BOOT_MODE=uefi)
 		if err := m.SetBootMode(cfg.RedfishBootMode()); err != nil {

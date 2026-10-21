@@ -2,6 +2,9 @@ package machine
 
 import (
 	"errors"
+	"fmt"
+	"os"
+	"path/filepath"
 	"sync"
 	"testing"
 	"time"
@@ -18,6 +21,9 @@ type mockQMPClient struct {
 	calls      []string
 	connectErr error
 	queryErr   error
+	blocks     []qmp.BlockInfo
+	mediumErr  error
+	mediumArgs []string // "<command> <id> [<filename>]" of medium commands
 }
 
 func newMockQMPClient(status qmp.Status) *mockQMPClient {
@@ -85,18 +91,49 @@ func (m *mockQMPClient) Quit() error {
 	return nil
 }
 
-func (m *mockQMPClient) BlockdevChangeMedium(device, filename string) error {
+func (m *mockQMPClient) QueryBlock() ([]qmp.BlockInfo, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.calls = append(m.calls, "QueryBlock")
+	return append([]qmp.BlockInfo(nil), m.blocks...), nil
+}
+
+func (m *mockQMPClient) BlockdevChangeMedium(id, filename, format string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.calls = append(m.calls, "BlockdevChangeMedium")
-	return nil
+	m.mediumArgs = append(m.mediumArgs, "change "+id+" "+filename+" "+format)
+	return m.mediumErr
 }
 
-func (m *mockQMPClient) BlockdevRemoveMedium(device string) error {
+func (m *mockQMPClient) BlockdevOpenTray(id string, force bool) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.calls = append(m.calls, "BlockdevOpenTray")
+	m.mediumArgs = append(m.mediumArgs, fmt.Sprintf("open %s force=%v", id, force))
+	return m.mediumErr
+}
+
+func (m *mockQMPClient) BlockdevCloseTray(id string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.calls = append(m.calls, "BlockdevCloseTray")
+	m.mediumArgs = append(m.mediumArgs, "close "+id)
+	return m.mediumErr
+}
+
+func (m *mockQMPClient) BlockdevRemoveMedium(id string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.calls = append(m.calls, "BlockdevRemoveMedium")
-	return nil
+	m.mediumArgs = append(m.mediumArgs, "remove "+id)
+	return m.mediumErr
+}
+
+func (m *mockQMPClient) MediumArgs() []string {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return append([]string(nil), m.mediumArgs...)
 }
 
 func (m *mockQMPClient) Close() error {
@@ -120,6 +157,7 @@ type mockProcessManager struct {
 	mu         sync.Mutex
 	running    bool
 	startCalls []string // boot targets passed to Start
+	startMedia []string // CD images passed to Start
 	calls      []string
 	exitCh     chan struct{}
 }
@@ -135,11 +173,12 @@ func newMockProcessManager(running bool) *mockProcessManager {
 	}
 }
 
-func (m *mockProcessManager) Start(bootTarget string) error {
+func (m *mockProcessManager) Start(bootTarget, cdImage string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.calls = append(m.calls, "Start")
 	m.startCalls = append(m.startCalls, bootTarget)
+	m.startMedia = append(m.startMedia, cdImage)
 	m.running = true
 	m.exitCh = make(chan struct{})
 	return nil
@@ -380,22 +419,136 @@ func TestBootOverride_InvalidTarget(t *testing.T) {
 	assert.Error(t, err)
 }
 
-func TestInsertMedia(t *testing.T) {
-	mock := newMockQMPClient(qmp.StatusRunning)
-	m := New(mock)
-
-	err := m.InsertMedia("http://example.com/boot.iso")
-	require.NoError(t, err)
-	assert.Contains(t, mock.Calls(), "BlockdevChangeMedium")
+// q35 with -cdrom: a virtio disk plus the removable ide2-cd0
+var q35Blocks = []qmp.BlockInfo{
+	{Device: "virtio0", QDev: "/machine/peripheral-anon/device[1]/virtio-backend",
+		Inserted: &qmp.BlockInserted{File: "/vm/disk.qcow2"}},
+	{Device: "floppy0", QDev: "/machine/unattached/device[20]", Removable: true},
+	{Device: "ide2-cd0", QDev: "/machine/unattached/device[23]", Removable: true},
 }
 
-func TestEjectMedia(t *testing.T) {
+func testISO(t *testing.T) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "boot.iso")
+	require.NoError(t, os.WriteFile(path, []byte("iso"), 0o644))
+	return path
+}
+
+func TestInsertMedia_Legacy_UsesQueryBlock(t *testing.T) {
 	mock := newMockQMPClient(qmp.StatusRunning)
+	mock.blocks = q35Blocks
 	m := New(mock)
 
-	err := m.EjectMedia()
-	require.NoError(t, err)
-	assert.Contains(t, mock.Calls(), "BlockdevRemoveMedium")
+	// Legacy mode: the path is in the external QEMU's filesystem
+	require.NoError(t, m.InsertMedia("/iso/boot.iso"))
+	assert.Equal(t, []string{"change /machine/unattached/device[23] /iso/boot.iso raw"}, mock.MediumArgs())
+	assert.Equal(t, Media{Image: "/iso/boot.iso", Inserted: true}, m.GetMedia())
+}
+
+func TestInsertMedia_Legacy_QMPError(t *testing.T) {
+	mock := newMockQMPClient(qmp.StatusRunning)
+	mock.blocks = q35Blocks
+	mock.mediumErr = errors.New("Could not open")
+	m := New(mock)
+
+	assert.Error(t, m.InsertMedia("/iso/boot.iso"))
+	assert.False(t, m.GetMedia().Inserted)
+}
+
+func TestInsertMedia_NoCDDrive(t *testing.T) {
+	mock := newMockQMPClient(qmp.StatusRunning)
+	mock.blocks = q35Blocks[:1]
+	m := New(mock)
+
+	assert.Error(t, m.InsertMedia("/iso/boot.iso"))
+	assert.Empty(t, mock.MediumArgs())
+}
+
+func TestInsertMedia_UnsupportedImage(t *testing.T) {
+	m := New(newMockQMPClient(qmp.StatusRunning))
+	for _, image := range []string{"http://example.com/boot.iso", "boot.iso", "file://host/boot.iso", "file:boot.iso"} {
+		err := m.InsertMedia(image)
+		assert.ErrorIs(t, err, ErrInvalidMedia, image)
+	}
+}
+
+func TestInsertMedia_PoweredOff_KeptAndAttachedOnStart(t *testing.T) {
+	iso := testISO(t)
+	qmpMock := newMockQMPClient(qmp.StatusRunning)
+	pm := newMockProcessManager(false)
+	m := NewWithProcess(qmpMock, pm)
+
+	require.NoError(t, m.InsertMedia("file://"+iso))
+	assert.Empty(t, qmpMock.Calls(), "no QMP while QEMU is not running")
+	assert.Equal(t, Media{Image: "file://" + iso, Inserted: true}, m.GetMedia())
+
+	require.NoError(t, m.SetBootOverride(BootOverride{Enabled: "Once", Target: "Cd", Mode: "Legacy"}))
+	qmpMock.blocks = []qmp.BlockInfo{{Device: "vmedia0", QDev: "vmedia-cd0", Removable: true,
+		Inserted: &qmp.BlockInserted{File: iso}}}
+	require.NoError(t, m.Reset("On"))
+	assert.Equal(t, []string{"Cd"}, pm.StartCalls())
+	assert.Equal(t, []string{iso}, pm.startMedia)
+	assert.Empty(t, qmpMock.MediumArgs(), "the drive already holds the image")
+}
+
+func TestInsertMedia_PoweredOff_MissingFile(t *testing.T) {
+	m := NewWithProcess(newMockQMPClient(qmp.StatusRunning), newMockProcessManager(false))
+
+	err := m.InsertMedia("/nonexistent/boot.iso")
+	assert.ErrorIs(t, err, ErrInvalidMedia)
+	err = m.InsertMedia(t.TempDir())
+	assert.ErrorIs(t, err, ErrInvalidMedia, "directory")
+	assert.False(t, m.GetMedia().Inserted)
+}
+
+func TestInsertMedia_Running_ChangesMedium(t *testing.T) {
+	iso := testISO(t)
+	qmpMock := newMockQMPClient(qmp.StatusRunning)
+	qmpMock.blocks = []qmp.BlockInfo{{Device: "vmedia0", QDev: "vmedia-cd0", Removable: true}}
+	m := NewWithProcess(qmpMock, newMockProcessManager(true))
+
+	require.NoError(t, m.InsertMedia(iso))
+	assert.Equal(t, []string{"change vmedia-cd0 " + iso + " raw"}, qmpMock.MediumArgs())
+	assert.True(t, m.GetMedia().Inserted)
+}
+
+func TestEjectMedia_Running(t *testing.T) {
+	qmpMock := newMockQMPClient(qmp.StatusRunning)
+	qmpMock.blocks = q35Blocks
+	m := NewWithProcess(qmpMock, newMockProcessManager(true))
+	m.SetInitialMedia("/iso/boot.iso")
+
+	require.NoError(t, m.EjectMedia())
+	id := "/machine/unattached/device[23]"
+	assert.Equal(t, []string{"open " + id + " force=true", "remove " + id, "close " + id}, qmpMock.MediumArgs())
+	assert.Equal(t, Media{}, m.GetMedia())
+}
+
+func TestEjectMedia_PoweredOff(t *testing.T) {
+	qmpMock := newMockQMPClient(qmp.StatusRunning)
+	pm := newMockProcessManager(false)
+	m := NewWithProcess(qmpMock, pm)
+	m.SetInitialMedia("/iso/boot.iso")
+	assert.Equal(t, Media{Image: "/iso/boot.iso", Inserted: true}, m.GetMedia())
+
+	require.NoError(t, m.EjectMedia())
+	assert.Empty(t, qmpMock.Calls())
+	assert.False(t, m.GetMedia().Inserted)
+
+	require.NoError(t, m.Reset("On"))
+	assert.Equal(t, []string{""}, pm.startMedia)
+}
+
+func TestPowerOn_SyncsUserCDDrive(t *testing.T) {
+	iso := testISO(t)
+	qmpMock := newMockQMPClient(qmp.StatusRunning)
+	// A user-defined CD drive does not get the image on the command line
+	qmpMock.blocks = []qmp.BlockInfo{{Device: "cd", QDev: "mycd", Removable: true}}
+	m := NewWithProcess(qmpMock, newMockProcessManager(false))
+	require.NoError(t, m.InsertMedia(iso))
+
+	require.NoError(t, m.Reset("On"))
+	assert.Equal(t, []string{"change mycd " + iso + " raw"}, qmpMock.MediumArgs())
 }
 
 // --- Process mode tests ---

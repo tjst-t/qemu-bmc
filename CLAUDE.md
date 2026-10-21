@@ -118,7 +118,7 @@ make container-test-all
 | `ENABLE_KVM` | `true` | Use KVM acceleration (falls back to TCG) |
 | `VNC_PORT` | `5900` | VNC display port |
 | `VM_DISK` | `/vm/disk.qcow2` | VM disk image path |
-| `VM_CDROM` | (empty) | CD-ROM ISO path |
+| `VM_CDROM` | (empty) | ISO initially inserted in the VirtualMedia CD drive (qemu-bmc always adds an empty CD drive; `-cdrom` is turned into it) |
 | `VM_BOOT` | `c` | Boot device (c=disk, d=cdrom, n=network) |
 | `VM_BOOT_MENU_TIMEOUT` | `0` | Boot menu timeout in ms (0=disabled) |
 | `VM_NETWORKS` | (empty) | Comma-separated host interfaces for TAP passthrough (default: eth2+). Needs `/dev/net/tun` (`--device /dev/net/tun`); entrypoint creates it with mknod if missing, else exits with an error |
@@ -140,8 +140,8 @@ make container-test-all
 | GET | `/redfish/v1/Managers/1` | BMC manager |
 | GET | `/redfish/v1/Managers/1/VirtualMedia` | VirtualMedia collection |
 | GET | `/redfish/v1/Managers/1/VirtualMedia/CD1` | VirtualMedia resource |
-| POST | `.../VirtualMedia/CD1/Actions/VirtualMedia.InsertMedia` | Insert ISO |
-| POST | `.../VirtualMedia/CD1/Actions/VirtualMedia.EjectMedia` | Eject ISO |
+| POST | `.../VirtualMedia/CD1/Actions/VirtualMedia.InsertMedia` | Insert ISO (container path `/...` or `file://`; 204, 400 if missing). Kept while off, attached at QEMU start |
+| POST | `.../VirtualMedia/CD1/Actions/VirtualMedia.EjectMedia` | Eject ISO (204) |
 | GET | `/redfish/v1/Chassis` | Chassis collection |
 | GET | `/redfish/v1/Chassis/1` | Chassis resource |
 

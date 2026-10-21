@@ -145,14 +145,14 @@ func TestRedfish_VirtualMedia(t *testing.T) {
 	env := loadTestEnv()
 	client := NewRedfishClient(env.RedfishURL, env.User, env.Pass)
 
-	// Insert media
+	// Insert media (a path in the external QEMU container)
 	resp, err := client.Post(
 		"/redfish/v1/Managers/1/VirtualMedia/CD1/Actions/VirtualMedia.InsertMedia",
-		map[string]string{"Image": "http://example.com/test.iso"},
+		map[string]string{"Image": "/etc/hostname"},
 	)
 	require.NoError(t, err)
 	resp.Body.Close()
-	assert.Equal(t, http.StatusOK, resp.StatusCode)
+	assert.Equal(t, http.StatusNoContent, resp.StatusCode)
 
 	// Verify inserted
 	resp, err = client.Get("/redfish/v1/Managers/1/VirtualMedia/CD1")
@@ -160,7 +160,8 @@ func TestRedfish_VirtualMedia(t *testing.T) {
 	data, err := readJSON(resp)
 	require.NoError(t, err)
 	assert.Equal(t, true, data["Inserted"])
-	assert.Equal(t, "http://example.com/test.iso", data["Image"])
+	assert.Equal(t, "/etc/hostname", data["Image"])
+	assert.Equal(t, "hostname", data["ImageName"])
 
 	// Eject media
 	resp, err = client.Post(
@@ -169,7 +170,7 @@ func TestRedfish_VirtualMedia(t *testing.T) {
 	)
 	require.NoError(t, err)
 	resp.Body.Close()
-	assert.Equal(t, http.StatusOK, resp.StatusCode)
+	assert.Equal(t, http.StatusNoContent, resp.StatusCode)
 
 	// Verify ejected
 	resp, err = client.Get("/redfish/v1/Managers/1/VirtualMedia/CD1")

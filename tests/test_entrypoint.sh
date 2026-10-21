@@ -111,7 +111,7 @@ test_disk_missing_no_error() {
     wait_for_qemu_running 30
     local cmdline
     cmdline=$(container_exec cat /proc/$(get_qemu_pid)/cmdline 2>/dev/null | tr '\0' ' ')
-    assert_not_contains "$cmdline" "-drive" "Missing disk should not add -drive"
+    assert_not_contains "$cmdline" "disk.qcow2" "Missing disk should not add a disk -drive"
 }
 
 test_cdrom_attached() {
@@ -137,7 +137,8 @@ test_cdrom_attached() {
     wait_for_qemu_running 30
     local cmdline
     cmdline=$(container_exec cat /proc/$(get_qemu_pid)/cmdline 2>/dev/null | tr '\0' ' ')
-    assert_contains "$cmdline" "-cdrom" "CD-ROM should be attached with -cdrom"
+    # qemu-bmc turns -cdrom into its VirtualMedia CD drive holding the ISO
+    assert_contains "$cmdline" "media=cdrom,readonly=on,format=raw,file=/iso/test.iso" "CD-ROM should hold VM_CDROM"
     rm -rf "$tmpdir"
 }
 

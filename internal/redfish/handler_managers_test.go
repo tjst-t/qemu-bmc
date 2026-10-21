@@ -2,6 +2,8 @@ package redfish
 
 import (
 	"encoding/json"
+	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -9,6 +11,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"github.com/tjst-t/qemu-bmc/internal/machine"
 	"github.com/tjst-t/qemu-bmc/internal/qmp"
 )
 
@@ -59,88 +62,146 @@ func TestGetVirtualMediaCollection(t *testing.T) {
 	assert.Equal(t, 1, col.MembersCount)
 }
 
-func TestGetVirtualMedia_NotInserted(t *testing.T) {
-	mock := newMockMachine(qmp.StatusRunning)
-	srv := NewServer(mock, "", "", "")
-
+func getVirtualMedia(t *testing.T, srv *Server) map[string]interface{} {
+	t.Helper()
 	req := httptest.NewRequest("GET", "/redfish/v1/Managers/1/VirtualMedia/CD1", nil)
 	w := httptest.NewRecorder()
 	srv.ServeHTTP(w, req)
+	require.Equal(t, http.StatusOK, w.Code)
+	var vm map[string]interface{}
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &vm))
+	return vm
+}
 
-	assert.Equal(t, http.StatusOK, w.Code)
-	var vm VirtualMedia
-	err := json.Unmarshal(w.Body.Bytes(), &vm)
-	require.NoError(t, err)
-	assert.False(t, vm.Inserted)
-	assert.Empty(t, vm.Image)
+func postMediaAction(srv *Server, action, body string) *httptest.ResponseRecorder {
+	req := httptest.NewRequest("POST",
+		"/redfish/v1/Managers/1/VirtualMedia/CD1/Actions/VirtualMedia."+action,
+		strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	srv.ServeHTTP(w, req)
+	return w
+}
+
+func TestGetVirtualMedia_NotInserted(t *testing.T) {
+	srv := NewServer(newMockMachine(qmp.StatusRunning), "", "", "")
+
+	vm := getVirtualMedia(t, srv)
+	assert.Equal(t, "#VirtualMedia.v1_2_0.VirtualMedia", vm["@odata.type"])
+	assert.Equal(t, "/redfish/v1/Managers/1/VirtualMedia/CD1", vm["@odata.id"])
+	assert.NotEmpty(t, vm["@odata.context"])
+	assert.Equal(t, false, vm["Inserted"])
+	assert.Equal(t, "", vm["Image"])
+	assert.Equal(t, "", vm["ImageName"])
+	assert.Equal(t, "NotConnected", vm["ConnectedVia"])
+	assert.Equal(t, true, vm["WriteProtected"])
+	assert.Equal(t, []interface{}{"CD", "DVD"}, vm["MediaTypes"])
+}
+
+func TestGetVirtualMedia_ReadsMachineState(t *testing.T) {
+	mock := newMockMachine(qmp.StatusShutdown)
+	mock.media = machine.Media{Image: "file:///iso/debian.iso", Inserted: true}
+	srv := NewServer(mock, "", "", "")
+
+	vm := getVirtualMedia(t, srv)
+	assert.Equal(t, true, vm["Inserted"])
+	assert.Equal(t, "file:///iso/debian.iso", vm["Image"])
+	assert.Equal(t, "debian.iso", vm["ImageName"])
+	assert.Equal(t, "URI", vm["ConnectedVia"])
+	assert.Equal(t, true, vm["WriteProtected"])
 }
 
 func TestInsertVirtualMedia(t *testing.T) {
 	mock := newMockMachine(qmp.StatusRunning)
 	srv := NewServer(mock, "", "", "")
 
-	body := `{"Image": "http://example.com/boot.iso", "Inserted": true}`
-	req := httptest.NewRequest("POST",
-		"/redfish/v1/Managers/1/VirtualMedia/CD1/Actions/VirtualMedia.InsertMedia",
-		strings.NewReader(body))
-	req.Header.Set("Content-Type", "application/json")
-	w := httptest.NewRecorder()
-	srv.ServeHTTP(w, req)
+	w := postMediaAction(srv, "InsertMedia", `{"Image": "/iso/boot.iso", "Inserted": true}`)
+	assert.Equal(t, http.StatusNoContent, w.Code)
+	assert.Empty(t, w.Body.Bytes())
+	assert.Equal(t, "/iso/boot.iso", mock.LastInsertedMedia())
+}
 
-	assert.Equal(t, http.StatusOK, w.Code)
-	assert.Equal(t, "http://example.com/boot.iso", mock.LastInsertedMedia())
+func TestInsertVirtualMedia_TrailingSlash(t *testing.T) {
+	srv := NewServer(newMockMachine(qmp.StatusRunning), "", "", "")
+
+	w := postMediaAction(srv, "InsertMedia/", `{"Image": "/iso/boot.iso"}`)
+	assert.Equal(t, http.StatusNoContent, w.Code)
 }
 
 func TestInsertVirtualMedia_EmptyImage(t *testing.T) {
 	mock := newMockMachine(qmp.StatusRunning)
 	srv := NewServer(mock, "", "", "")
 
-	body := `{"Image": "", "Inserted": true}`
-	req := httptest.NewRequest("POST",
-		"/redfish/v1/Managers/1/VirtualMedia/CD1/Actions/VirtualMedia.InsertMedia",
-		strings.NewReader(body))
-	req.Header.Set("Content-Type", "application/json")
-	w := httptest.NewRecorder()
-	srv.ServeHTTP(w, req)
-
+	w := postMediaAction(srv, "InsertMedia", `{"Image": "", "Inserted": true}`)
 	assert.Equal(t, http.StatusBadRequest, w.Code)
+	assert.NotContains(t, mock.Calls(), "InsertMedia")
+}
+
+func TestInsertVirtualMedia_MalformedJSON(t *testing.T) {
+	srv := NewServer(newMockMachine(qmp.StatusRunning), "", "", "")
+
+	w := postMediaAction(srv, "InsertMedia", `{`)
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+}
+
+func TestInsertVirtualMedia_InvalidMedia(t *testing.T) {
+	mock := newMockMachine(qmp.StatusRunning)
+	mock.mediaErr = fmt.Errorf("%w: stat /iso/missing.iso: no such file or directory", machine.ErrInvalidMedia)
+	srv := NewServer(mock, "", "", "")
+
+	w := postMediaAction(srv, "InsertMedia", `{"Image": "/iso/missing.iso"}`)
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+	assert.Contains(t, w.Body.String(), "missing.iso")
+	assert.False(t, getVirtualMedia(t, srv)["Inserted"].(bool))
+}
+
+func TestInsertVirtualMedia_QMPError(t *testing.T) {
+	mock := newMockMachine(qmp.StatusRunning)
+	mock.mediaErr = errors.New("no removable CD drive found")
+	srv := NewServer(mock, "", "", "")
+
+	w := postMediaAction(srv, "InsertMedia", `{"Image": "/iso/boot.iso"}`)
+	assert.Equal(t, http.StatusInternalServerError, w.Code)
 }
 
 func TestEjectVirtualMedia(t *testing.T) {
 	mock := newMockMachine(qmp.StatusRunning)
-	mock.lastMedia = "http://example.com/boot.iso"
+	mock.media = machine.Media{Image: "/iso/boot.iso", Inserted: true}
 	srv := NewServer(mock, "", "", "")
 
+	w := postMediaAction(srv, "EjectMedia", `{}`)
+	assert.Equal(t, http.StatusNoContent, w.Code)
+	assert.Contains(t, mock.Calls(), "EjectMedia")
+	assert.False(t, getVirtualMedia(t, srv)["Inserted"].(bool))
+}
+
+func TestEjectVirtualMedia_NoBody(t *testing.T) {
+	srv := NewServer(newMockMachine(qmp.StatusRunning), "", "", "")
+
 	req := httptest.NewRequest("POST",
-		"/redfish/v1/Managers/1/VirtualMedia/CD1/Actions/VirtualMedia.EjectMedia",
-		nil)
+		"/redfish/v1/Managers/1/VirtualMedia/CD1/Actions/VirtualMedia.EjectMedia", nil)
 	w := httptest.NewRecorder()
 	srv.ServeHTTP(w, req)
+	assert.Equal(t, http.StatusNoContent, w.Code)
+}
 
-	assert.Equal(t, http.StatusOK, w.Code)
+func TestEjectVirtualMedia_Error(t *testing.T) {
+	mock := newMockMachine(qmp.StatusRunning)
+	mock.mediaErr = errors.New("QMP error")
+	srv := NewServer(mock, "", "", "")
+
+	w := postMediaAction(srv, "EjectMedia", `{}`)
+	assert.Equal(t, http.StatusInternalServerError, w.Code)
 }
 
 func TestVirtualMedia_InsertThenGet(t *testing.T) {
-	mock := newMockMachine(qmp.StatusRunning)
-	srv := NewServer(mock, "", "", "")
+	srv := NewServer(newMockMachine(qmp.StatusRunning), "", "", "")
 
-	// Insert
-	body := `{"Image": "http://example.com/boot.iso", "Inserted": true}`
-	insertReq := httptest.NewRequest("POST",
-		"/redfish/v1/Managers/1/VirtualMedia/CD1/Actions/VirtualMedia.InsertMedia",
-		strings.NewReader(body))
-	insertReq.Header.Set("Content-Type", "application/json")
-	w1 := httptest.NewRecorder()
-	srv.ServeHTTP(w1, insertReq)
-	assert.Equal(t, http.StatusOK, w1.Code)
+	w := postMediaAction(srv, "InsertMedia", `{"Image": "/iso/boot.iso", "Inserted": true}`)
+	require.Equal(t, http.StatusNoContent, w.Code)
 
-	// Get - should show inserted
-	getReq := httptest.NewRequest("GET", "/redfish/v1/Managers/1/VirtualMedia/CD1", nil)
-	w2 := httptest.NewRecorder()
-	srv.ServeHTTP(w2, getReq)
-
-	var vm VirtualMedia
-	json.Unmarshal(w2.Body.Bytes(), &vm)
-	assert.True(t, vm.Inserted)
-	assert.Equal(t, "http://example.com/boot.iso", vm.Image)
+	vm := getVirtualMedia(t, srv)
+	assert.Equal(t, true, vm["Inserted"])
+	assert.Equal(t, "/iso/boot.iso", vm["Image"])
+	assert.Equal(t, "boot.iso", vm["ImageName"])
 }

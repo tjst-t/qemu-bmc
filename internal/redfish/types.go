@@ -161,16 +161,18 @@ type VirtualMediaCollection struct {
 
 // VirtualMedia represents a virtual media resource
 type VirtualMedia struct {
-	ODataType    string              `json:"@odata.type"`
-	ODataID      string              `json:"@odata.id"`
-	ODataContext string              `json:"@odata.context,omitempty"`
-	ID           string              `json:"Id"`
-	Name         string              `json:"Name"`
-	MediaTypes   []string            `json:"MediaTypes"`
-	Image        string              `json:"Image,omitempty"`
-	Inserted     bool                `json:"Inserted"`
-	ConnectedVia string              `json:"ConnectedVia,omitempty"`
-	Actions      VirtualMediaActions `json:"Actions"`
+	ODataType      string              `json:"@odata.type"`
+	ODataID        string              `json:"@odata.id"`
+	ODataContext   string              `json:"@odata.context,omitempty"`
+	ID             string              `json:"Id"`
+	Name           string              `json:"Name"`
+	MediaTypes     []string            `json:"MediaTypes"`
+	Image          string              `json:"Image"`
+	ImageName      string              `json:"ImageName"`
+	Inserted       bool                `json:"Inserted"`
+	WriteProtected bool                `json:"WriteProtected"`
+	ConnectedVia   string              `json:"ConnectedVia"`
+	Actions        VirtualMediaActions `json:"Actions"`
 }
 
 // VirtualMediaActions contains available actions for virtual media

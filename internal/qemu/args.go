@@ -93,7 +93,8 @@ func ArgValue(args []string, flag string) (string, bool) {
 }
 
 // BuildCommandLine validates user args, applies defaults, and injects
-// qemu-bmc-managed arguments (QMP, serial, display, UUID, NIC MACs).
+// qemu-bmc-managed arguments (QMP, serial, display, UUID, NIC MACs, the
+// VirtualMedia CD drive).
 func BuildCommandLine(userArgs []string, opts BuildOptions) ([]string, error) {
 	if err := ValidateArgs(userArgs); err != nil {
 		return nil, err
@@ -106,6 +107,9 @@ func BuildCommandLine(userArgs []string, opts BuildOptions) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
+
+	// Always provide a CD drive for VirtualMedia
+	args = EnsureCDROM(args)
 
 	// Inject QMP socket
 	args = append(args,
@@ -150,11 +154,15 @@ var bootTargetToQEMU = map[string]string{
 }
 
 // ApplyBootOverride modifies QEMU args to apply a boot target override.
-// If target is "None" or empty, args are returned unchanged.
+// If target is "None" or empty, args are returned unchanged. For "Cd" the
+// managed CD drive also gets bootindex=0, which UEFI requires.
 func ApplyBootOverride(args []string, target string) []string {
 	bootVal, ok := bootTargetToQEMU[target]
 	if !ok {
 		return args
+	}
+	if target == "Cd" {
+		args = setCDBootIndex(args)
 	}
 
 	result := make([]string, 0, len(args)+2)

@@ -226,17 +226,40 @@ func (c *qmpClient) Quit() error {
 	return c.execute("quit", nil)
 }
 
-func (c *qmpClient) BlockdevChangeMedium(device, filename string) error {
+func (c *qmpClient) QueryBlock() ([]BlockInfo, error) {
+	raw, err := c.executeWithResponse("query-block", nil)
+	if err != nil {
+		return nil, err
+	}
+
+	var resp qmpQueryBlockResponse
+	if err := json.Unmarshal(raw, &resp); err != nil {
+		return nil, fmt.Errorf("parsing query-block response: %w", err)
+	}
+	if resp.Error != nil {
+		return nil, fmt.Errorf("QMP error: %s: %s", resp.Error.Class, resp.Error.Desc)
+	}
+	return resp.Return, nil
+}
+
+func (c *qmpClient) BlockdevChangeMedium(id, filename, format string) error {
 	return c.execute("blockdev-change-medium", blockdevChangeMediumArgs{
-		Device:   device,
+		ID:       id,
 		Filename: filename,
+		Format:   format,
 	})
 }
 
-func (c *qmpClient) BlockdevRemoveMedium(device string) error {
-	return c.execute("blockdev-remove-medium", blockdevRemoveMediumArgs{
-		Device: device,
-	})
+func (c *qmpClient) BlockdevOpenTray(id string, force bool) error {
+	return c.execute("blockdev-open-tray", blockdevOpenTrayArgs{ID: id, Force: force})
+}
+
+func (c *qmpClient) BlockdevCloseTray(id string) error {
+	return c.execute("blockdev-close-tray", blockdevIDArgs{ID: id})
+}
+
+func (c *qmpClient) BlockdevRemoveMedium(id string) error {
+	return c.execute("blockdev-remove-medium", blockdevIDArgs{ID: id})
 }
 
 func (c *qmpClient) Close() error {

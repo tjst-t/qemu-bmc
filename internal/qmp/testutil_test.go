@@ -27,6 +27,8 @@ type mockQMPServer struct {
 	listener    net.Listener
 	status      Status
 	lastCommand string
+	lastArgs    map[string]interface{}
+	blocks      []BlockInfo
 	mu          sync.Mutex
 	t           *testing.T
 	done        chan struct{}
@@ -79,13 +81,17 @@ func (m *mockQMPServer) handleConnection(conn net.Conn) {
 	for scanner.Scan() {
 		line := scanner.Text()
 
-		var cmd qmpCommand
+		var cmd struct {
+			Execute   string                 `json:"execute"`
+			Arguments map[string]interface{} `json:"arguments"`
+		}
 		if err := json.Unmarshal([]byte(line), &cmd); err != nil {
 			continue
 		}
 
 		m.mu.Lock()
 		m.lastCommand = cmd.Execute
+		m.lastArgs = cmd.Arguments
 		m.mu.Unlock()
 
 		var response string
@@ -117,8 +123,11 @@ func (m *mockQMPServer) handleConnection(conn net.Conn) {
 			}
 			m.mu.Unlock()
 			response = `{"return": {}}` + "\n"
-		case "blockdev-change-medium", "blockdev-remove-medium":
-			response = `{"return": {}}` + "\n"
+		case "query-block":
+			m.mu.Lock()
+			data, _ := json.Marshal(map[string]interface{}{"return": m.blocks})
+			m.mu.Unlock()
+			response = string(data) + "\n"
 		default:
 			response = `{"return": {}}` + "\n"
 		}
@@ -137,6 +146,18 @@ func (m *mockQMPServer) LastCommand() string {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	return m.lastCommand
+}
+
+func (m *mockQMPServer) LastArgs() map[string]interface{} {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.lastArgs
+}
+
+func (m *mockQMPServer) SetBlocks(blocks []BlockInfo) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.blocks = blocks
 }
 
 func (m *mockQMPServer) Close() {

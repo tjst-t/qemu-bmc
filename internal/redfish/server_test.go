@@ -20,6 +20,8 @@ type mockMachine struct {
 	bootOverride machine.BootOverride
 	calls        []string
 	lastMedia    string
+	media        machine.Media
+	mediaErr     error
 	resetErr     error
 }
 
@@ -80,15 +82,27 @@ func (m *mockMachine) SetBootOverride(override machine.BootOverride) error {
 	return nil
 }
 
+func (m *mockMachine) GetMedia() machine.Media {
+	return m.media
+}
+
 func (m *mockMachine) InsertMedia(image string) error {
 	m.lastMedia = image
 	m.calls = append(m.calls, "InsertMedia")
+	if m.mediaErr != nil {
+		return m.mediaErr
+	}
+	m.media = machine.Media{Image: image, Inserted: true}
 	return nil
 }
 
 func (m *mockMachine) EjectMedia() error {
 	m.lastMedia = ""
 	m.calls = append(m.calls, "EjectMedia")
+	if m.mediaErr != nil {
+		return m.mediaErr
+	}
+	m.media = machine.Media{}
 	return nil
 }
 

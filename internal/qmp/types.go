@@ -18,8 +18,13 @@ type Client interface {
 	Stop() error
 	Cont() error
 	Quit() error
-	BlockdevChangeMedium(device, filename string) error
-	BlockdevRemoveMedium(device string) error
+	QueryBlock() ([]BlockInfo, error)
+	// The id argument of the medium commands is the guest device's qdev ID
+	// or QOM path (BlockInfo.QDev).
+	BlockdevChangeMedium(id, filename, format string) error
+	BlockdevOpenTray(id string, force bool) error
+	BlockdevCloseTray(id string) error
+	BlockdevRemoveMedium(id string) error
 	Close() error
 }
 
@@ -60,11 +65,37 @@ type qmpStatusResponse struct {
 	} `json:"return"`
 }
 
-type blockdevChangeMediumArgs struct {
-	Device   string `json:"device"`
-	Filename string `json:"filename"`
+// BlockInfo is one entry of the query-block result.
+type BlockInfo struct {
+	Device    string         `json:"device"` // legacy drive name; empty for -blockdev
+	QDev      string         `json:"qdev"`   // guest device qdev ID or QOM path
+	Removable bool           `json:"removable"`
+	TrayOpen  bool           `json:"tray_open"`
+	Inserted  *BlockInserted `json:"inserted,omitempty"`
 }
 
-type blockdevRemoveMediumArgs struct {
-	Device string `json:"device"`
+// BlockInserted describes the medium inserted in a block device.
+type BlockInserted struct {
+	File     string `json:"file"`
+	ReadOnly bool   `json:"ro"`
+}
+
+type qmpQueryBlockResponse struct {
+	Return []BlockInfo `json:"return"`
+	Error  *qmpError   `json:"error,omitempty"`
+}
+
+type blockdevChangeMediumArgs struct {
+	ID       string `json:"id"`
+	Filename string `json:"filename"`
+	Format   string `json:"format,omitempty"`
+}
+
+type blockdevOpenTrayArgs struct {
+	ID    string `json:"id"`
+	Force bool   `json:"force,omitempty"`
+}
+
+type blockdevIDArgs struct {
+	ID string `json:"id"`
 }

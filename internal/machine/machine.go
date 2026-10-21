@@ -1,8 +1,12 @@
 package machine
 
 import (
+	"errors"
 	"fmt"
 	"log"
+	"net/url"
+	"os"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -25,9 +29,21 @@ type BootOverride struct {
 	Mode    string // "UEFI", "Legacy"
 }
 
+// Media is the state of the virtual CD drive.
+type Media struct {
+	Image    string // image as requested ("" when ejected)
+	Inserted bool
+}
+
+// ErrInvalidMedia is returned by InsertMedia for an image that cannot be
+// inserted (unsupported scheme, missing file).
+var ErrInvalidMedia = errors.New("invalid media")
+
 // ProcessManager controls the QEMU process lifecycle.
 type ProcessManager interface {
-	Start(bootTarget string) error
+	// Start launches QEMU with the given boot target and CD image ("" =
+	// empty drive).
+	Start(bootTarget, cdImage string) error
 	Stop(timeout time.Duration) error
 	Kill() error
 	IsRunning() bool
@@ -49,7 +65,11 @@ type Machine struct {
 	// runningBootTarget is the boot target the current QEMU process was
 	// started with (process management mode only).
 	runningBootTarget string
-	mu                sync.RWMutex
+	// media is the virtual CD state, kept while QEMU is not running and
+	// applied when it starts. mediaPath is the local path of media.Image.
+	media     Media
+	mediaPath string
+	mu        sync.RWMutex
 
 	// resetMu serializes power actions, including the deferred power-on of
 	// a GracefulRestart. resetGen counts Reset calls so that a pending
@@ -216,9 +236,10 @@ func (m *Machine) resetProcessMode(resetType string) error {
 		}
 		m.mu.RLock()
 		target := m.nextBootTarget()
+		cdImage := m.insertedPath()
 		m.mu.RUnlock()
 
-		if err := m.processManager.Start(target); err != nil {
+		if err := m.processManager.Start(target, cdImage); err != nil {
 			return fmt.Errorf("starting QEMU: %w", err)
 		}
 		m.mu.Lock()
@@ -228,6 +249,7 @@ func (m *Machine) resetProcessMode(resetType string) error {
 		if err := m.waitForQMP(30 * time.Second); err != nil {
 			return fmt.Errorf("waiting for QMP: %w", err)
 		}
+		m.syncMedia(cdImage)
 
 		m.ConsumeBootOnce()
 		return nil
@@ -412,12 +434,184 @@ func (m *Machine) ConsumeBootOnce() {
 	}
 }
 
-// InsertMedia inserts virtual media into the VM
-func (m *Machine) InsertMedia(image string) error {
-	return m.qmpClient.BlockdevChangeMedium("ide0-cd0", image)
+// GetMedia returns the virtual CD state.
+func (m *Machine) GetMedia() Media {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.media
 }
 
-// EjectMedia ejects virtual media from the VM
+// SetInitialMedia records the image the CD drive is configured with on the
+// QEMU command line (e.g. -cdrom) as inserted.
+func (m *Machine) SetInitialMedia(image string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if image == "" {
+		m.media, m.mediaPath = Media{}, ""
+		return
+	}
+	m.media, m.mediaPath = Media{Image: image, Inserted: true}, image
+}
+
+// InsertMedia inserts an image into the virtual CD drive. Only local paths
+// ("/..." or "file://...") are supported. In process management mode the
+// image is kept while QEMU is not running and attached when it starts.
+func (m *Machine) InsertMedia(image string) error {
+	path, err := m.resolveImage(image)
+	if err != nil {
+		return err
+	}
+
+	// Serialize with power actions so a starting QEMU gets the new image
+	m.resetMu.Lock()
+	defer m.resetMu.Unlock()
+
+	if m.qemuRunning() {
+		if err := m.changeMedium(path); err != nil {
+			return fmt.Errorf("inserting media: %w", err)
+		}
+	}
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.media, m.mediaPath = Media{Image: image, Inserted: true}, path
+	return nil
+}
+
+// EjectMedia ejects the virtual CD drive's image.
 func (m *Machine) EjectMedia() error {
-	return m.qmpClient.BlockdevRemoveMedium("ide0-cd0")
+	m.resetMu.Lock()
+	defer m.resetMu.Unlock()
+
+	if m.qemuRunning() {
+		if err := m.ejectMedium(); err != nil {
+			return fmt.Errorf("ejecting media: %w", err)
+		}
+	}
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.media, m.mediaPath = Media{}, ""
+	return nil
+}
+
+// resolveImage returns the local path of a VirtualMedia image.
+func (m *Machine) resolveImage(image string) (string, error) {
+	var path string
+	switch {
+	case strings.HasPrefix(image, "/"):
+		path = image
+	case strings.HasPrefix(image, "file://"):
+		u, err := url.Parse(image)
+		if err != nil || (u.Host != "" && u.Host != "localhost") || !strings.HasPrefix(u.Path, "/") {
+			return "", fmt.Errorf("%w: invalid file URI %q", ErrInvalidMedia, image)
+		}
+		path = u.Path
+	default:
+		return "", fmt.Errorf("%w: unsupported image %q: only local paths (/... or file://...) are supported", ErrInvalidMedia, image)
+	}
+
+	// In legacy mode the path refers to the external QEMU's filesystem
+	if m.processManager != nil {
+		fi, err := os.Stat(path)
+		if err != nil {
+			return "", fmt.Errorf("%w: %v", ErrInvalidMedia, err)
+		}
+		if !fi.Mode().IsRegular() {
+			return "", fmt.Errorf("%w: %s is not a regular file", ErrInvalidMedia, path)
+		}
+	}
+	return path, nil
+}
+
+// insertedPath returns the path of the inserted image, "" if none. Callers
+// must hold m.mu.
+func (m *Machine) insertedPath() string {
+	if !m.media.Inserted {
+		return ""
+	}
+	return m.mediaPath
+}
+
+// qemuRunning reports whether a QEMU process exists to apply media changes
+// to (always in legacy mode).
+func (m *Machine) qemuRunning() bool {
+	return m.processManager == nil || m.processManager.IsRunning()
+}
+
+// findCDDrive returns the QMP id (qdev ID or QOM path) and current medium of
+// the VM's CD drive: the first removable drive, preferring one whose name
+// mentions "cd" (q35 names the -cdrom drive ide2-cd0).
+func (m *Machine) findCDDrive() (id, file string, err error) {
+	blocks, err := m.qmpClient.QueryBlock()
+	if err != nil {
+		return "", "", fmt.Errorf("query-block: %w", err)
+	}
+	var found *qmp.BlockInfo
+	for i := range blocks {
+		b := &blocks[i]
+		if !b.Removable || b.QDev == "" {
+			continue
+		}
+		isCD := strings.Contains(strings.ToLower(b.Device+" "+b.QDev), "cd")
+		if found == nil || isCD {
+			found = b
+		}
+		if isCD {
+			break
+		}
+	}
+	if found == nil {
+		return "", "", errors.New("no removable CD drive found")
+	}
+	if found.Inserted != nil {
+		file = found.Inserted.File
+	}
+	return found.QDev, file, nil
+}
+
+func (m *Machine) changeMedium(path string) error {
+	id, _, err := m.findCDDrive()
+	if err != nil {
+		return err
+	}
+	return m.qmpClient.BlockdevChangeMedium(id, path, "raw")
+}
+
+func (m *Machine) ejectMedium() error {
+	id, _, err := m.findCDDrive()
+	if err != nil {
+		return err
+	}
+	// The tray must be open to remove the medium; force it open even if
+	// the guest has locked it
+	if err := m.qmpClient.BlockdevOpenTray(id, true); err != nil {
+		return err
+	}
+	if err := m.qmpClient.BlockdevRemoveMedium(id); err != nil {
+		return err
+	}
+	return m.qmpClient.BlockdevCloseTray(id)
+}
+
+// syncMedia makes a freshly started QEMU hold the expected CD image. The
+// managed CD drive already got it on the command line; this covers a
+// user-defined CD drive.
+func (m *Machine) syncMedia(path string) {
+	_, current, err := m.findCDDrive()
+	if err != nil {
+		log.Printf("VirtualMedia: %v", err)
+		return
+	}
+	if current == path {
+		return
+	}
+	if path == "" {
+		err = m.ejectMedium()
+	} else {
+		err = m.changeMedium(path)
+	}
+	if err != nil {
+		log.Printf("VirtualMedia: applying media at power on: %v", err)
+	}
 }

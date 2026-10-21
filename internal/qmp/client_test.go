@@ -102,9 +102,62 @@ func TestClient_BlockdevChangeMedium(t *testing.T) {
 	require.NoError(t, err)
 	defer client.Close()
 
-	err = client.BlockdevChangeMedium("ide0-cd0", "/path/to/image.iso")
+	err = client.BlockdevChangeMedium("ide0-cd0", "/path/to/image.iso", "raw")
 	require.NoError(t, err)
 	assert.Equal(t, "blockdev-change-medium", mockQMP.LastCommand())
+	assert.Equal(t, map[string]interface{}{
+		"id": "ide0-cd0", "filename": "/path/to/image.iso", "format": "raw",
+	}, mockQMP.LastArgs())
+}
+
+func TestClient_BlockdevOpenCloseTray(t *testing.T) {
+	socketPath := testSocketPath(t)
+	mockQMP := newMockQMPServer(t, socketPath)
+	defer mockQMP.Close()
+
+	time.Sleep(50 * time.Millisecond)
+
+	client, err := NewClient(socketPath)
+	require.NoError(t, err)
+	defer client.Close()
+
+	require.NoError(t, client.BlockdevOpenTray("ide2-cd0", true))
+	assert.Equal(t, "blockdev-open-tray", mockQMP.LastCommand())
+	assert.Equal(t, map[string]interface{}{"id": "ide2-cd0", "force": true}, mockQMP.LastArgs())
+
+	require.NoError(t, client.BlockdevCloseTray("ide2-cd0"))
+	assert.Equal(t, "blockdev-close-tray", mockQMP.LastCommand())
+	assert.Equal(t, map[string]interface{}{"id": "ide2-cd0"}, mockQMP.LastArgs())
+}
+
+func TestClient_QueryBlock(t *testing.T) {
+	socketPath := testSocketPath(t)
+	mockQMP := newMockQMPServer(t, socketPath)
+	defer mockQMP.Close()
+	mockQMP.SetBlocks([]BlockInfo{
+		{Device: "virtio0", QDev: "/machine/peripheral-anon/device[0]/virtio-backend",
+			Inserted: &BlockInserted{File: "/vm/disk.qcow2"}},
+		{Device: "ide2-cd0", QDev: "/machine/unattached/device[23]", Removable: true,
+			Inserted: &BlockInserted{File: "/iso/a.iso", ReadOnly: true}},
+	})
+
+	time.Sleep(50 * time.Millisecond)
+
+	client, err := NewClient(socketPath)
+	require.NoError(t, err)
+	defer client.Close()
+
+	blocks, err := client.QueryBlock()
+	require.NoError(t, err)
+	assert.Equal(t, "query-block", mockQMP.LastCommand())
+	require.Len(t, blocks, 2)
+	assert.False(t, blocks[0].Removable)
+	assert.Equal(t, "ide2-cd0", blocks[1].Device)
+	assert.Equal(t, "/machine/unattached/device[23]", blocks[1].QDev)
+	assert.True(t, blocks[1].Removable)
+	require.NotNil(t, blocks[1].Inserted)
+	assert.Equal(t, "/iso/a.iso", blocks[1].Inserted.File)
+	assert.True(t, blocks[1].Inserted.ReadOnly)
 }
 
 func TestClient_BlockdevRemoveMedium(t *testing.T) {

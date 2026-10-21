@@ -2,8 +2,12 @@ package redfish
 
 import (
 	"encoding/json"
+	"errors"
 	"log"
 	"net/http"
+	"path"
+
+	"github.com/tjst-t/qemu-bmc/internal/machine"
 )
 
 func (s *Server) handleManagerCollection(w http.ResponseWriter, r *http.Request) {
@@ -45,25 +49,26 @@ func (s *Server) handleVirtualMediaCollection(w http.ResponseWriter, r *http.Req
 }
 
 func (s *Server) handleGetVirtualMedia(w http.ResponseWriter, r *http.Request) {
+	media := s.machine.GetMedia()
 	vm := VirtualMedia{
-		ODataType:    "#VirtualMedia.v1_2_0.VirtualMedia",
-		ODataID:      "/redfish/v1/Managers/1/VirtualMedia/CD1",
-		ODataContext: "/redfish/v1/$metadata#VirtualMedia.VirtualMedia",
-		ID:           "CD1",
-		Name:         "Virtual CD",
-		MediaTypes:   []string{"CD", "DVD"},
-		Image:        s.currentMedia,
-		Inserted:     s.currentMedia != "",
-		ConnectedVia: func() string {
-			if s.currentMedia != "" {
-				return "URI"
-			}
-			return "NotConnected"
-		}(),
+		ODataType:      "#VirtualMedia.v1_2_0.VirtualMedia",
+		ODataID:        "/redfish/v1/Managers/1/VirtualMedia/CD1",
+		ODataContext:   "/redfish/v1/$metadata#VirtualMedia.VirtualMedia",
+		ID:             "CD1",
+		Name:           "Virtual CD",
+		MediaTypes:     []string{"CD", "DVD"},
+		Image:          media.Image,
+		Inserted:       media.Inserted,
+		WriteProtected: true,
+		ConnectedVia:   "NotConnected",
 		Actions: VirtualMediaActions{
 			InsertMedia: VirtualMediaAction{Target: "/redfish/v1/Managers/1/VirtualMedia/CD1/Actions/VirtualMedia.InsertMedia"},
 			EjectMedia:  VirtualMediaAction{Target: "/redfish/v1/Managers/1/VirtualMedia/CD1/Actions/VirtualMedia.EjectMedia"},
 		},
+	}
+	if media.Inserted {
+		vm.ImageName = path.Base(media.Image)
+		vm.ConnectedVia = "URI"
 	}
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(vm)
@@ -77,29 +82,27 @@ func (s *Server) handleInsertMedia(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if req.Image == "" {
-		writeError(w, http.StatusBadRequest, "PropertyMissing", "Image URL is required")
+		writeError(w, http.StatusBadRequest, "ActionParameterMissing", "Image is required")
 		return
 	}
 
-	// Track media state in BMC. QMP insertion is best-effort since
-	// the URL may not be accessible until boot time.
 	if err := s.machine.InsertMedia(req.Image); err != nil {
-		log.Printf("VirtualMedia: QMP insert failed (non-fatal): %v", err)
+		log.Printf("VirtualMedia: InsertMedia %q failed: %v", req.Image, err)
+		if errors.Is(err, machine.ErrInvalidMedia) {
+			writeError(w, http.StatusBadRequest, "ActionParameterValueFormatError", err.Error())
+			return
+		}
+		writeError(w, http.StatusInternalServerError, "InternalError", err.Error())
+		return
 	}
-
-	s.currentMedia = req.Image
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
+	w.WriteHeader(http.StatusNoContent)
 }
 
 func (s *Server) handleEjectMedia(w http.ResponseWriter, r *http.Request) {
 	if err := s.machine.EjectMedia(); err != nil {
-		log.Printf("VirtualMedia: QMP eject failed (non-fatal): %v", err)
+		log.Printf("VirtualMedia: EjectMedia failed: %v", err)
+		writeError(w, http.StatusInternalServerError, "InternalError", err.Error())
+		return
 	}
-
-	s.currentMedia = ""
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
+	w.WriteHeader(http.StatusNoContent)
 }
