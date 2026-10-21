@@ -275,7 +275,7 @@
       "number": 14,
       "kind": "task",
       "title": "管理ネットワークを分けた containerlab のトポロジー例と手順を書く",
-      "status": "ready",
+      "status": "in-progress",
       "parent": "containerlab-bmc",
       "dependsOn": [
         "uuid-redfish-uuid-ipmi-get-system-guid",
@@ -290,7 +290,7 @@
       "refs": [],
       "threads": [],
       "createdAt": "2026-10-20T14:43:42.014Z",
-      "updatedAt": "2026-10-21T07:34:27.095Z",
+      "updatedAt": "2026-10-21T07:34:33.117Z",
       "closedAt": null,
       "extra": {}
     },
