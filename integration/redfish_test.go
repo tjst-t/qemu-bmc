@@ -56,9 +56,22 @@ func TestRedfish_PowerOffOn(t *testing.T) {
 	client := NewRedfishClient(env.RedfishURL, env.User, env.Pass)
 	require.NoError(t, ensurePowerOn(client))
 
-	// GracefulShutdown
+	// GracefulShutdown only sends the ACPI power button event and returns at
+	// once. This QEMU has no guest OS to honor it, so the VM stays on.
+	start := time.Now()
 	resp, err := client.Post("/redfish/v1/Systems/1/Actions/ComputerSystem.Reset", map[string]string{
 		"ResetType": "GracefulShutdown",
+	})
+	require.NoError(t, err)
+	resp.Body.Close()
+	assert.Equal(t, http.StatusNoContent, resp.StatusCode)
+	assert.Less(t, time.Since(start), 5*time.Second)
+	time.Sleep(2 * time.Second)
+	require.NoError(t, waitForPowerState(client, "On", time.Second))
+
+	// ForceOff
+	resp, err = client.Post("/redfish/v1/Systems/1/Actions/ComputerSystem.Reset", map[string]string{
+		"ResetType": "ForceOff",
 	})
 	require.NoError(t, err)
 	resp.Body.Close()

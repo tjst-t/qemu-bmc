@@ -2,6 +2,7 @@ package machine
 
 import (
 	"errors"
+	"sync"
 	"testing"
 	"time"
 
@@ -12,6 +13,7 @@ import (
 
 // mockQMPClient implements qmp.Client for testing
 type mockQMPClient struct {
+	mu         sync.Mutex
 	status     qmp.Status
 	calls      []string
 	connectErr error
@@ -23,6 +25,8 @@ func newMockQMPClient(status qmp.Status) *mockQMPClient {
 }
 
 func (m *mockQMPClient) Connect() error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	m.calls = append(m.calls, "Connect")
 	if m.connectErr != nil {
 		return m.connectErr
@@ -31,6 +35,8 @@ func (m *mockQMPClient) Connect() error {
 }
 
 func (m *mockQMPClient) QueryStatus() (qmp.Status, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	m.calls = append(m.calls, "QueryStatus")
 	if m.queryErr != nil {
 		return "", m.queryErr
@@ -39,39 +45,56 @@ func (m *mockQMPClient) QueryStatus() (qmp.Status, error) {
 }
 
 func (m *mockQMPClient) SystemPowerdown() error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	m.calls = append(m.calls, "SystemPowerdown")
 	return nil
 }
 
 func (m *mockQMPClient) SystemReset() error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	m.calls = append(m.calls, "SystemReset")
+	if m.status == qmp.StatusShutdown {
+		m.status = qmp.StatusPaused // like QEMU: reset leaves a shut-down VM paused
+	}
 	return nil
 }
 
 func (m *mockQMPClient) Stop() error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	m.calls = append(m.calls, "Stop")
 	m.status = qmp.StatusPaused
 	return nil
 }
 
 func (m *mockQMPClient) Cont() error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	m.calls = append(m.calls, "Cont")
 	m.status = qmp.StatusRunning
 	return nil
 }
 
 func (m *mockQMPClient) Quit() error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	m.calls = append(m.calls, "Quit")
 	m.status = qmp.StatusShutdown
 	return nil
 }
 
 func (m *mockQMPClient) BlockdevChangeMedium(device, filename string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	m.calls = append(m.calls, "BlockdevChangeMedium")
 	return nil
 }
 
 func (m *mockQMPClient) BlockdevRemoveMedium(device string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	m.calls = append(m.calls, "BlockdevRemoveMedium")
 	return nil
 }
@@ -81,11 +104,20 @@ func (m *mockQMPClient) Close() error {
 }
 
 func (m *mockQMPClient) Calls() []string {
-	return m.calls
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return append([]string(nil), m.calls...)
+}
+
+func (m *mockQMPClient) setStatus(status qmp.Status) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.status = status
 }
 
 // mockProcessManager implements ProcessManager for testing
 type mockProcessManager struct {
+	mu         sync.Mutex
 	running    bool
 	startCalls []string // boot targets passed to Start
 	calls      []string
@@ -104,6 +136,8 @@ func newMockProcessManager(running bool) *mockProcessManager {
 }
 
 func (m *mockProcessManager) Start(bootTarget string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	m.calls = append(m.calls, "Start")
 	m.startCalls = append(m.startCalls, bootTarget)
 	m.running = true
@@ -112,6 +146,8 @@ func (m *mockProcessManager) Start(bootTarget string) error {
 }
 
 func (m *mockProcessManager) Stop(timeout time.Duration) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	m.calls = append(m.calls, "Stop")
 	m.running = false
 	select {
@@ -123,6 +159,8 @@ func (m *mockProcessManager) Stop(timeout time.Duration) error {
 }
 
 func (m *mockProcessManager) Kill() error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	m.calls = append(m.calls, "Kill")
 	m.running = false
 	select {
@@ -134,17 +172,53 @@ func (m *mockProcessManager) Kill() error {
 }
 
 func (m *mockProcessManager) IsRunning() bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	return m.running
 }
 
 func (m *mockProcessManager) WaitForExit(timeout time.Duration) error {
+	m.mu.Lock()
 	m.calls = append(m.calls, "WaitForExit")
+	ch := m.exitCh
+	m.mu.Unlock()
 	select {
-	case <-m.exitCh:
+	case <-ch:
 		return nil
 	case <-time.After(timeout):
 		return errors.New("timeout")
 	}
+}
+
+func (m *mockProcessManager) Calls() []string {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return append([]string(nil), m.calls...)
+}
+
+func (m *mockProcessManager) StartCalls() []string {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return append([]string(nil), m.startCalls...)
+}
+
+// exit simulates QEMU exiting by itself (e.g. the guest powered off).
+func (m *mockProcessManager) exit() {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.running = false
+	select {
+	case <-m.exitCh:
+	default:
+		close(m.exitCh)
+	}
+}
+
+// newFastMachine shortens the background GracefulRestart wait for tests.
+func newFastMachine(m *Machine, timeout time.Duration) *Machine {
+	m.gracefulTimeout = timeout
+	m.pollInterval = 5 * time.Millisecond
+	return m
 }
 
 // --- Legacy mode tests (existing) ---
@@ -182,7 +256,30 @@ func TestReset_GracefulShutdown(t *testing.T) {
 
 	err := m.Reset("GracefulShutdown")
 	require.NoError(t, err)
-	assert.Contains(t, mock.Calls(), "SystemPowerdown")
+	assert.Equal(t, []string{"SystemPowerdown"}, mock.Calls())
+
+	// A guest ignoring ACPI keeps running: no forced stop
+	state, err := m.GetPowerState()
+	require.NoError(t, err)
+	assert.Equal(t, PowerOn, state)
+
+	// A guest honoring ACPI powers off (QEMU -no-shutdown)
+	mock.setStatus(qmp.StatusShutdown)
+	state, err = m.GetPowerState()
+	require.NoError(t, err)
+	assert.Equal(t, PowerOff, state)
+}
+
+func TestReset_On_AfterGuestShutdown_ResetsBeforeCont(t *testing.T) {
+	mock := newMockQMPClient(qmp.StatusShutdown)
+	m := New(mock)
+
+	require.NoError(t, m.Reset("On"))
+	calls := mock.Calls()
+	assert.Equal(t, []string{"SystemReset", "Cont"}, calls[len(calls)-2:])
+	state, err := m.GetPowerState()
+	require.NoError(t, err)
+	assert.Equal(t, PowerOn, state)
 }
 
 func TestReset_ForceRestart(t *testing.T) {
@@ -194,13 +291,53 @@ func TestReset_ForceRestart(t *testing.T) {
 	assert.Contains(t, mock.Calls(), "SystemReset")
 }
 
-func TestReset_GracefulRestart(t *testing.T) {
+func TestReset_GracefulRestart_GuestPowersOff(t *testing.T) {
 	mock := newMockQMPClient(qmp.StatusRunning)
-	m := New(mock)
+	m := newFastMachine(New(mock), 5*time.Second)
 
-	err := m.Reset("GracefulRestart")
-	require.NoError(t, err)
+	require.NoError(t, m.Reset("GracefulRestart"))
+	assert.Equal(t, []string{"SystemPowerdown"}, mock.Calls())
+
+	// Guest handles ACPI and powers off; the VM is then powered back on
+	mock.setStatus(qmp.StatusShutdown)
+	assert.Eventually(t, func() bool {
+		calls := mock.Calls()
+		return len(calls) >= 2 && calls[len(calls)-1] == "Cont"
+	}, 2*time.Second, 5*time.Millisecond)
 	assert.Contains(t, mock.Calls(), "SystemReset")
+	state, err := m.GetPowerState()
+	require.NoError(t, err)
+	assert.Equal(t, PowerOn, state)
+}
+
+func TestReset_GracefulRestart_GuestIgnoresACPI(t *testing.T) {
+	mock := newMockQMPClient(qmp.StatusRunning)
+	m := newFastMachine(New(mock), 50*time.Millisecond)
+
+	require.NoError(t, m.Reset("GracefulRestart"))
+	time.Sleep(150 * time.Millisecond)
+
+	for _, c := range mock.Calls() {
+		assert.NotContains(t, []string{"Stop", "SystemReset", "Cont", "Quit"}, c)
+	}
+	state, err := m.GetPowerState()
+	require.NoError(t, err)
+	assert.Equal(t, PowerOn, state)
+}
+
+func TestReset_GracefulRestart_SupersededByForceOff(t *testing.T) {
+	mock := newMockQMPClient(qmp.StatusRunning)
+	m := newFastMachine(New(mock), 5*time.Second)
+
+	require.NoError(t, m.Reset("GracefulRestart"))
+	require.NoError(t, m.Reset("ForceOff"))
+	mock.setStatus(qmp.StatusShutdown)
+	time.Sleep(100 * time.Millisecond)
+
+	assert.NotContains(t, mock.Calls(), "Cont")
+	state, err := m.GetPowerState()
+	require.NoError(t, err)
+	assert.Equal(t, PowerOff, state)
 }
 
 func TestReset_InvalidType(t *testing.T) {
@@ -384,8 +521,7 @@ func TestProcessMode_Reset_ForceOff_Quits(t *testing.T) {
 	// Simulate the process exiting shortly after Quit is sent
 	go func() {
 		time.Sleep(50 * time.Millisecond)
-		pm.running = false
-		close(pm.exitCh)
+		pm.exit()
 	}()
 
 	err := m.Reset("ForceOff")
@@ -538,36 +674,109 @@ func TestProcessMode_Reset_ForceRestart_DisabledAfterContinuousRestartsWithDefau
 func TestProcessMode_Reset_GracefulRestart_DisabledIgnoresTarget(t *testing.T) {
 	qmpMock := newMockQMPClient(qmp.StatusRunning)
 	pm := newMockProcessManager(false)
-	m := NewWithProcess(qmpMock, pm)
+	m := newFastMachine(NewWithProcess(qmpMock, pm), 5*time.Second)
 
 	require.NoError(t, m.Reset("On"))
 	require.NoError(t, m.SetBootOverride(BootOverride{Enabled: "Disabled", Target: "Pxe", Mode: "UEFI"}))
 
-	// Simulate the guest powering off after the ACPI request
-	exitCh := pm.exitCh
-	go func() {
-		time.Sleep(50 * time.Millisecond)
-		pm.running = false
-		close(exitCh)
-	}()
-
 	require.NoError(t, m.Reset("GracefulRestart"))
-	assert.Equal(t, []string{"None", "None"}, pm.startCalls)
+	// Simulate the guest powering off after the ACPI request
+	pm.exit()
+	assert.Eventually(t, func() bool {
+		return len(pm.StartCalls()) == 2
+	}, 2*time.Second, 5*time.Millisecond)
+	assert.Equal(t, []string{"None", "None"}, pm.StartCalls())
 }
 
-func TestProcessMode_Reset_GracefulShutdown(t *testing.T) {
+func TestProcessMode_Reset_GracefulShutdown_ReturnsWithoutWaiting(t *testing.T) {
 	qmpMock := newMockQMPClient(qmp.StatusRunning)
 	pm := newMockProcessManager(true)
 	m := NewWithProcess(qmpMock, pm)
 
-	// Close exitCh so WaitForExit returns immediately
-	pm.running = false
-	close(pm.exitCh)
+	start := time.Now()
+	require.NoError(t, m.Reset("GracefulShutdown"))
+	assert.Less(t, time.Since(start), time.Second)
+	assert.Equal(t, []string{"SystemPowerdown"}, qmpMock.Calls())
+	assert.Empty(t, pm.Calls()) // no wait, no Stop/Kill
 
-	err := m.Reset("GracefulShutdown")
+	// Guest ignoring ACPI stays on
+	state, err := m.GetPowerState()
 	require.NoError(t, err)
+	assert.Equal(t, PowerOn, state)
+
+	// Guest honoring ACPI: QEMU exits by itself
+	pm.exit()
+	state, err = m.GetPowerState()
+	require.NoError(t, err)
+	assert.Equal(t, PowerOff, state)
+}
+
+func TestProcessMode_Reset_GracefulRestart_GuestPowersOff(t *testing.T) {
+	qmpMock := newMockQMPClient(qmp.StatusRunning)
+	pm := newMockProcessManager(false)
+	m := newFastMachine(NewWithProcess(qmpMock, pm), 5*time.Second)
+	require.NoError(t, m.Reset("On"))
+
+	start := time.Now()
+	require.NoError(t, m.Reset("GracefulRestart"))
+	assert.Less(t, time.Since(start), time.Second)
 	assert.Contains(t, qmpMock.Calls(), "SystemPowerdown")
-	assert.Contains(t, pm.calls, "WaitForExit")
+	assert.Equal(t, []string{"None"}, pm.StartCalls())
+
+	pm.exit()
+	assert.Eventually(t, func() bool {
+		return len(pm.StartCalls()) == 2 && pm.IsRunning()
+	}, 2*time.Second, 5*time.Millisecond)
+	assert.NotContains(t, pm.Calls(), "Kill")
+}
+
+func TestProcessMode_Reset_GracefulRestart_NoShutdownStatus(t *testing.T) {
+	// With -no-shutdown QEMU stays alive in "shutdown" status
+	qmpMock := newMockQMPClient(qmp.StatusRunning)
+	pm := newMockProcessManager(false)
+	m := newFastMachine(NewWithProcess(qmpMock, pm), 5*time.Second)
+	require.NoError(t, m.Reset("On"))
+
+	require.NoError(t, m.Reset("GracefulRestart"))
+	qmpMock.setStatus(qmp.StatusShutdown)
+	assert.Eventually(t, func() bool {
+		return len(pm.StartCalls()) == 2
+	}, 2*time.Second, 5*time.Millisecond)
+	assert.Contains(t, pm.Calls(), "Stop")
+}
+
+func TestProcessMode_Reset_GracefulRestart_GuestIgnoresACPI(t *testing.T) {
+	qmpMock := newMockQMPClient(qmp.StatusRunning)
+	pm := newMockProcessManager(false)
+	m := newFastMachine(NewWithProcess(qmpMock, pm), 50*time.Millisecond)
+	require.NoError(t, m.Reset("On"))
+
+	require.NoError(t, m.Reset("GracefulRestart"))
+	time.Sleep(150 * time.Millisecond)
+
+	assert.NotContains(t, pm.Calls(), "Stop")
+	assert.NotContains(t, pm.Calls(), "Kill")
+	assert.Equal(t, []string{"None"}, pm.StartCalls())
+	assert.True(t, pm.IsRunning())
+}
+
+func TestProcessMode_Reset_GracefulRestart_SupersededByForceOff(t *testing.T) {
+	qmpMock := newMockQMPClient(qmp.StatusRunning)
+	pm := newMockProcessManager(false)
+	m := newFastMachine(NewWithProcess(qmpMock, pm), 5*time.Second)
+	require.NoError(t, m.Reset("On"))
+
+	require.NoError(t, m.Reset("GracefulRestart"))
+	go func() {
+		time.Sleep(20 * time.Millisecond)
+		pm.exit()
+	}()
+	require.NoError(t, m.Reset("ForceOff"))
+	time.Sleep(100 * time.Millisecond)
+
+	// The user's ForceOff wins: the VM is not powered back on
+	assert.Equal(t, []string{"None"}, pm.StartCalls())
+	assert.False(t, pm.IsRunning())
 }
 
 func TestLegacyMode_Reset_ForceOff_StopsQMP(t *testing.T) {

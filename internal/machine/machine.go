@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/tjst-t/qemu-bmc/internal/qmp"
@@ -33,6 +34,13 @@ type ProcessManager interface {
 	WaitForExit(timeout time.Duration) error
 }
 
+const (
+	// gracefulRestartTimeout bounds how long a GracefulRestart waits in the
+	// background for the guest to power off before giving up.
+	gracefulRestartTimeout = 120 * time.Second
+	gracefulPollInterval   = 500 * time.Millisecond
+)
+
 // Machine manages the state of a QEMU VM
 type Machine struct {
 	qmpClient      qmp.Client
@@ -42,6 +50,15 @@ type Machine struct {
 	// started with (process management mode only).
 	runningBootTarget string
 	mu                sync.RWMutex
+
+	// resetMu serializes power actions, including the deferred power-on of
+	// a GracefulRestart. resetGen counts Reset calls so that a pending
+	// GracefulRestart is abandoned once another power action is requested.
+	resetMu  sync.Mutex
+	resetGen atomic.Uint64
+
+	gracefulTimeout time.Duration
+	pollInterval    time.Duration
 }
 
 // New creates a new Machine with the given QMP client (legacy mode)
@@ -53,6 +70,8 @@ func New(client qmp.Client) *Machine {
 			Target:  "None",
 			Mode:    "UEFI",
 		},
+		gracefulTimeout: gracefulRestartTimeout,
+		pollInterval:    gracefulPollInterval,
 	}
 }
 
@@ -66,6 +85,8 @@ func NewWithProcess(client qmp.Client, pm ProcessManager) *Machine {
 			Target:  "None",
 			Mode:    "UEFI",
 		},
+		gracefulTimeout: gracefulRestartTimeout,
+		pollInterval:    gracefulPollInterval,
 	}
 }
 
@@ -135,8 +156,17 @@ func (m *Machine) getQMPStatusProcess() (qmp.Status, error) {
 	return status, nil
 }
 
-// Reset performs a reset action on the VM
+// Reset performs a reset action on the VM.
+//
+// GracefulShutdown and GracefulRestart only send the ACPI power button event
+// and return; like a physical BMC, the guest powers off afterwards (or not, if
+// it ignores ACPI — the VM is never forced off). GracefulRestart powers the VM
+// back on in the background once the guest has powered off.
 func (m *Machine) Reset(resetType string) error {
+	m.resetMu.Lock()
+	defer m.resetMu.Unlock()
+	m.resetGen.Add(1)
+
 	if m.processManager != nil {
 		return m.resetProcessMode(resetType)
 	}
@@ -153,18 +183,26 @@ func (m *Machine) resetLegacy(resetType string) error {
 		if state == PowerOn {
 			return nil // already on, no-op
 		}
+		if status, err := m.qmpClient.QueryStatus(); err == nil && status == qmp.StatusShutdown {
+			// The guest powered off (QEMU -no-shutdown); QEMU must be reset
+			// before it can run again.
+			if err := m.qmpClient.SystemReset(); err != nil {
+				return err
+			}
+		}
 		return m.qmpClient.Cont()
 	case "ForceOff":
 		return m.qmpClient.Stop()
 	case "GracefulShutdown":
-		// Send ACPI shutdown signal, then stop the VM.
-		// The stop ensures the VM halts even without a guest OS.
-		m.qmpClient.SystemPowerdown()
-		return m.qmpClient.Stop()
+		return m.qmpClient.SystemPowerdown()
 	case "ForceRestart":
 		return m.qmpClient.SystemReset()
 	case "GracefulRestart":
-		return m.qmpClient.SystemReset()
+		if err := m.qmpClient.SystemPowerdown(); err != nil {
+			return err
+		}
+		go m.powerOnAfterGuestPowerOff(m.resetGen.Load())
+		return nil
 	default:
 		return fmt.Errorf("unsupported reset type: %s", resetType)
 	}
@@ -220,28 +258,66 @@ func (m *Machine) resetProcessMode(resetType string) error {
 		return nil
 
 	case "GracefulShutdown":
-		if err := m.qmpClient.SystemPowerdown(); err != nil {
-			return err
-		}
-		if err := m.processManager.WaitForExit(120 * time.Second); err != nil {
-			log.Printf("Graceful shutdown timed out: %v", err)
-		}
-		return nil
+		// QEMU exits by itself once the guest powers off
+		return m.qmpClient.SystemPowerdown()
 
 	case "GracefulRestart":
 		if err := m.qmpClient.SystemPowerdown(); err != nil {
 			return err
 		}
-		if err := m.processManager.WaitForExit(120 * time.Second); err != nil {
-			log.Printf("Graceful shutdown timed out, killing: %v", err)
-			m.processManager.Kill()
-			m.processManager.WaitForExit(5 * time.Second)
-		}
-		return m.resetProcessMode("On")
+		go m.powerOnAfterGuestPowerOff(m.resetGen.Load())
+		return nil
 
 	default:
 		return fmt.Errorf("unsupported reset type: %s", resetType)
 	}
+}
+
+// powerOnAfterGuestPowerOff completes a GracefulRestart: it waits for the
+// guest to power off and then powers the VM on again. It gives up, leaving the
+// VM running, if the guest does not power off in time or another power action
+// (identified by gen) is requested meanwhile.
+func (m *Machine) powerOnAfterGuestPowerOff(gen uint64) {
+	deadline := time.Now().Add(m.gracefulTimeout)
+	for !m.guestPoweredOff() {
+		if m.resetGen.Load() != gen {
+			return
+		}
+		if time.Now().After(deadline) {
+			log.Printf("GracefulRestart: guest did not power off within %s, leaving it running", m.gracefulTimeout)
+			return
+		}
+		time.Sleep(m.pollInterval)
+	}
+
+	m.resetMu.Lock()
+	defer m.resetMu.Unlock()
+	if m.resetGen.Load() != gen {
+		return
+	}
+
+	log.Printf("GracefulRestart: guest powered off, powering on")
+	var err error
+	if m.processManager != nil {
+		// With -no-shutdown QEMU stays alive after the guest powers off
+		if err = m.processManager.Stop(30 * time.Second); err == nil {
+			err = m.resetProcessMode("On")
+		}
+	} else {
+		err = m.resetLegacy("On")
+	}
+	if err != nil {
+		log.Printf("GracefulRestart: powering on failed: %v", err)
+	}
+}
+
+// guestPoweredOff reports whether the guest has powered off.
+func (m *Machine) guestPoweredOff() bool {
+	if m.processManager != nil && !m.processManager.IsRunning() {
+		return true
+	}
+	status, err := m.qmpClient.QueryStatus()
+	return err == nil && status == qmp.StatusShutdown
 }
 
 // bootTargetChanged reports whether the boot target for the next boot differs

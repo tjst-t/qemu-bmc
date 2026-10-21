@@ -252,10 +252,10 @@ IPMI/Redfish 経由でブートデバイスが変更された場合、QEMU 再�
 | Power Off (ForceOff) | QMP `quit` で QEMU プロセスを終了 |
 | Power Cycle | QMP `quit` → QEMU プロセス再起動 |
 | Hard Reset | QMP `system_reset`（プロセス継続） |
-| Graceful Shutdown | QMP `system_powerdown`（ACPI）→ QEMU 自発終了を待機（タイムアウト 120 秒、超過時はログ出力のみで強制終了しない） |
-| Graceful Restart | QMP `system_powerdown` → 終了待機（タイムアウト 120 秒、超過時は強制終了）→ QEMU プロセス再起動 |
+| Graceful Shutdown | QMP `system_powerdown`（ACPI）を送ってすぐ応答する。QEMU はゲストの電源断で自発終了する。強制終了はしない |
+| Graceful Restart | QMP `system_powerdown` を送ってすぐ応答し、裏でゲストの電源断を待つ（120 秒）→ 電源断したら QEMU プロセス再起動。タイムアウト時はログ出力のみで強制終了しない |
 
-注: Graceful Shutdown のタイムアウトは「ゲスト OS がシャットダウンしない」ケースへの対策。タイムアウト後も QEMU プロセスは維持し、ユーザーが ForceOff で明示的に停止する想定（実機 BMC と同じ挙動）。Graceful Restart ではタイムアウト後に強制終了して再起動に進む。
+注: 実機 BMC と同じく、Graceful 系は電源ボタンを押すだけで HTTP 応答を待たせない。ゲスト OS が ACPI に応えない場合は電源 On のまま残り、ユーザーが PowerState を見て ForceOff などで明示的に停止する想定。旧モード（QMP のみ）も同じで、`-no-shutdown` 付き QEMU ではゲスト電源断後に `system_reset` → `cont` で電源 On に戻す。
 
 ### 7.5 電源状態の判定
 
