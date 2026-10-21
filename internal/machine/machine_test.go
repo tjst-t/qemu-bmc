@@ -787,3 +787,17 @@ func TestLegacyMode_Reset_ForceOff_StopsQMP(t *testing.T) {
 	require.NoError(t, err)
 	assert.Contains(t, mock.Calls(), "Stop")
 }
+
+func TestSetBootMode(t *testing.T) {
+	m := NewWithProcess(newMockQMPClient(qmp.StatusRunning), newMockProcessManager(false))
+	assert.Equal(t, "UEFI", m.GetBootOverride().Mode)
+
+	require.NoError(t, m.SetBootMode("Legacy"))
+	b := m.GetBootOverride()
+	assert.Equal(t, "Legacy", b.Mode)
+	assert.Equal(t, "Disabled", b.Enabled)
+	assert.Equal(t, "None", b.Target)
+
+	assert.Error(t, m.SetBootMode("bios"))
+	assert.Equal(t, "Legacy", m.GetBootOverride().Mode)
+}

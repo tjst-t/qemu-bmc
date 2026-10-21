@@ -87,3 +87,13 @@ func getBoolEnv(key string, defaultValue bool) bool {
 		return defaultValue
 	}
 }
+
+// RedfishBootMode maps VM_BOOT_MODE ("bios"/"uefi") to the Redfish
+// BootSourceOverrideMode value ("Legacy"/"UEFI"). Unknown values map to
+// "Legacy", matching entrypoint.sh, which falls back to BIOS.
+func (c *Config) RedfishBootMode() string {
+	if strings.EqualFold(c.VMBootMode, "uefi") {
+		return "UEFI"
+	}
+	return "Legacy"
+}

@@ -365,6 +365,19 @@ func (m *Machine) GetBootOverride() BootOverride {
 	return m.bootOverride
 }
 
+// SetBootMode sets the reported boot mode ("UEFI" or "Legacy") without
+// touching the override target. Used at startup so the reported mode
+// matches the firmware QEMU was configured with (VM_BOOT_MODE).
+func (m *Machine) SetBootMode(mode string) error {
+	if mode != "UEFI" && mode != "Legacy" {
+		return fmt.Errorf("invalid boot mode: %s", mode)
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.bootOverride.Mode = mode
+	return nil
+}
+
 // SetBootOverride sets the boot override settings
 func (m *Machine) SetBootOverride(override BootOverride) error {
 	// Validate target

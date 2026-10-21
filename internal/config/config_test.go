@@ -159,3 +159,10 @@ func TestLoad_VMHardware_QEMUSyntax(t *testing.T) {
 		})
 	}
 }
+
+func TestRedfishBootMode(t *testing.T) {
+	for in, want := range map[string]string{"bios": "Legacy", "uefi": "UEFI", "UEFI": "UEFI", "": "Legacy", "other": "Legacy"} {
+		c := &Config{VMBootMode: in}
+		assert.Equal(t, want, c.RedfishBootMode(), "VM_BOOT_MODE=%q", in)
+	}
+}

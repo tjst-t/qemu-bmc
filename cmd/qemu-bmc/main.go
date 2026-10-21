@@ -70,6 +70,11 @@ func main() {
 		qmpClient = qmp.NewDisconnectedClient(cfg.QMPSocket)
 		pm := qemu.NewProcessManager(cfg.QEMUBinary, cmdArgs, qemu.DefaultCommandFactory)
 		m = machine.NewWithProcess(qmpClient, pm)
+		// Report the firmware QEMU is started with (entrypoint.sh picks
+		// OVMF only for VM_BOOT_MODE=uefi)
+		if err := m.SetBootMode(cfg.RedfishBootMode()); err != nil {
+			log.Fatalf("Invalid VM_BOOT_MODE: %v", err)
+		}
 
 		if cfg.PowerOnAtStart {
 			log.Printf("Starting QEMU: %s %v", cfg.QEMUBinary, cmdArgs)
