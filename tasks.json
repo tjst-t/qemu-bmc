@@ -729,7 +729,7 @@
       "number": 33,
       "kind": "task",
       "title": "電源操作を足す：Redfish の PowerCycle・Nmi・ForceOn・PushPowerButton と IPMI の power diag（NMI）",
-      "status": "ready",
+      "status": "in-progress",
       "parent": "v0-9-0-ironic-metal3-sushy-bmclib-ipmito",
       "dependsOn": [
         "redfish-systems-1-processors-storage-sim"
@@ -743,7 +743,7 @@
       "refs": [],
       "threads": [],
       "createdAt": "2026-10-22T00:37:05.903Z",
-      "updatedAt": "2026-10-22T00:37:05.903Z",
+      "updatedAt": "2026-10-22T01:12:51.572Z",
       "closedAt": null,
       "extra": {}
     },
