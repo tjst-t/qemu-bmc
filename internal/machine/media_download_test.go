@@ -1,10 +1,13 @@
 package machine
 
 import (
+	"bytes"
+	"log"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -448,4 +451,48 @@ func TestCleanStaleDownloads(t *testing.T) {
 
 	left, _ := filepath.Glob(filepath.Join(dir, "*"))
 	assert.Equal(t, []string{filepath.Join(dir, "keep.iso")}, left)
+}
+
+func TestRedactImage(t *testing.T) {
+	assert.Equal(t, "https://user:xxxxx@host/a.iso", RedactImage("https://user:secret@host/a.iso"))
+	assert.Equal(t, "http://user@host/a.iso", RedactImage("http://user@host/a.iso"))
+	assert.Equal(t, "https://host/a%20b.iso?x=1", RedactImage("https://host/a%20b.iso?x=1"))
+	assert.Equal(t, "/iso/a.iso", RedactImage("/iso/a.iso"))
+}
+
+func TestInsertMedia_URL_CredentialsInURL_NotReportedOrLogged(t *testing.T) {
+	var gotUser, gotPass string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotUser, gotPass, _ = r.BasicAuth()
+		if gotPass != "s3cret" {
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
+		w.Write([]byte("iso"))
+	}))
+	defer srv.Close()
+	var logs bytes.Buffer
+	log.SetOutput(&logs)
+	defer log.SetOutput(os.Stderr)
+	m, _ := newDownloadMachine(t, newMockQMPClient(qmp.StatusRunning), newMockProcessManager(false))
+
+	host := strings.TrimPrefix(srv.URL, "http://")
+	require.NoError(t, m.InsertMedia("http://vm:s3cret@"+host+"/boot.iso", "", ""))
+	want := Media{Image: "http://vm:xxxxx@" + host + "/boot.iso", Inserted: true}
+	assert.Equal(t, want, m.GetMedia())
+	require.NotEmpty(t, downloadedPath(t, m))
+	assert.Equal(t, "vm", gotUser)
+	assert.Equal(t, want, m.GetMedia())
+
+	// A failed download (wrong password) is logged without the password too
+	require.NoError(t, m.InsertMedia("http://vm:wr0ng@"+host+"/boot.iso", "", ""))
+	assert.Empty(t, downloadedPath(t, m))
+	// Connection errors include the URL
+	srv.Close()
+	require.NoError(t, m.InsertMedia("http://vm:wr0ng@"+host+"/boot.iso", "", ""))
+	assert.Empty(t, downloadedPath(t, m))
+
+	assert.NotContains(t, logs.String(), "s3cret")
+	assert.NotContains(t, logs.String(), "wr0ng")
+	assert.Contains(t, logs.String(), "vm:xxxxx@")
 }

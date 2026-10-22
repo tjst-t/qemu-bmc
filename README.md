@@ -129,7 +129,7 @@ curl -k -u admin:password -X POST \
 
 - In process management mode (the container), the VM always has a CD drive. It is empty unless `VM_CDROM` is set, in which case that ISO is the initially inserted medium.
 - `Image` is a path inside the container, `/iso/boot.iso` or `file:///iso/boot.iso` (bind-mount the ISO, e.g. `-v ./iso:/iso:ro`), or an `http://` / `https://` URL. A missing `Image`, a nonexistent file or an unsupported scheme returns `400`; InsertMedia and EjectMedia return `204 No Content` on success.
-- An HTTP(S) image is downloaded by qemu-bmc into `VMEDIA_DIR`, then attached (QEMU in the image cannot read URLs itself). InsertMedia returns `204` without waiting for the download; meanwhile `GET` already reports the URL as `Image` with `Inserted: true`. `UserName` / `Password` in the InsertMedia request are sent as HTTP Basic auth. Certificates are not verified unless `VMEDIA_INSECURE_TLS=false` (self-signed servers are common).
+- An HTTP(S) image is downloaded by qemu-bmc into `VMEDIA_DIR`, then attached (QEMU in the image cannot read URLs itself). InsertMedia returns `204` without waiting for the download; meanwhile `GET` already reports the URL as `Image` with `Inserted: true`. `UserName` / `Password` in the InsertMedia request are sent as HTTP Basic auth. Credentials can also be put in the URL (`https://user:pass@host/boot.iso`); the password is then reported as `xxxxx` in `Image` and in the logs. Certificates are not verified unless `VMEDIA_INSECURE_TLS=false` (self-signed servers are common); to verify against your own CA, also mount it and set `SSL_CERT_FILE` (e.g. `-e SSL_CERT_FILE=/certs/ca.pem`).
 - A power on or reset (Redfish `On` / `ForceRestart`, IPMI `chassis power on` / `cycle` / `reset`) during a download is carried out once the download finishes (at most `VMEDIA_TIMEOUT` later), so the VM boots from the ISO. The request itself returns at once; the power state is `PoweringOn` meanwhile, and another power action (e.g. `ForceOff`) cancels it. If the download fails (e.g. `404`), the medium is ejected (`Inserted: false`) and the reason is logged. A download finishing while the VM runs is attached over QMP. Inserting another image or ejecting abandons the download and deletes the previously downloaded file.
 - The medium is kept by qemu-bmc while the VM is powered off and attached when QEMU starts; while the VM is running it is swapped live over QMP.
 - Boot target `Cd` (Redfish `BootSourceOverrideTarget`, IPMI `chassis bootdev cdrom`) boots the inserted ISO in both BIOS and UEFI mode (the CD drive gets `bootindex=0`, which OVMF requires).
@@ -270,7 +270,7 @@ Another power action (Redfish or IPMI) during `PoweringOff` / `PoweringOn` ends 
 | `POWER_ON_AT_START` | `false` | Power on VM automatically at startup (useful for non-MAAS setups) |
 | `GRACEFUL_TIMEOUT` | `120` | Seconds `GracefulShutdown` / `GracefulRestart` (and IPMI `chassis power soft`) report `PoweringOff` before going back to `On` when the guest does not power off |
 | `VMEDIA_DIR` | `/vm/vmedia` if `/vm` is writable, else `/tmp/vmedia` | Where VirtualMedia HTTP(S) images are downloaded. The previous download is deleted when the medium is replaced or ejected, and leftovers from an earlier run (`cd1-*.iso`) are deleted at startup. In legacy mode the external QEMU must be able to read this directory (same filesystem) |
-| `VMEDIA_INSECURE_TLS` | `true` | Skip certificate verification when downloading HTTPS images |
+| `VMEDIA_INSECURE_TLS` | `true` | Skip certificate verification when downloading HTTPS images. With `false`, the system CAs are used; add your own CA with `SSL_CERT_FILE` |
 | `VMEDIA_TIMEOUT` | `600` | Seconds a power on or reset requested during a VirtualMedia download waits for it before booting without the image |
 | `SYSTEM_UUID` | (derived) | Fixed system UUID, passed to QEMU as `-uuid` and reported by Redfish `Systems/1` `UUID` and IPMI `mc guid`. If unset, it is read from `SYSTEM_UUID_FILE`, or derived from the hostname and saved there. Set it (or use a fixed `--hostname` / a mounted `/vm`) to keep it across container re-creation |
 | `SYSTEM_UUID_FILE` | `<VM_DISK dir>/system-uuid` | Where a derived UUID is persisted |
@@ -475,7 +475,7 @@ curl -k -u admin:password -X POST \
 
 - プロセス管理モード（コンテナ）では、VM に CD ドライブが常に付く。`VM_CDROM` が無ければ空、あればその ISO が最初に差さった状態になる。
 - `Image` はコンテナ内のパス（`/iso/boot.iso` または `file:///iso/boot.iso`。ISO はバインドマウントする（例: `-v ./iso:/iso:ro`））か、`http://` / `https://` の URL。`Image` が空・ファイルが無い・未対応の形式なら `400`。InsertMedia・EjectMedia は成功すると `204 No Content`。
-- HTTP(S) の URL は qemu-bmc が `VMEDIA_DIR` へダウンロードしてから差す（イメージの QEMU は URL を直接読めない）。InsertMedia はダウンロードを待たずに `204` を返し、ダウンロード中も `GET` は `Image` に URL、`Inserted: true` を返す。InsertMedia の `UserName` / `Password` は HTTP の Basic 認証に使う。自己署名のサーバが多いので、`VMEDIA_INSECURE_TLS=false` にしない限り証明書は検証しない。
+- HTTP(S) の URL は qemu-bmc が `VMEDIA_DIR` へダウンロードしてから差す（イメージの QEMU は URL を直接読めない）。InsertMedia はダウンロードを待たずに `204` を返し、ダウンロード中も `GET` は `Image` に URL、`Inserted: true` を返す。InsertMedia の `UserName` / `Password` は HTTP の Basic 認証に使う。URL に認証情報を書いてもよい（`https://user:pass@host/boot.iso`）。そのときパスワードは `Image` とログでは `xxxxx` に伏せる。自己署名のサーバが多いので、`VMEDIA_INSECURE_TLS=false` にしない限り証明書は検証しない。自前の CA で検証するなら、CA をマウントして `SSL_CERT_FILE` を指す（例 `-e SSL_CERT_FILE=/certs/ca.pem`）。
 - ダウンロード中に電源オン・リセット（Redfish の `On` / `ForceRestart`、IPMI の `chassis power on` / `cycle` / `reset`）が来たら、ダウンロードが終わってから（最大 `VMEDIA_TIMEOUT` 待つ）実行するので、ISO から起動できる。要求そのものはすぐ返り、その間の電源状態は `PoweringOn`。別の電源操作（`ForceOff` など）が来たら取りやめる。ダウンロードに失敗したら（`404` など）中身を外し（`Inserted: false`）、理由をログに出す。VM が動いている間に終わったら QMP で差す。別のイメージを差す・Eject すると、ダウンロードはやめ、前に落としたファイルは消す。
 - 差した中身は電源オフ中も qemu-bmc が覚えていて、QEMU を起動するときに付ける。VM が動いていれば QMP でその場で差し替える。
 - 起動先 `Cd`（Redfish の `BootSourceOverrideTarget`、IPMI の `chassis bootdev cdrom`）で、差した ISO から起動する。BIOS・UEFI のどちらでも動く（UEFI（OVMF）のため CD ドライブに `bootindex=0` を付ける）。
@@ -615,7 +615,7 @@ ipmitool user enable 3
 | `POWER_ON_AT_START` | `false` | 起動時に VM を自動的に電源オンにする（MAAS を使わない構成で有用） |
 | `GRACEFUL_TIMEOUT` | `120` | `GracefulShutdown` / `GracefulRestart`（と IPMI `chassis power soft`）でゲストが電源を切らないとき、`PoweringOff` から `On` に戻すまでの秒数 |
 | `VMEDIA_DIR` | `/vm` が書ければ `/vm/vmedia`、無理なら `/tmp/vmedia` | VirtualMedia の HTTP(S) イメージの保存先。差し替え・Eject で前に落としたファイルは消し、前の起動の残り（`cd1-*.iso`）は起動時に消す。レガシーモードでは外の QEMU がこのディレクトリを読める（同じファイルシステム）必要がある |
-| `VMEDIA_INSECURE_TLS` | `true` | HTTPS のイメージを落とすとき証明書を検証しない |
+| `VMEDIA_INSECURE_TLS` | `true` | HTTPS のイメージを落とすとき証明書を検証しない。`false` ならシステムの CA で検証する。自前の CA は `SSL_CERT_FILE` で足す |
 | `VMEDIA_TIMEOUT` | `600` | ダウンロード中に電源オン・リセットが来たとき、終わるまで待つ秒数（過ぎたら ISO 無しで起動） |
 | `SYSTEM_UUID` | （導出） | システム UUID を固定する。QEMU に `-uuid` で渡し、Redfish `Systems/1` の `UUID` と IPMI `mc guid` で返す。未指定なら `SYSTEM_UUID_FILE` から読み、無ければホスト名から導出してそこへ保存する。コンテナを作り直しても保つには、これを指定するか、`--hostname` を固定するか、`/vm` をマウントする |
 | `SYSTEM_UUID_FILE` | `<VM_DISK のディレクトリ>/system-uuid` | 導出した UUID の保存先 |

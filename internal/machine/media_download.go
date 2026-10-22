@@ -72,6 +72,23 @@ func (m *Machine) CleanStaleDownloads() {
 	}
 }
 
+// RedactImage hides the password of an http(s) URL that carries credentials
+// ("https://user:pass@host/x" becomes "https://user:xxxxx@host/x"), for logs and
+// the reported Image. Other images are returned unchanged.
+func RedactImage(image string) string {
+	if !isHTTPImage(image) {
+		return image
+	}
+	u, err := url.Parse(image)
+	if err != nil || u.User == nil {
+		return image
+	}
+	if _, ok := u.User.Password(); !ok {
+		return image
+	}
+	return u.Redacted()
+}
+
 func isHTTPImage(image string) bool {
 	lower := strings.ToLower(image)
 	return strings.HasPrefix(lower, "http://") || strings.HasPrefix(lower, "https://")
@@ -83,21 +100,24 @@ func isHTTPImage(image string) bool {
 func (m *Machine) insertURL(image, username, password string) error {
 	u, err := url.Parse(image)
 	if err != nil || u.Host == "" {
-		return fmt.Errorf("%w: invalid URL %q", ErrInvalidMedia, image)
+		return fmt.Errorf("%w: invalid URL %q", ErrInvalidMedia, RedactImage(image))
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
 	dl := &mediaDownload{done: make(chan struct{}), cancel: cancel}
 
+	// Report the URL without its password (sent as Basic auth by the client)
+	shown := RedactImage(image)
+
 	m.mu.Lock()
-	old := m.replaceMediaLocked(Media{Image: image, Inserted: true}, "", "")
+	old := m.replaceMediaLocked(Media{Image: shown, Inserted: true}, "", "")
 	m.download = dl
 	gen := m.mediaGen
 	opts := m.vmedia
 	m.mu.Unlock()
 	removeMediaFile(old)
 
-	go m.runDownload(ctx, dl, gen, image, username, password, opts)
+	go m.runDownload(ctx, dl, gen, image, shown, username, password, opts)
 	// Take the previous image out of a running QEMU right away. Done in the
 	// background: a power on waiting for a download holds resetMu.
 	go m.applyMediaLocked()
@@ -128,9 +148,10 @@ func removeMediaFile(path string) {
 }
 
 // runDownload downloads image for media generation gen and records the
-// result, unless the media was replaced in the meantime.
-func (m *Machine) runDownload(ctx context.Context, dl *mediaDownload, gen uint64, image, username, password string, opts MediaOptions) {
-	log.Printf("VirtualMedia: downloading %s to %s", image, opts.Dir)
+// result, unless the media was replaced in the meantime. shown is image
+// without its password, for logs.
+func (m *Machine) runDownload(ctx context.Context, dl *mediaDownload, gen uint64, image, shown, username, password string, opts MediaOptions) {
+	log.Printf("VirtualMedia: downloading %s to %s", shown, opts.Dir)
 	start := time.Now()
 	path, err := downloadImage(ctx, opts, gen, image, username, password)
 
@@ -144,10 +165,10 @@ func (m *Machine) runDownload(ctx context.Context, dl *mediaDownload, gen uint64
 	}
 	m.download = nil
 	if err != nil {
-		log.Printf("VirtualMedia: download of %s failed, ejecting: %v", image, err)
+		log.Printf("VirtualMedia: download of %s failed, ejecting: %v", shown, err)
 		m.media, m.mediaPath = Media{}, ""
 	} else {
-		log.Printf("VirtualMedia: downloaded %s to %s in %s", image, path, time.Since(start).Round(time.Millisecond))
+		log.Printf("VirtualMedia: downloaded %s to %s in %s", shown, path, time.Since(start).Round(time.Millisecond))
 		m.mediaPath, m.mediaFile = path, path
 	}
 	m.mu.Unlock()
