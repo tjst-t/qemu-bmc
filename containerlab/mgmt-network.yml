@@ -19,7 +19,7 @@ topology:
     node1:
       # Published image. To try a local build, run `make docker-build`
       # and use qemu-bmc:latest instead.
-      image: ghcr.io/tjst-t/qemu-bmc:0.8
+      image: ghcr.io/tjst-t/qemu-bmc:0.9
       devices:
         - /dev/net/tun  # needed for the VM NIC (eth2 is passed through)
       env:
@@ -34,7 +34,7 @@ topology:
         - ip addr add 192.168.100.11/24 dev eth1
 
     node2:
-      image: ghcr.io/tjst-t/qemu-bmc:0.8
+      image: ghcr.io/tjst-t/qemu-bmc:0.9
       devices:
         - /dev/net/tun
       env:

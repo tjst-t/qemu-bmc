@@ -5,7 +5,7 @@
 | `example.yml` | 2 nodes that boot their own disk (or an ISO), BMC (Redfish/noVNC, IPMI) published on the host, VM NICs on a data link |
 | `mgmt-network.yml` | BMC management network separated from the VM data network, with an operator container and fixed UUIDs/MACs |
 
-Both use the published image `ghcr.io/tjst-t/qemu-bmc:0.8` (the latest 0.8.x release). To try a local build, run `make docker-build` and change `image:` to `qemu-bmc:latest`.
+Both use the published image `ghcr.io/tjst-t/qemu-bmc:0.9` (the latest 0.9.x release). To try a local build, run `make docker-build` and change `image:` to `qemu-bmc:latest`.
 
 ## example.yml
 
@@ -101,7 +101,7 @@ sudo containerlab destroy -t containerlab/mgmt-network.yml --cleanup
 
 ## 日本語
 
-どちらの例も公開イメージ `ghcr.io/tjst-t/qemu-bmc:0.8`（0.8.x の最新）を使います。手元でビルドしたものを試すときは `make docker-build` のあと `image:` を `qemu-bmc:latest` に変えてください。
+どちらの例も公開イメージ `ghcr.io/tjst-t/qemu-bmc:0.9`（0.9.x の最新）を使います。手元でビルドしたものを試すときは `make docker-build` のあと `image:` を `qemu-bmc:latest` に変えてください。
 
 ### example.yml
 
