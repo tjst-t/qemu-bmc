@@ -618,7 +618,7 @@
       "number": 28,
       "kind": "task",
       "title": "README の「イン・バンドで作ったユーザーは Redfish 認証でも使える」が実際と違う",
-      "status": "ready",
+      "status": "in-progress",
       "parent": "v0-9-0-ironic-metal3-sushy-bmclib-ipmito",
       "dependsOn": [
         "redfish-powercycle-nmi-forceon-pushpower"
@@ -632,7 +632,7 @@
       "refs": [],
       "threads": [],
       "createdAt": "2026-10-22T00:25:02.816Z",
-      "updatedAt": "2026-10-22T00:37:24.625Z",
+      "updatedAt": "2026-10-22T01:17:03.060Z",
       "closedAt": null,
       "extra": {}
     },
