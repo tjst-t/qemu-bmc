@@ -612,6 +612,27 @@
       "updatedAt": "2026-10-21T16:09:53.962Z",
       "closedAt": "2026-10-21T16:09:53.962Z",
       "extra": {}
+    },
+    {
+      "id": "readme-redfish",
+      "number": 28,
+      "kind": "bug",
+      "title": "README の「イン・バンドで作ったユーザーは Redfish 認証でも使える」が実際と違う",
+      "status": "backlog",
+      "parent": null,
+      "dependsOn": [],
+      "milestone": null,
+      "priority": "low",
+      "labels": [],
+      "body": "README（英語 177 行目付近・日本語の VM IPMI 節）は「Users created in-band are automatically available for out-of-band IPMI and Redfish authentication」と書いている。しかし Redfish の認証（internal/redfish/middleware.go の validCredentials）は IPMI_USER / IPMI_PASS の1組しか見ておらず、bmc.State のユーザーを参照していない。2026-10-22 のセッション認証の実装中に気づいた。\n\n直し方の候補：(a) Redfish の認証（Basic・セッションのログイン）で bmc.State のユーザーも受け付ける、(b) README の記述を IPMI だけに直す。",
+      "doneWhen": "README の記述と Redfish の認証の動きが一致している（(a) なら in-band で作ったユーザーで Redfish の Basic 認証とセッションのログインが通る試験がある）",
+      "resolution": null,
+      "refs": [],
+      "threads": [],
+      "createdAt": "2026-10-22T00:25:02.816Z",
+      "updatedAt": "2026-10-22T00:25:02.816Z",
+      "closedAt": null,
+      "extra": {}
     }
   ]
 }
