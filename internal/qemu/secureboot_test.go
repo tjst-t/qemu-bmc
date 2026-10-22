@@ -38,8 +38,9 @@ func pflashArgs(code, vars string) []string {
 func TestFindSecureBootFirmware_2M(t *testing.T) {
 	fw, ok := FindSecureBootFirmware(pflashArgs("/usr/share/OVMF/OVMF_CODE.fd", "/vm/OVMF_VARS.fd"))
 	require.True(t, ok)
-	assert.Equal(t, "/usr/share/OVMF/OVMF_CODE.secboot.fd", fw.Code)
-	assert.Equal(t, "/usr/share/OVMF/OVMF_VARS.ms.fd", fw.VarsTemplate)
+	// The 4M build also for 2M code (Debian's 2M secboot build hangs)
+	assert.Equal(t, "/usr/share/OVMF/OVMF_CODE_4M.secboot.fd", fw.Code)
+	assert.Equal(t, "/usr/share/OVMF/OVMF_VARS_4M.ms.fd", fw.VarsTemplate)
 	assert.Equal(t, "/vm/OVMF_VARS.secboot.fd", fw.Vars)
 }
 
@@ -65,21 +66,22 @@ func TestFindSecureBootFirmware_NotOVMF(t *testing.T) {
 }
 
 func TestSecureBootFirmware_Check(t *testing.T) {
-	ovmf, vm := ovmfDirs(t, "OVMF_CODE.fd", "OVMF_VARS.fd", "OVMF_CODE.secboot.fd", "OVMF_VARS.ms.fd")
+	ovmf, vm := ovmfDirs(t, "OVMF_CODE.fd", "OVMF_VARS.fd", "OVMF_CODE_4M.secboot.fd", "OVMF_VARS_4M.ms.fd")
 	fw, ok := FindSecureBootFirmware(pflashArgs(filepath.Join(ovmf, "OVMF_CODE.fd"), filepath.Join(vm, "OVMF_VARS.fd")))
 	require.True(t, ok)
 	assert.NoError(t, fw.Check())
 
-	// Only the 2M files exist
-	fw4M, ok := FindSecureBootFirmware(pflashArgs(filepath.Join(ovmf, "OVMF_CODE_4M.fd"), filepath.Join(vm, "OVMF_VARS.fd")))
+	// Only the 2M secboot files exist
+	ovmf2M, _ := ovmfDirs(t, "OVMF_CODE.fd", "OVMF_CODE.secboot.fd", "OVMF_VARS.ms.fd")
+	fw2M, ok := FindSecureBootFirmware(pflashArgs(filepath.Join(ovmf2M, "OVMF_CODE.fd"), filepath.Join(vm, "OVMF_VARS.fd")))
 	require.True(t, ok)
-	err := fw4M.Check()
+	err := fw2M.Check()
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "OVMF_CODE_4M.secboot.fd")
 }
 
 func TestSecureBootFirmware_PrepareVars_CopiesTemplateOnce(t *testing.T) {
-	ovmf, vm := ovmfDirs(t, "OVMF_CODE.secboot.fd", "OVMF_VARS.ms.fd")
+	ovmf, vm := ovmfDirs(t, "OVMF_CODE_4M.secboot.fd", "OVMF_VARS_4M.ms.fd")
 	writeFile(t, filepath.Join(vm, "OVMF_VARS.fd"), "plain vars")
 	fw, ok := FindSecureBootFirmware(pflashArgs(filepath.Join(ovmf, "OVMF_CODE.fd"), filepath.Join(vm, "OVMF_VARS.fd")))
 	require.True(t, ok)
@@ -87,13 +89,13 @@ func TestSecureBootFirmware_PrepareVars_CopiesTemplateOnce(t *testing.T) {
 	require.NoError(t, fw.PrepareVars())
 	data, err := os.ReadFile(filepath.Join(vm, "OVMF_VARS.secboot.fd"))
 	require.NoError(t, err)
-	assert.Equal(t, "OVMF_VARS.ms.fd", string(data))
+	assert.Equal(t, "OVMF_VARS_4M.ms.fd", string(data))
 
 	// An existing copy (with the guest's changes) is kept
-	writeFile(t, fw.Vars, "changed by the guest")
+	writeFile(t, fw.Vars, "changed by guest!!") // same size as the template
 	require.NoError(t, fw.PrepareVars())
 	data, _ = os.ReadFile(fw.Vars)
-	assert.Equal(t, "changed by the guest", string(data))
+	assert.Equal(t, "changed by guest!!", string(data))
 
 	// The plain VARS is untouched
 	data, _ = os.ReadFile(filepath.Join(vm, "OVMF_VARS.fd"))
@@ -104,7 +106,7 @@ func TestSecureBootFirmware_PrepareVars_CopiesTemplateOnce(t *testing.T) {
 	require.NoError(t, fw.ResetVars()) // already removed
 	require.NoError(t, fw.PrepareVars())
 	data, _ = os.ReadFile(fw.Vars)
-	assert.Equal(t, "OVMF_VARS.ms.fd", string(data))
+	assert.Equal(t, "OVMF_VARS_4M.ms.fd", string(data))
 }
 
 func TestSecureBootFirmware_Apply(t *testing.T) {
@@ -136,14 +138,14 @@ func TestSecureBootFirmware_Apply_ReplacesSMMOff(t *testing.T) {
 }
 
 func TestProcessManager_Start_SecureBoot(t *testing.T) {
-	ovmf, vm := ovmfDirs(t, "OVMF_CODE.fd", "OVMF_CODE.secboot.fd", "OVMF_VARS.ms.fd")
+	ovmf, vm := ovmfDirs(t, "OVMF_CODE.fd", "OVMF_CODE_4M.secboot.fd", "OVMF_VARS_4M.ms.fd")
 	f := &trackingFactory{}
 	base := EnsureCDROM(pflashArgs(filepath.Join(ovmf, "OVMF_CODE.fd"), filepath.Join(vm, "OVMF_VARS.fd")))
 	pm := NewProcessManager("qemu-system-x86_64", base, f.create)
 	require.NoError(t, pm.Start("Cd", "/vm/cd.iso", "", true))
 	defer pm.Kill()
 
-	assert.Contains(t, f.lastArgs, "if=pflash,format=raw,readonly=on,file="+filepath.Join(ovmf, "OVMF_CODE.secboot.fd"))
+	assert.Contains(t, f.lastArgs, "if=pflash,format=raw,readonly=on,file="+filepath.Join(ovmf, "OVMF_CODE_4M.secboot.fd"))
 	assert.Contains(t, f.lastArgs, "if=pflash,format=raw,file="+filepath.Join(vm, "OVMF_VARS.secboot.fd"))
 	assert.Contains(t, f.lastArgs, "q35,accel=kvm,smm=on")
 	assert.Contains(t, f.lastArgs, "driver=cfi.pflash01,property=secure,value=on")
@@ -170,11 +172,23 @@ func TestProcessManager_Start_SecureBootFirmwareMissing(t *testing.T) {
 	pm := NewProcessManager("qemu-system-x86_64", pflashArgs(filepath.Join(ovmf, "OVMF_CODE.fd"), filepath.Join(vm, "OVMF_VARS.fd")), f.create)
 	err := pm.Start("", "", "", true)
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "OVMF_CODE.secboot.fd")
+	assert.Contains(t, err.Error(), "OVMF_CODE_4M.secboot.fd")
 	assert.False(t, pm.IsRunning())
 	assert.Nil(t, f.lastArgs)
 
 	// BIOS
 	pm = NewProcessManager("qemu-system-x86_64", []string{"-m", "2048"}, f.create)
 	assert.Error(t, pm.Start("", "", "", true))
+}
+
+func TestSecureBootFirmware_PrepareVars_ReplacesVarsOfAnotherSize(t *testing.T) {
+	ovmf, vm := ovmfDirs(t, "OVMF_CODE_4M.secboot.fd", "OVMF_VARS_4M.ms.fd")
+	fw, ok := FindSecureBootFirmware(pflashArgs(filepath.Join(ovmf, "OVMF_CODE.fd"), filepath.Join(vm, "OVMF_VARS.fd")))
+	require.True(t, ok)
+	// e.g. copied from the 2M template by an earlier build
+	writeFile(t, fw.Vars, "2M")
+	require.NoError(t, fw.PrepareVars())
+	data, err := os.ReadFile(fw.Vars)
+	require.NoError(t, err)
+	assert.Equal(t, "OVMF_VARS_4M.ms.fd", string(data))
 }

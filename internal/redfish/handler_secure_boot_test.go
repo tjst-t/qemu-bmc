@@ -115,10 +115,10 @@ func TestPatchSecureBoot_Invalid(t *testing.T) {
 
 func TestPatchSecureBoot_FirmwareMissing(t *testing.T) {
 	srv, mock := newSecureBootServer(machine.SecureBoot{})
-	mock.secureBootErr = errors.New("Secure Boot OVMF not available: OVMF_CODE.secboot.fd: no such file")
+	mock.secureBootErr = errors.New("Secure Boot OVMF not available: OVMF_CODE_4M.secboot.fd: no such file")
 	w := serve(srv, "PATCH", "/redfish/v1/Systems/1/SecureBoot", `{"SecureBootEnable": true}`)
 	assert.Equal(t, http.StatusBadRequest, w.Code)
-	assert.Contains(t, w.Body.String(), "OVMF_CODE.secboot.fd")
+	assert.Contains(t, w.Body.String(), "OVMF_CODE_4M.secboot.fd")
 	assert.False(t, mock.secureBoot.Enable)
 }
 

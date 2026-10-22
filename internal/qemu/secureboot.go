@@ -12,8 +12,8 @@ import (
 // SecureBootFirmware is the Secure Boot variant of the OVMF on a QEMU
 // command line (see FindSecureBootFirmware).
 type SecureBootFirmware struct {
-	Code         string // Secure Boot OVMF code (OVMF_CODE[_4M].secboot.fd)
-	VarsTemplate string // VARS with the Microsoft keys enrolled (OVMF_VARS[_4M].ms.fd)
+	Code         string // Secure Boot OVMF code (OVMF_CODE_4M.secboot.fd)
+	VarsTemplate string // VARS with the Microsoft keys enrolled (OVMF_VARS_4M.ms.fd)
 	Vars         string // VARS used for Secure Boot, copied from VarsTemplate
 
 	codePos, varsPos int // indexes of the pflash -drive values in args
@@ -22,8 +22,8 @@ type SecureBootFirmware struct {
 // FindSecureBootFirmware finds the OVMF pflash drives in args (-drive
 // if=pflash with an OVMF_CODE*.fd file, and the other pflash drive holding
 // its VARS) and returns their Secure Boot counterparts: the secboot code and
-// the Microsoft-keys VARS template in the code's directory (the 4M variants
-// for OVMF_CODE_4M*), and a VARS file next to the current one
+// the Microsoft-keys VARS template in the code's directory, and a VARS file
+// next to the current one
 // (OVMF_VARS.fd → OVMF_VARS.secboot.fd). ok is false without OVMF pflash
 // drives. The files are not checked (see Check).
 func FindSecureBootFirmware(args []string) (fw SecureBootFirmware, ok bool) {
@@ -35,12 +35,14 @@ func FindSecureBootFirmware(args []string) (fw SecureBootFirmware, ok bool) {
 		file := optionValue(args[i+1], "file")
 		if base := filepath.Base(file); fw.codePos < 0 && strings.HasPrefix(base, "OVMF_CODE") && strings.HasSuffix(base, ".fd") {
 			fw.codePos = i + 1
-			dir, variant := filepath.Dir(file), ""
-			if strings.HasPrefix(base, "OVMF_CODE_4M") {
-				variant = "_4M"
-			}
-			fw.Code = filepath.Join(dir, "OVMF_CODE"+variant+".secboot.fd")
-			fw.VarsTemplate = filepath.Join(dir, "OVMF_VARS"+variant+".ms.fd")
+			// Always the 4M build, also for a 2M OVMF_CODE.fd: Debian's
+			// 2M OVMF_CODE.secboot.fd hangs before any output under QEMU
+			// with SMM (Debian ovmf 2022.11), the 4M one boots. The Secure
+			// Boot VARS is a separate file, so the sizes need not match
+			// the plain firmware's.
+			dir := filepath.Dir(file)
+			fw.Code = filepath.Join(dir, "OVMF_CODE_4M.secboot.fd")
+			fw.VarsTemplate = filepath.Join(dir, "OVMF_VARS_4M.ms.fd")
 		} else if fw.varsPos < 0 && file != "" {
 			fw.varsPos = i + 1
 			fw.Vars = strings.TrimSuffix(file, ".fd") + ".secboot.fd"
@@ -63,10 +65,15 @@ func (fw SecureBootFirmware) Check() error {
 	return nil
 }
 
-// PrepareVars copies the VARS template to Vars unless it exists.
+// PrepareVars copies the VARS template to Vars unless it exists with the
+// template's size (a VARS of another size, e.g. made from a 2M template by
+// an earlier version, would not fit the code and is replaced).
 func (fw SecureBootFirmware) PrepareVars() error {
-	if _, err := os.Stat(fw.Vars); err == nil {
-		return nil
+	if fi, err := os.Stat(fw.Vars); err == nil {
+		tfi, terr := os.Stat(fw.VarsTemplate)
+		if terr != nil || fi.Size() == tfi.Size() {
+			return nil
+		}
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return err
 	}

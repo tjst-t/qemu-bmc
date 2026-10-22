@@ -18,7 +18,7 @@ func secureBootFirmware(t *testing.T, present bool) qemu.SecureBootFirmware {
 	t.Helper()
 	ovmf, vm := t.TempDir(), t.TempDir()
 	if present {
-		for _, f := range []string{"OVMF_CODE.secboot.fd", "OVMF_VARS.ms.fd"} {
+		for _, f := range []string{"OVMF_CODE_4M.secboot.fd", "OVMF_VARS_4M.ms.fd"} {
 			require.NoError(t, os.WriteFile(filepath.Join(ovmf, f), []byte(f), 0o644))
 		}
 	}
@@ -65,7 +65,7 @@ func TestSecureBoot_EnableNeedsFirmwareFiles(t *testing.T) {
 
 	err := m.SetSecureBootEnable(true)
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "OVMF_CODE.secboot.fd")
+	assert.Contains(t, err.Error(), "OVMF_CODE_4M.secboot.fd")
 	assert.False(t, m.GetSecureBoot().Enable)
 	assert.NoError(t, m.SetSecureBootEnable(false))
 }
