@@ -683,7 +683,7 @@
       "number": 31,
       "kind": "task",
       "title": "Redfish: VirtualMedia を Systems/1/VirtualMedia にも出す（Managers/1 側は残す）",
-      "status": "ready",
+      "status": "in-progress",
       "parent": "v0-9-0-ironic-metal3-sushy-bmclib-ipmito",
       "dependsOn": [
         "redfish-systems-managers-chassis-links-s"
@@ -697,7 +697,7 @@
       "refs": [],
       "threads": [],
       "createdAt": "2026-10-22T00:37:05.903Z",
-      "updatedAt": "2026-10-22T00:37:05.903Z",
+      "updatedAt": "2026-10-22T00:42:39.824Z",
       "closedAt": null,
       "extra": {}
     },
