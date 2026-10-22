@@ -907,7 +907,7 @@
       "number": 41,
       "kind": "task",
       "title": "VM_NET_MTU：VM に渡す NIC（TAP・ブリッジ・コンテナ側・virtio の host_mtu）の MTU をそろえて設定する",
-      "status": "in-progress",
+      "status": "done",
       "parent": "v0-9-0-uefi-http-secureboot",
       "dependsOn": [
         "uefi-http-bootsourceoverridetarget-uefih"
@@ -917,12 +917,12 @@
       "labels": [],
       "body": "## なぜ\nProject「FCテープのデジタルツイン」（tjst-t/fc-switch-sim）からの依頼（2026-10-22）。qemu-bmc の VM の上で FCoE のファブリックを模擬していて、FCoE は 1 フレーム 2158 バイト、FCF は FIP の広告を最大長まで詰めて送るので、経路のどこかが 1500 だとファブリックにログインできない。TAP 直結の試験で MTU 1500 は不可、9000 は可と確認済み。いまの docker/setup-network.sh は TAP（tap<idx>）とブリッジ（br<idx>）の MTU を設定しないので 1500 になる。\n\n## やること\n- 環境変数 `VM_NET_MTU`（既定は空＝今どおり何も設定しない）。数字でなければエラーで終わる（理由を出す）\n- 設定されたら docker/setup-network.sh で：\n  1. コンテナ側のインタフェース（VM_NETWORKS の eth2 など）の MTU が VM_NET_MTU より小さければ上げる（大きければそのまま。containerlab のリンクは既定 9500）\n  2. TAP（tap<idx>）とブリッジ（br<idx>）の MTU を VM_NET_MTU にする（ブリッジに入れる前後の順に注意。ブリッジの MTU は配下の最小になるので、最後にブリッジにも明示する）\n  3. QEMU の `-device virtio-net-pci,...` に `host_mtu=<MTU>` を付ける（ゲストに MTU を知らせる。virtio-net 以外のモデルなら付けない）\n  失敗したらエラーで終わる\n- qemu-bmc の Go 側で NIC の引数を書き換えている所（internal/qemu/nic.go の MAC の付与など）が host_mtu を壊さないこと\n- README（英語・日本語）の Container Configuration 表・CLAUDE.md・containerlab/README.md に書く（FCoE やジャンボフレームを流すときに使う、と一言）\n- tests/ の統合テスト（test_network.sh）に、VM_NET_MTU=9000 で tap0・br0 の MTU が 9000 で、QEMU の引数に host_mtu=9000 が付く試験を足す（試験の数も直す）\n\n## 確かめ方\nmake container-test-all。可能ならゲストの中で ip link の MTU が 9000 に見えること（Debian の qcow2 /tmp/guest/debian-12-nocloud-amd64.qcow2、シリアルはコンテナ内 localhost:9002）。",
       "doneWhen": "VM_NET_MTU=9000 で tap・ブリッジ・コンテナ側の MTU が 9000 以上になり QEMU の引数に host_mtu=9000 が付くことを統合テストで確かめていて、未設定のときは今と同じ（MTU を触らず host_mtu も付かない）。make container-test-all と go test ./... -race が通る",
-      "resolution": null,
+      "resolution": "Factory が取り込みました（factory/vm-net-mtu-vm-nic-tap-virtio-host-mtu-mt）",
       "refs": [],
       "threads": [],
       "createdAt": "2026-10-22T03:23:22.575Z",
-      "updatedAt": "2026-10-22T03:40:57.961Z",
-      "closedAt": null,
+      "updatedAt": "2026-10-22T03:47:38.965Z",
+      "closedAt": "2026-10-22T03:47:38.965Z",
       "extra": {}
     }
   ]
