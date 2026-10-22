@@ -773,7 +773,7 @@
       "number": 35,
       "kind": "task",
       "title": "IPMI: cipher suite 17（RAKP-HMAC-SHA256・HMAC-SHA256-128・AES-CBC-128）に対応する",
-      "status": "ready",
+      "status": "in-progress",
       "parent": "v0-9-0-ironic-metal3-sushy-bmclib-ipmito",
       "dependsOn": [
         "vm-disk-vm-disk-size-qcow2"
@@ -787,7 +787,7 @@
       "refs": [],
       "threads": [],
       "createdAt": "2026-10-22T00:37:05.903Z",
-      "updatedAt": "2026-10-22T00:37:20.284Z",
+      "updatedAt": "2026-10-22T00:42:41.058Z",
       "closedAt": null,
       "extra": {}
     },
