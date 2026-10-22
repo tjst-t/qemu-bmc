@@ -145,8 +145,10 @@ make container-test-all
 | GET | `/redfish/v1/Systems/1/Processors` | Processor collection: CPU1, or no members when the CPU count (SystemInfo.CPUs) is 0 |
 | GET | `/redfish/v1/Systems/1/Processors/CPU1` | Processor (ProcessorType CPU, ProcessorArchitecture x86, InstructionSet x86-64, TotalCores = TotalThreads = CPU count, Status) |
 | GET | `/redfish/v1/Systems/1/Storage` | Storage collection: Storage/1, or no members without disks (legacy mode) |
-| GET | `/redfish/v1/Systems/1/Storage/1` | Storage (Drives → Disk{n}, no StorageControllers) |
+| GET | `/redfish/v1/Systems/1/Storage/1` | Storage (Drives → Disk{n}, Volumes, no StorageControllers) |
 | GET | `/redfish/v1/Systems/1/Storage/1/Drives/Disk{n}` | Drive (CapacityBytes, MediaType HDD, Protocol PCIe/SATA/SAS/NVMe/USB, Name, Status). Disks are found in the QEMU args (`qemu.DisksFromArgs`: `-drive file=` except media=cdrom/pflash/floppy/mtd and CD devices, `-hda`..`-hdd`) and sized at start with `qemu-img info --output=json -U`; unknown capacity/protocol is omitted |
+| GET | `/redfish/v1/Systems/1/Storage/1/Volumes` | Volume collection: {n} per disk (read by sushy `volumes_sizes_bytes` in Ironic inspection), or no members without disks (legacy mode) |
+| GET | `/redfish/v1/Systems/1/Storage/1/Volumes/{n}` | Volume (CapacityBytes, Name "Volume {n}", Status, Links.Drives → Disk{n}; no RAIDType). Volume ids are plain 1-based numbers |
 | GET | `/redfish/v1/Systems/1/SimpleStorage` | SimpleStorage collection (deprecated, but Ironic inspection reads it first): SimpleStorage/1 or empty |
 | GET | `/redfish/v1/Systems/1/SimpleStorage/1` | Devices: [{Name, CapacityBytes, Status}] per disk |
 | GET | `/redfish/v1/Systems/1/VirtualMedia` | VirtualMedia collection (recommended location; same single CD drive as Managers/1/VirtualMedia, shared state) |

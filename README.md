@@ -243,8 +243,10 @@ ipmitool user enable 3
 | GET | `/redfish/v1/Systems/1/Processors` | Processor collection (CPU1; empty if the CPU count is unknown) |
 | GET | `/redfish/v1/Systems/1/Processors/CPU1` | Processor (x86, x86-64; TotalCores/TotalThreads = VM CPU count) |
 | GET | `/redfish/v1/Systems/1/Storage` | Storage collection (Storage/1; empty when no disk is known, e.g. legacy mode) |
-| GET | `/redfish/v1/Systems/1/Storage/1` | Storage with one drive per guest disk |
+| GET | `/redfish/v1/Systems/1/Storage/1` | Storage with one drive per guest disk, and Volumes |
 | GET | `/redfish/v1/Systems/1/Storage/1/Drives/Disk{n}` | Drive (CapacityBytes from `qemu-img info` at start, MediaType HDD, Protocol) |
+| GET | `/redfish/v1/Systems/1/Storage/1/Volumes` | Volume collection (one volume per guest disk; empty when no disk is known) |
+| GET | `/redfish/v1/Systems/1/Storage/1/Volumes/{n}` | Volume (CapacityBytes, Name, Status, Links.Drives → Disk{n}; no RAIDType). Read by Ironic inspection (sushy `volumes_sizes_bytes`) |
 | GET | `/redfish/v1/Systems/1/SimpleStorage` | SimpleStorage collection (deprecated, read by Ironic inspection) |
 | GET | `/redfish/v1/Systems/1/SimpleStorage/1` | Devices: Name and CapacityBytes of each guest disk |
 | GET | `/redfish/v1/Systems/1/VirtualMedia` | VirtualMedia collection (same CD drive as Managers/1/VirtualMedia) |
@@ -638,8 +640,10 @@ ipmitool user enable 3
 | GET | `/redfish/v1/Systems/1/Processors` | プロセッサ一覧（CPU1。CPU 数が分からないときは空） |
 | GET | `/redfish/v1/Systems/1/Processors/CPU1` | プロセッサ（x86・x86-64。TotalCores・TotalThreads は VM の CPU 数） |
 | GET | `/redfish/v1/Systems/1/Storage` | ストレージ一覧（Storage/1。レガシーモードなどディスクが分からないときは空） |
-| GET | `/redfish/v1/Systems/1/Storage/1` | ストレージ（ゲストのディスクごとに Drive を1つ） |
+| GET | `/redfish/v1/Systems/1/Storage/1` | ストレージ（ゲストのディスクごとに Drive を1つ。Volumes へのリンク） |
 | GET | `/redfish/v1/Systems/1/Storage/1/Drives/Disk{n}` | ドライブ（CapacityBytes は起動時の `qemu-img info`、MediaType HDD、Protocol） |
+| GET | `/redfish/v1/Systems/1/Storage/1/Volumes` | ボリューム一覧（ゲストのディスクごとに1つ。ディスクが分からないときは空） |
+| GET | `/redfish/v1/Systems/1/Storage/1/Volumes/{n}` | ボリューム（CapacityBytes、Name、Status、Links.Drives に Disk{n}。RAIDType は無し）。Ironic の inspection（sushy の `volumes_sizes_bytes`）が読む |
 | GET | `/redfish/v1/Systems/1/SimpleStorage` | SimpleStorage 一覧（非推奨だが Ironic の inspection が読む） |
 | GET | `/redfish/v1/Systems/1/SimpleStorage/1` | Devices：各ディスクの Name と CapacityBytes |
 | GET | `/redfish/v1/Systems/1/VirtualMedia` | VirtualMedia コレクション（Managers/1/VirtualMedia と同じ CD ドライブ） |

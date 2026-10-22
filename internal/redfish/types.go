@@ -284,7 +284,27 @@ type Storage struct {
 	Name         string         `json:"Name"`
 	Drives       []ODataID      `json:"Drives"`
 	DrivesCount  int            `json:"Drives@odata.count"`
+	Volumes      ODataID        `json:"Volumes"`
 	Status       ResourceStatus `json:"Status"`
+}
+
+// Volume represents a logical volume; each guest disk is reported as one
+// volume on its drive (no RAID).
+type Volume struct {
+	ODataType     string         `json:"@odata.type"`
+	ODataID       string         `json:"@odata.id"`
+	ODataContext  string         `json:"@odata.context,omitempty"`
+	ID            string         `json:"Id"`
+	Name          string         `json:"Name"`
+	CapacityBytes int64          `json:"CapacityBytes,omitempty"`
+	Status        ResourceStatus `json:"Status"`
+	Links         VolumeLinks    `json:"Links"`
+}
+
+// VolumeLinks links a volume to the drives backing it
+type VolumeLinks struct {
+	Drives      []ODataID `json:"Drives"`
+	DrivesCount int       `json:"Drives@odata.count"`
 }
 
 // Drive represents a disk drive

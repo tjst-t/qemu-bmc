@@ -9,19 +9,24 @@ import (
 	"github.com/gorilla/mux"
 )
 
-// The guest disks are reported both as Storage/1 with one drive per disk and
-// as SimpleStorage/1 (deprecated, but read first by Ironic inspection). Both
+// The guest disks are reported both as Storage/1 with one drive and one
+// volume per disk and as SimpleStorage/1 (deprecated, but read first by Ironic inspection). Both
 // collections are empty when no disk is known (legacy mode).
 const (
 	storagePath       = systemPath + "/Storage"
 	storage1Path      = storagePath + "/1"
 	drivesPath        = storage1Path + "/Drives"
+	volumesPath       = storage1Path + "/Volumes"
 	simpleStoragePath = systemPath + "/SimpleStorage"
 	simpleStorage1    = simpleStoragePath + "/1"
 )
 
 func diskName(idx int) string {
 	return fmt.Sprintf("Disk %d", idx)
+}
+
+func drivePath(idx int) string {
+	return fmt.Sprintf("%s/Disk%d", drivesPath, idx)
 }
 
 // storageMembers returns the single storage member, or none without disks.
@@ -56,7 +61,7 @@ func (s *Server) handleGetStorage(w http.ResponseWriter, r *http.Request) {
 	}
 	drives := make([]ODataID, 0, len(s.systemInfo.Disks))
 	for i := range s.systemInfo.Disks {
-		drives = append(drives, ODataID{ODataID: fmt.Sprintf("%s/Disk%d", drivesPath, i+1)})
+		drives = append(drives, ODataID{ODataID: drivePath(i + 1)})
 	}
 	writeJSON(w, http.StatusOK, Storage{
 		ODataType:    "#Storage.v1_7_0.Storage",
@@ -66,6 +71,7 @@ func (s *Server) handleGetStorage(w http.ResponseWriter, r *http.Request) {
 		Name:         "Storage",
 		Drives:       drives,
 		DrivesCount:  len(drives),
+		Volumes:      ODataID{ODataID: volumesPath},
 		Status:       statusOK,
 	})
 }
@@ -84,7 +90,7 @@ func (s *Server) handleGetDrive(w http.ResponseWriter, r *http.Request) {
 	disk := s.systemInfo.Disks[idx-1]
 	writeJSON(w, http.StatusOK, Drive{
 		ODataType:     "#Drive.v1_7_0.Drive",
-		ODataID:       fmt.Sprintf("%s/Disk%d", drivesPath, idx),
+		ODataID:       drivePath(idx),
 		ODataContext:  "/redfish/v1/$metadata#Drive.Drive",
 		ID:            fmt.Sprintf("Disk%d", idx),
 		Name:          diskName(idx),
@@ -92,6 +98,51 @@ func (s *Server) handleGetDrive(w http.ResponseWriter, r *http.Request) {
 		MediaType:     "HDD",
 		Protocol:      disk.Protocol,
 		Status:        statusOK,
+	})
+}
+
+// handleVolumeCollection lists one volume per disk; it has no members when
+// no disk is known (legacy mode).
+func (s *Server) handleVolumeCollection(w http.ResponseWriter, r *http.Request) {
+	if mux.Vars(r)["stid"] != "1" {
+		writeError(w, http.StatusNotFound, "ResourceNotFound", "storage not found")
+		return
+	}
+	members := make([]ODataID, 0, len(s.systemInfo.Disks))
+	for i := range s.systemInfo.Disks {
+		members = append(members, ODataID{ODataID: fmt.Sprintf("%s/%d", volumesPath, i+1)})
+	}
+	writeJSON(w, http.StatusOK, Collection{
+		ODataType:    "#VolumeCollection.VolumeCollection",
+		ODataID:      volumesPath,
+		Name:         "Volume Collection",
+		MembersCount: len(members),
+		Members:      members,
+	})
+}
+
+// handleGetVolume serves volume {n}, which covers the whole n-th (1-based)
+// disk, i.e. drive Disk{n}.
+func (s *Server) handleGetVolume(w http.ResponseWriter, r *http.Request) {
+	volid := mux.Vars(r)["volid"]
+	idx, err := strconv.Atoi(volid)
+	if err != nil || strconv.Itoa(idx) != volid || !s.hasStorage(r) || idx < 1 || idx > len(s.systemInfo.Disks) {
+		writeError(w, http.StatusNotFound, "ResourceNotFound", "volume not found")
+		return
+	}
+	disk := s.systemInfo.Disks[idx-1]
+	writeJSON(w, http.StatusOK, Volume{
+		ODataType:     "#Volume.v1_4_0.Volume",
+		ODataID:       fmt.Sprintf("%s/%d", volumesPath, idx),
+		ODataContext:  "/redfish/v1/$metadata#Volume.Volume",
+		ID:            volid,
+		Name:          fmt.Sprintf("Volume %d", idx),
+		CapacityBytes: disk.CapacityBytes,
+		Status:        statusOK,
+		Links: VolumeLinks{
+			Drives:      []ODataID{{ODataID: drivePath(idx)}},
+			DrivesCount: 1,
+		},
 	})
 }
 

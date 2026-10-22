@@ -135,6 +135,8 @@ func (s *Server) setupRoutes() {
 		s.router.HandleFunc(sys+"/Storage"+p, s.handleStorageCollection).Methods("GET")
 		s.router.HandleFunc(sys+"/Storage/{stid}"+p, s.handleGetStorage).Methods("GET")
 		s.router.HandleFunc(sys+"/Storage/{stid}/Drives/{driveid}"+p, s.handleGetDrive).Methods("GET")
+		s.router.HandleFunc(sys+"/Storage/{stid}/Volumes"+p, s.handleVolumeCollection).Methods("GET")
+		s.router.HandleFunc(sys+"/Storage/{stid}/Volumes/{volid}"+p, s.handleGetVolume).Methods("GET")
 		s.router.HandleFunc(sys+"/SimpleStorage"+p, s.handleSimpleStorageCollection).Methods("GET")
 		s.router.HandleFunc(sys+"/SimpleStorage/{stid}"+p, s.handleGetSimpleStorage).Methods("GET")
 	}
