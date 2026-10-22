@@ -796,7 +796,7 @@
       "number": 36,
       "kind": "task",
       "title": "IPMI: SDR・SEL・FRU を空・最小で答え、Get Self Test Results・Get Global Enables に答える",
-      "status": "ready",
+      "status": "in-progress",
       "parent": "v0-9-0-ironic-metal3-sushy-bmclib-ipmito",
       "dependsOn": [
         "ipmi-cipher-suite-17-rakp-hmac-sha256-hm"
@@ -810,7 +810,7 @@
       "refs": [],
       "threads": [],
       "createdAt": "2026-10-22T00:37:05.903Z",
-      "updatedAt": "2026-10-22T00:37:05.903Z",
+      "updatedAt": "2026-10-22T00:59:28.814Z",
       "closedAt": null,
       "extra": {}
     }
