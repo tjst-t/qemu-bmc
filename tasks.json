@@ -813,6 +813,29 @@
       "updatedAt": "2026-10-22T01:12:44.440Z",
       "closedAt": "2026-10-22T01:12:44.440Z",
       "extra": {}
+    },
+    {
+      "id": "redfish-storage-1-volumes-1",
+      "number": 37,
+      "kind": "task",
+      "title": "Redfish: Storage/1 に Volumes（ディスクごとに1つ）を足す",
+      "status": "ready",
+      "parent": "v0-9-0-ironic-metal3-sushy-bmclib-ipmito",
+      "dependsOn": [
+        "readme-redfish"
+      ],
+      "milestone": null,
+      "priority": "normal",
+      "labels": [],
+      "body": "## なぜ\n#32 で Systems/1/Storage/1 と Drives を足したが、sushy の `system.storage.volumes_sizes_bytes`（Ironic の redfish inspection が読む）は Storage/1 の `Volumes` を見るので、MissingAttributeError になる（2026-10-22、main 74372a1 の実機で確認。simple_storage.disks_sizes_bytes は [8589934592] で通っている）。\n\n## やること\n- `/redfish/v1/Systems/1/Storage/1` に `Volumes: {@odata.id: .../Storage/1/Volumes}` を足す\n- `/Storage/1/Volumes`（コレクション）と `/Storage/1/Volumes/{n}`（ディスクごとに1つ。`CapacityBytes`、`Name`、`Status`、`Links.Drives` に対応する Drive。RAID は無いので `RAIDType` は省く）。ディスクが分からないとき（レガシーモード）はメンバーが空\n- 末尾スラッシュのルートもほかと同じに\n- README（英語・日本語）・CLAUDE.md のエンドポイント表\n\n## 確かめ方\n単体テスト。可能なら sushy で `system.storage.volumes_sizes_bytes` が容量を返すこと。",
+      "doneWhen": "go test ./... -race が通り、Storage/1/Volumes とその要素の応答（容量・Drives へのリンク）を単体テストで確かめている",
+      "resolution": null,
+      "refs": [],
+      "threads": [],
+      "createdAt": "2026-10-22T01:13:46.508Z",
+      "updatedAt": "2026-10-22T01:13:46.508Z",
+      "closedAt": null,
+      "extra": {}
     }
   ]
 }
