@@ -309,7 +309,7 @@ func TestReset_GracefulShutdown(t *testing.T) {
 
 	err := m.Reset("GracefulShutdown")
 	require.NoError(t, err)
-	assert.Equal(t, []string{"SystemPowerdown"}, mock.Calls())
+	assert.Equal(t, []string{"SystemPowerdown"}, filterPowerCalls(mock.Calls())) // the graceful watcher may already be polling the status
 
 	// Until the guest powers off, the VM is powering off (never forced)
 	state, err := m.GetPowerState()
@@ -349,7 +349,7 @@ func TestReset_GracefulRestart_GuestPowersOff(t *testing.T) {
 	m := newFastMachine(New(mock), 5*time.Second)
 
 	require.NoError(t, m.Reset("GracefulRestart"))
-	assert.Equal(t, []string{"SystemPowerdown"}, mock.Calls())
+	assert.Equal(t, []string{"SystemPowerdown"}, filterPowerCalls(mock.Calls())) // the graceful watcher may already be polling the status
 
 	// Guest handles ACPI and powers off; the VM is then powered back on
 	mock.setStatus(qmp.StatusShutdown)
