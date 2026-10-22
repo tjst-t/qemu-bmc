@@ -179,3 +179,41 @@ func TestRedfish_VirtualMedia(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, false, data["Inserted"])
 }
+
+func TestRedfish_VirtualMedia_SystemsAndManagersShareDrive(t *testing.T) {
+	env := loadTestEnv()
+	client := NewRedfishClient(env.RedfishURL, env.User, env.Pass)
+
+	// Insert through Systems/1
+	resp, err := client.Post(
+		"/redfish/v1/Systems/1/VirtualMedia/CD1/Actions/VirtualMedia.InsertMedia",
+		map[string]string{"Image": "/etc/hostname"},
+	)
+	require.NoError(t, err)
+	resp.Body.Close()
+	assert.Equal(t, http.StatusNoContent, resp.StatusCode)
+
+	// Seen through Managers/1
+	resp, err = client.Get("/redfish/v1/Managers/1/VirtualMedia/CD1")
+	require.NoError(t, err)
+	data, err := readJSON(resp)
+	require.NoError(t, err)
+	assert.Equal(t, true, data["Inserted"])
+	assert.Equal(t, "/etc/hostname", data["Image"])
+
+	// Eject through Managers/1, seen through Systems/1
+	resp, err = client.Post(
+		"/redfish/v1/Managers/1/VirtualMedia/CD1/Actions/VirtualMedia.EjectMedia",
+		map[string]string{},
+	)
+	require.NoError(t, err)
+	resp.Body.Close()
+	assert.Equal(t, http.StatusNoContent, resp.StatusCode)
+
+	resp, err = client.Get("/redfish/v1/Systems/1/VirtualMedia/CD1")
+	require.NoError(t, err)
+	data, err = readJSON(resp)
+	require.NoError(t, err)
+	assert.Equal(t, false, data["Inserted"])
+	assert.Equal(t, "/redfish/v1/Systems/1/VirtualMedia/CD1", data["@odata.id"])
+}

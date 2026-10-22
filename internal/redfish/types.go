@@ -50,6 +50,7 @@ type ComputerSystem struct {
 	MemorySummary      *MemorySummary    `json:"MemorySummary,omitempty"`
 	ProcessorSummary   *ProcessorSummary `json:"ProcessorSummary,omitempty"`
 	EthernetInterfaces ODataID           `json:"EthernetInterfaces"`
+	VirtualMedia       ODataID           `json:"VirtualMedia"`
 	Status             ResourceStatus    `json:"Status"`
 	Links              SystemLinks       `json:"Links"`
 }

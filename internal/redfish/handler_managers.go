@@ -6,6 +6,7 @@ import (
 	"log"
 	"net/http"
 	"path"
+	"strings"
 
 	"github.com/tjst-t/qemu-bmc/internal/machine"
 )
@@ -42,13 +43,24 @@ func (s *Server) handleGetManager(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(mgr)
 }
 
+// virtualMediaPath returns the VirtualMedia collection URI the request was
+// made under: Systems/1/VirtualMedia or Managers/1/VirtualMedia. Both expose
+// the same CD drive.
+func virtualMediaPath(r *http.Request) string {
+	if strings.HasPrefix(r.URL.Path, systemPath+"/") {
+		return systemVirtualMediaPath
+	}
+	return managerPath + "/VirtualMedia"
+}
+
 func (s *Server) handleVirtualMediaCollection(w http.ResponseWriter, r *http.Request) {
+	base := virtualMediaPath(r)
 	col := VirtualMediaCollection{
 		ODataType:    "#VirtualMediaCollection.VirtualMediaCollection",
-		ODataID:      "/redfish/v1/Managers/1/VirtualMedia",
+		ODataID:      base,
 		Name:         "Virtual Media Collection",
 		MembersCount: 1,
-		Members:      []ODataID{{ODataID: "/redfish/v1/Managers/1/VirtualMedia/CD1"}},
+		Members:      []ODataID{{ODataID: base + "/CD1"}},
 	}
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(col)
@@ -56,9 +68,10 @@ func (s *Server) handleVirtualMediaCollection(w http.ResponseWriter, r *http.Req
 
 func (s *Server) handleGetVirtualMedia(w http.ResponseWriter, r *http.Request) {
 	media := s.machine.GetMedia()
+	cd := virtualMediaPath(r) + "/CD1"
 	vm := VirtualMedia{
 		ODataType:      "#VirtualMedia.v1_2_0.VirtualMedia",
-		ODataID:        "/redfish/v1/Managers/1/VirtualMedia/CD1",
+		ODataID:        cd,
 		ODataContext:   "/redfish/v1/$metadata#VirtualMedia.VirtualMedia",
 		ID:             "CD1",
 		Name:           "Virtual CD",
@@ -68,8 +81,8 @@ func (s *Server) handleGetVirtualMedia(w http.ResponseWriter, r *http.Request) {
 		WriteProtected: true,
 		ConnectedVia:   "NotConnected",
 		Actions: VirtualMediaActions{
-			InsertMedia: VirtualMediaAction{Target: "/redfish/v1/Managers/1/VirtualMedia/CD1/Actions/VirtualMedia.InsertMedia"},
-			EjectMedia:  VirtualMediaAction{Target: "/redfish/v1/Managers/1/VirtualMedia/CD1/Actions/VirtualMedia.EjectMedia"},
+			InsertMedia: VirtualMediaAction{Target: cd + "/Actions/VirtualMedia.InsertMedia"},
+			EjectMedia:  VirtualMediaAction{Target: cd + "/Actions/VirtualMedia.EjectMedia"},
 		},
 	}
 	if media.Inserted {

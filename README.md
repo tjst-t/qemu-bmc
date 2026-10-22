@@ -127,6 +127,7 @@ curl -k -u admin:password -X POST \
 
 #### VirtualMedia
 
+- The CD drive is `/redfish/v1/Systems/1/VirtualMedia/CD1` (recommended since Redfish 2021.1; Ironic/sushy looks here first) and also `/redfish/v1/Managers/1/VirtualMedia/CD1` (deprecated location, kept for gofish, bmclib and existing users). Both are the same drive: inserting through one is seen through the other. `@odata.id` and the action targets follow the URI you read.
 - In process management mode (the container), the VM always has a CD drive. It is empty unless `VM_CDROM` is set, in which case that ISO is the initially inserted medium.
 - `Image` is a path inside the container, `/iso/boot.iso` or `file:///iso/boot.iso` (bind-mount the ISO, e.g. `-v ./iso:/iso:ro`), or an `http://` / `https://` URL. A missing `Image`, a nonexistent file or an unsupported scheme returns `400`; InsertMedia and EjectMedia return `204 No Content` on success.
 - An HTTP(S) image is downloaded by qemu-bmc into `VMEDIA_DIR`, then attached (QEMU in the image cannot read URLs itself). InsertMedia returns `204` without waiting for the download; meanwhile `GET` already reports the URL as `Image` with `Inserted: true`. `UserName` / `Password` in the InsertMedia request are sent as HTTP Basic auth. Credentials can also be put in the URL (`https://user:pass@host/boot.iso`); the password is then reported as `xxxxx` in `Image` and in the logs. Certificates are not verified unless `VMEDIA_INSECURE_TLS=false` (self-signed servers are common); to verify against your own CA, also mount it and set `SSL_CERT_FILE` (e.g. `-e SSL_CERT_FILE=/certs/ca.pem`).
@@ -234,14 +235,18 @@ ipmitool user enable 3
 | GET | `/redfish/v1/SessionService/Sessions/{id}` | Session |
 | DELETE | `/redfish/v1/SessionService/Sessions/{id}` | Log out (204) |
 | GET | `/redfish/v1/Systems` | System collection |
-| GET | `/redfish/v1/Systems/1` | Computer system (Status; Links: ManagedBy Managers/1, Chassis Chassis/1) |
+| GET | `/redfish/v1/Systems/1` | Computer system (Status, VirtualMedia; Links: ManagedBy Managers/1, Chassis Chassis/1) |
 | PATCH | `/redfish/v1/Systems/1` | Boot device override |
 | POST | `/redfish/v1/Systems/1/Actions/ComputerSystem.Reset` | Power control |
 | GET | `/redfish/v1/Systems/1/EthernetInterfaces` | NIC collection |
 | GET | `/redfish/v1/Systems/1/EthernetInterfaces/{n}` | NIC (MACAddress, LinkStatus) |
+| GET | `/redfish/v1/Systems/1/VirtualMedia` | VirtualMedia collection (same CD drive as Managers/1/VirtualMedia) |
+| GET | `/redfish/v1/Systems/1/VirtualMedia/CD1` | VirtualMedia resource (same as Managers/1/VirtualMedia/CD1) |
+| POST | `/redfish/v1/Systems/1/VirtualMedia/CD1/Actions/VirtualMedia.InsertMedia` | Insert an ISO (204) |
+| POST | `/redfish/v1/Systems/1/VirtualMedia/CD1/Actions/VirtualMedia.EjectMedia` | Eject media (204) |
 | GET | `/redfish/v1/Managers` | Manager collection |
 | GET | `/redfish/v1/Managers/1` | BMC manager (ManagerType BMC, FirmwareVersion = qemu-bmc version, Status; Links: ManagerForServers Systems/1, ManagerInChassis Chassis/1) |
-| GET | `/redfish/v1/Managers/1/VirtualMedia` | VirtualMedia collection |
+| GET | `/redfish/v1/Managers/1/VirtualMedia` | VirtualMedia collection (deprecated location; same drive as Systems/1/VirtualMedia) |
 | GET | `/redfish/v1/Managers/1/VirtualMedia/CD1` | VirtualMedia resource (ImageName only while inserted) |
 | POST | `.../VirtualMedia.InsertMedia` | Insert an ISO (container path or HTTP(S) URL; 204) |
 | POST | `.../VirtualMedia.EjectMedia` | Eject media (204) |
@@ -500,6 +505,7 @@ curl -k -u admin:password -X POST \
 
 #### VirtualMedia
 
+- CD ドライブは `/redfish/v1/Systems/1/VirtualMedia/CD1`（Redfish 2021.1 以降の推奨の場所。Ironic/sushy はまずここを見る）と `/redfish/v1/Managers/1/VirtualMedia/CD1`（非推奨の場所。gofish・bmclib・既存の利用者のため残す）の両方にある。どちらも同じ1つのドライブで、片方から差せばもう片方でも差さって見える。`@odata.id` と Actions の target は読んだ URI に合わせる。
 - プロセス管理モード（コンテナ）では、VM に CD ドライブが常に付く。`VM_CDROM` が無ければ空、あればその ISO が最初に差さった状態になる。
 - `Image` はコンテナ内のパス（`/iso/boot.iso` または `file:///iso/boot.iso`。ISO はバインドマウントする（例: `-v ./iso:/iso:ro`））か、`http://` / `https://` の URL。`Image` が空・ファイルが無い・未対応の形式なら `400`。InsertMedia・EjectMedia は成功すると `204 No Content`。
 - HTTP(S) の URL は qemu-bmc が `VMEDIA_DIR` へダウンロードしてから差す（イメージの QEMU は URL を直接読めない）。InsertMedia はダウンロードを待たずに `204` を返し、ダウンロード中も `GET` は `Image` に URL、`Inserted: true` を返す。InsertMedia の `UserName` / `Password` は HTTP の Basic 認証に使う。URL に認証情報を書いてもよい（`https://user:pass@host/boot.iso`）。そのときパスワードは `Image` とログでは `xxxxx` に伏せる。自己署名のサーバが多いので、`VMEDIA_INSECURE_TLS=false` にしない限り証明書は検証しない。自前の CA で検証するなら、CA をマウントして `SSL_CERT_FILE` を指す（例 `-e SSL_CERT_FILE=/certs/ca.pem`）。
@@ -607,14 +613,18 @@ ipmitool user enable 3
 | GET | `/redfish/v1/SessionService/Sessions/{id}` | セッション |
 | DELETE | `/redfish/v1/SessionService/Sessions/{id}` | ログアウト（204） |
 | GET | `/redfish/v1/Systems` | システムコレクション |
-| GET | `/redfish/v1/Systems/1` | コンピュータシステム（Status。Links: ManagedBy に Managers/1、Chassis に Chassis/1） |
+| GET | `/redfish/v1/Systems/1` | コンピュータシステム（Status、VirtualMedia。Links: ManagedBy に Managers/1、Chassis に Chassis/1） |
 | PATCH | `/redfish/v1/Systems/1` | ブートデバイス変更 |
 | POST | `/redfish/v1/Systems/1/Actions/ComputerSystem.Reset` | 電源制御 |
 | GET | `/redfish/v1/Systems/1/EthernetInterfaces` | NIC 一覧 |
 | GET | `/redfish/v1/Systems/1/EthernetInterfaces/{n}` | NIC（MACAddress・LinkStatus） |
+| GET | `/redfish/v1/Systems/1/VirtualMedia` | VirtualMedia コレクション（Managers/1/VirtualMedia と同じ CD ドライブ） |
+| GET | `/redfish/v1/Systems/1/VirtualMedia/CD1` | VirtualMedia リソース（Managers/1/VirtualMedia/CD1 と同じ） |
+| POST | `/redfish/v1/Systems/1/VirtualMedia/CD1/Actions/VirtualMedia.InsertMedia` | ISO を差す（204） |
+| POST | `/redfish/v1/Systems/1/VirtualMedia/CD1/Actions/VirtualMedia.EjectMedia` | メディア取り出し（204） |
 | GET | `/redfish/v1/Managers` | マネージャコレクション |
 | GET | `/redfish/v1/Managers/1` | BMC マネージャ（ManagerType は BMC、FirmwareVersion は qemu-bmc のバージョン、Status。Links: ManagerForServers に Systems/1、ManagerInChassis に Chassis/1） |
-| GET | `/redfish/v1/Managers/1/VirtualMedia` | VirtualMedia コレクション |
+| GET | `/redfish/v1/Managers/1/VirtualMedia` | VirtualMedia コレクション（非推奨の場所。Systems/1/VirtualMedia と同じドライブ） |
 | GET | `/redfish/v1/Managers/1/VirtualMedia/CD1` | VirtualMedia リソース（ImageName は差しているときだけ） |
 | POST | `.../VirtualMedia.InsertMedia` | ISO を差す（コンテナ内のパスか HTTP(S) の URL、204） |
 | POST | `.../VirtualMedia.EjectMedia` | メディア取り出し（204） |

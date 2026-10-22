@@ -115,14 +115,18 @@ func (s *Server) setupRoutes() {
 	s.router.HandleFunc("/redfish/v1/Managers/", s.handleManagerCollection).Methods("GET")
 	s.router.HandleFunc("/redfish/v1/Managers/{id}", s.handleGetManager).Methods("GET")
 	s.router.HandleFunc("/redfish/v1/Managers/{id}/", s.handleGetManager).Methods("GET")
-	s.router.HandleFunc("/redfish/v1/Managers/{id}/VirtualMedia", s.handleVirtualMediaCollection).Methods("GET")
-	s.router.HandleFunc("/redfish/v1/Managers/{id}/VirtualMedia/", s.handleVirtualMediaCollection).Methods("GET")
-	s.router.HandleFunc("/redfish/v1/Managers/{id}/VirtualMedia/{vmid}", s.handleGetVirtualMedia).Methods("GET")
-	s.router.HandleFunc("/redfish/v1/Managers/{id}/VirtualMedia/{vmid}/", s.handleGetVirtualMedia).Methods("GET")
-	s.router.HandleFunc("/redfish/v1/Managers/{id}/VirtualMedia/{vmid}/Actions/VirtualMedia.InsertMedia", s.handleInsertMedia).Methods("POST")
-	s.router.HandleFunc("/redfish/v1/Managers/{id}/VirtualMedia/{vmid}/Actions/VirtualMedia.InsertMedia/", s.handleInsertMedia).Methods("POST")
-	s.router.HandleFunc("/redfish/v1/Managers/{id}/VirtualMedia/{vmid}/Actions/VirtualMedia.EjectMedia", s.handleEjectMedia).Methods("POST")
-	s.router.HandleFunc("/redfish/v1/Managers/{id}/VirtualMedia/{vmid}/Actions/VirtualMedia.EjectMedia/", s.handleEjectMedia).Methods("POST")
+
+	// VirtualMedia: the same CD drive under Systems/1 (recommended since
+	// Redfish 2021.1) and Managers/1 (deprecated, kept for existing clients)
+	for _, owner := range []string{"Systems", "Managers"} {
+		vm := "/redfish/v1/" + owner + "/{id}/VirtualMedia"
+		for _, p := range []string{"", "/"} {
+			s.router.HandleFunc(vm+p, s.handleVirtualMediaCollection).Methods("GET")
+			s.router.HandleFunc(vm+"/{vmid}"+p, s.handleGetVirtualMedia).Methods("GET")
+			s.router.HandleFunc(vm+"/{vmid}/Actions/VirtualMedia.InsertMedia"+p, s.handleInsertMedia).Methods("POST")
+			s.router.HandleFunc(vm+"/{vmid}/Actions/VirtualMedia.EjectMedia"+p, s.handleEjectMedia).Methods("POST")
+		}
+	}
 
 	// Chassis
 	s.router.HandleFunc("/redfish/v1/Chassis", s.handleChassisCollection).Methods("GET")

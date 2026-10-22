@@ -237,3 +237,86 @@ func TestVirtualMedia_InsertThenGet(t *testing.T) {
 	assert.Equal(t, "/iso/boot.iso", vm["Image"])
 	assert.Equal(t, "boot.iso", vm["ImageName"])
 }
+
+const (
+	systemsCD1  = "/redfish/v1/Systems/1/VirtualMedia/CD1"
+	managersCD1 = "/redfish/v1/Managers/1/VirtualMedia/CD1"
+)
+
+func postMediaActionAt(srv *Server, cd, action, body string) *httptest.ResponseRecorder {
+	req := httptest.NewRequest("POST", cd+"/Actions/VirtualMedia."+action, strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	srv.ServeHTTP(w, req)
+	return w
+}
+
+func TestGetSystem_VirtualMediaLink(t *testing.T) {
+	srv := NewServer(newMockMachine(qmp.StatusRunning), "", "", "")
+
+	sys := getResource(t, srv, "/redfish/v1/Systems/1")
+	assert.Equal(t, map[string]interface{}{"@odata.id": "/redfish/v1/Systems/1/VirtualMedia"}, sys["VirtualMedia"])
+}
+
+func TestSystemsVirtualMediaCollection(t *testing.T) {
+	srv := NewServer(newMockMachine(qmp.StatusRunning), "", "", "")
+
+	for _, p := range []string{"/redfish/v1/Systems/1/VirtualMedia", "/redfish/v1/Systems/1/VirtualMedia/"} {
+		col := getResource(t, srv, p)
+		assert.Equal(t, "#VirtualMediaCollection.VirtualMediaCollection", col["@odata.type"])
+		assert.Equal(t, "/redfish/v1/Systems/1/VirtualMedia", col["@odata.id"])
+		assert.Equal(t, float64(1), col["Members@odata.count"])
+		assert.Equal(t, []interface{}{map[string]interface{}{"@odata.id": systemsCD1}}, col["Members"])
+	}
+}
+
+func TestSystemsVirtualMedia_URIsFollowRequest(t *testing.T) {
+	srv := NewServer(newMockMachine(qmp.StatusRunning), "", "", "")
+
+	for _, cd := range []string{systemsCD1, managersCD1} {
+		for _, p := range []string{cd, cd + "/"} {
+			vm := getResource(t, srv, p)
+			assert.Equal(t, cd, vm["@odata.id"])
+			assert.Equal(t, map[string]interface{}{
+				"#VirtualMedia.InsertMedia": map[string]interface{}{"target": cd + "/Actions/VirtualMedia.InsertMedia"},
+				"#VirtualMedia.EjectMedia":  map[string]interface{}{"target": cd + "/Actions/VirtualMedia.EjectMedia"},
+			}, vm["Actions"])
+		}
+	}
+}
+
+func TestVirtualMedia_SharedBetweenSystemsAndManagers(t *testing.T) {
+	cases := []struct{ name, insertAt, readAt string }{
+		{"systems to managers", systemsCD1, managersCD1},
+		{"managers to systems", managersCD1, systemsCD1},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			srv := NewServer(newMockMachine(qmp.StatusRunning), "", "", "")
+
+			w := postMediaActionAt(srv, tc.insertAt, "InsertMedia", `{"Image": "/iso/boot.iso"}`)
+			require.Equal(t, http.StatusNoContent, w.Code)
+
+			vm := getResource(t, srv, tc.readAt)
+			assert.Equal(t, true, vm["Inserted"])
+			assert.Equal(t, "/iso/boot.iso", vm["Image"])
+
+			w = postMediaActionAt(srv, tc.readAt, "EjectMedia", `{}`)
+			require.Equal(t, http.StatusNoContent, w.Code)
+			vm = getResource(t, srv, tc.insertAt)
+			assert.Equal(t, false, vm["Inserted"])
+		})
+	}
+}
+
+func TestSystemsVirtualMedia_TrailingSlashActions(t *testing.T) {
+	srv := NewServer(newMockMachine(qmp.StatusRunning), "", "", "")
+
+	req := httptest.NewRequest("POST", systemsCD1+"/Actions/VirtualMedia.InsertMedia/", strings.NewReader(`{"Image": "/iso/a.iso"}`))
+	w := httptest.NewRecorder()
+	srv.ServeHTTP(w, req)
+	assert.Equal(t, http.StatusNoContent, w.Code)
+
+	w = postMediaActionAt(srv, systemsCD1, "InsertMedia", `{}`)
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+}

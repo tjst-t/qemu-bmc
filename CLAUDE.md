@@ -139,14 +139,16 @@ make container-test-all
 | GET/POST | `/redfish/v1/SessionService/Sessions` | Session collection / log in (POST needs no auth; 201 with X-Auth-Token and Location; 401 bad credentials; 503 over 64 sessions) |
 | GET/DELETE | `/redfish/v1/SessionService/Sessions/{id}` | Session / log out (204). Sessions are in memory and expire after SessionTimeout idle |
 | GET | `/redfish/v1/Systems` | System collection |
-| GET | `/redfish/v1/Systems/1` | Computer system (PowerState, Boot, MemorySummary, ProcessorSummary, EthernetInterfaces, Actions, Status, Links.ManagedBy → Managers/1, Links.Chassis → Chassis/1) |
+| GET | `/redfish/v1/Systems/1` | Computer system (PowerState, Boot, MemorySummary, ProcessorSummary, EthernetInterfaces, VirtualMedia → Systems/1/VirtualMedia, Actions, Status, Links.ManagedBy → Managers/1, Links.Chassis → Chassis/1) |
 | GET | `/redfish/v1/Systems/1/EthernetInterfaces` | NIC collection (one per guest NIC, command-line order) |
 | GET | `/redfish/v1/Systems/1/EthernetInterfaces/{n}` | NIC (MACAddress, LinkStatus: LinkUp while the VM runs) |
+| GET | `/redfish/v1/Systems/1/VirtualMedia` | VirtualMedia collection (recommended location; same single CD drive as Managers/1/VirtualMedia, shared state) |
+| GET | `/redfish/v1/Systems/1/VirtualMedia/CD1` | VirtualMedia resource, same as Managers/1/VirtualMedia/CD1; `@odata.id` and action targets follow the URI requested. InsertMedia/EjectMedia actions below work under both |
 | PATCH | `/redfish/v1/Systems/1` | Boot device override (with ETag support) |
 | POST | `/redfish/v1/Systems/1/Actions/ComputerSystem.Reset` | Power control |
 | GET | `/redfish/v1/Managers` | Manager collection |
 | GET | `/redfish/v1/Managers/1` | BMC manager (ManagerType BMC, FirmwareVersion = qemu-bmc version via SetFirmwareVersion, Status, Links.ManagerForServers → Systems/1, Links.ManagerInChassis → Chassis/1) |
-| GET | `/redfish/v1/Managers/1/VirtualMedia` | VirtualMedia collection |
+| GET | `/redfish/v1/Managers/1/VirtualMedia` | VirtualMedia collection (deprecated location, kept for gofish/bmclib) |
 | GET | `/redfish/v1/Managers/1/VirtualMedia/CD1` | VirtualMedia resource (ImageName omitted when nothing is inserted; Image stays as "") |
 | POST | `.../VirtualMedia/CD1/Actions/VirtualMedia.InsertMedia` | Insert ISO (container path `/...` or `file://`, or http(s) URL downloaded in the background with optional UserName/Password Basic auth; 204, 400 if missing). Kept while off, attached at QEMU start; power on/reset during a download runs once it ends (reports PoweringOn meanwhile), a failed download ejects |
 | POST | `.../VirtualMedia/CD1/Actions/VirtualMedia.EjectMedia` | Eject ISO (204) |

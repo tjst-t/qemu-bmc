@@ -14,6 +14,8 @@ const (
 	systemPath  = "/redfish/v1/Systems/1"
 	managerPath = "/redfish/v1/Managers/1"
 	chassisPath = "/redfish/v1/Chassis/1"
+
+	systemVirtualMediaPath = systemPath + "/VirtualMedia"
 )
 
 // statusOK is the Status of the always-present system, manager and chassis
@@ -66,6 +68,7 @@ func (s *Server) handleGetSystem(w http.ResponseWriter, r *http.Request) {
 			},
 		},
 		EthernetInterfaces: ODataID{ODataID: ethernetInterfacesPath},
+		VirtualMedia:       ODataID{ODataID: systemVirtualMediaPath},
 		Status:             statusOK,
 		Links: SystemLinks{
 			ManagedBy: []ODataID{{ODataID: managerPath}},
