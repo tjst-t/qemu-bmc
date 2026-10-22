@@ -20,6 +20,15 @@ QEMU_ARGS="$QEMU_ARGS -m ${VM_MEMORY:-2048} -smp ${VM_CPUS:-2}"
 
 # Disk
 VM_DISK="${VM_DISK:-/vm/disk.qcow2}"
+# VM_DISK_SIZE creates a missing disk; an existing one is left as it is
+if [ -n "$VM_DISK_SIZE" ] && [ -n "$VM_DISK" ] && [ ! -e "$VM_DISK" ]; then
+    if ! mkdir -p "$(dirname "$VM_DISK")" || \
+       ! qemu-img create -q -f qcow2 "$VM_DISK" "$VM_DISK_SIZE"; then
+        echo "ERROR: cannot create VM disk $VM_DISK ($VM_DISK_SIZE), not starting the VM" >&2
+        exit 1
+    fi
+    echo "Created VM disk $VM_DISK ($VM_DISK_SIZE, qcow2)" >&2
+fi
 if [ -n "$VM_DISK" ] && [ -f "$VM_DISK" ]; then
     QEMU_ARGS="$QEMU_ARGS -drive file=$VM_DISK,format=qcow2,if=virtio"
 fi

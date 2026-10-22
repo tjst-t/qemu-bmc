@@ -5,9 +5,10 @@
 #
 #   node1 VM NIC (eth1) ──────────── node2 VM NIC (eth1)   data network
 #
-# Each node boots containerlab/vm/<node>/disk.qcow2 (create it first, see
-# README.md). Without a disk the VM just sits in the BIOS. Put ISOs in
-# containerlab/iso/ and set VM_CDROM to boot one.
+# Each node boots containerlab/vm/<node>/disk.qcow2, created empty (20G) at
+# the first start by VM_DISK_SIZE; an existing disk (e.g. a copied cloud
+# image) is used as is. An empty disk just sits in the BIOS until you install
+# on it: put ISOs in containerlab/iso/ and set VM_CDROM to boot one.
 # For a separate BMC management network, see mgmt-network.yml.
 name: qemu-bmc-lab
 
@@ -30,6 +31,7 @@ topology:
         VM_MEMORY: "2048"
         VM_CPUS: "2"
         VM_BOOT_MODE: "bios"
+        VM_DISK_SIZE: "20G"  # creates /vm/disk.qcow2 if it is missing
         VM_NETWORKS: "eth1"
         IPMI_USER: "admin"
         IPMI_PASS: "password"
@@ -48,6 +50,7 @@ topology:
         VM_MEMORY: "2048"
         VM_CPUS: "2"
         VM_BOOT_MODE: "uefi"
+        VM_DISK_SIZE: "20G"
         VM_NETWORKS: "eth1"
         IPMI_USER: "admin"
         IPMI_PASS: "password"

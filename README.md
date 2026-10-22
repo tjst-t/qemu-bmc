@@ -38,7 +38,7 @@ A Go single binary that controls QEMU VMs via both Redfish API (HTTPS) and IPMI 
 qemu-bmc manages the QEMU process directly inside the container:
 
 ```bash
-# Create VM disk
+# Create VM disk (or set VM_DISK_SIZE=20G to let the container create it)
 mkdir -p vm
 qemu-img create -f qcow2 vm/disk.qcow2 20G
 
@@ -313,6 +313,7 @@ These variables are used by `docker/entrypoint.sh` to construct QEMU arguments:
 | `ENABLE_KVM` | `true` | Use KVM acceleration (falls back to TCG) |
 | `VNC_PORT` | `5900` | VNC display port |
 | `VM_DISK` | `/vm/disk.qcow2` | VM disk image path |
+| `VM_DISK_SIZE` | (empty) | If set (e.g. `20G`) and `VM_DISK` does not exist, create it as qcow2 of this size at start (an existing disk is not touched) |
 | `VM_CDROM` | (empty) | ISO initially inserted in the VirtualMedia CD drive (the drive exists, empty, without it) |
 | `VM_BOOT` | `c` | Boot device (c=disk, d=cdrom, n=network) |
 | `VM_BOOT_MENU_TIMEOUT` | `0` | Boot menu timeout in ms (0=disabled) |
@@ -339,7 +340,7 @@ go vet ./...
 
 # Container integration tests
 make container-test         # Quick smoke tests
-make container-test-all     # All 89 tests (9 categories)
+make container-test-all     # All 91 tests (9 categories)
 ```
 
 ## Architecture
@@ -416,7 +417,7 @@ QEMU VM を Redfish API (HTTPS) と IPMI over LAN (UDP) の両方で制御する
 qemu-bmc がコンテナ内で QEMU プロセスを直接管理します:
 
 ```bash
-# VM ディスク作成
+# VM ディスク作成（VM_DISK_SIZE=20G を設定すればコンテナが作る）
 mkdir -p vm
 qemu-img create -f qcow2 vm/disk.qcow2 20G
 
@@ -684,6 +685,7 @@ ipmitool user enable 3
 | `ENABLE_KVM` | `true` | KVM アクセラレーション使用 (TCG にフォールバック) |
 | `VNC_PORT` | `5900` | VNC ディスプレイポート |
 | `VM_DISK` | `/vm/disk.qcow2` | VM ディスクイメージパス |
+| `VM_DISK_SIZE` | (空) | 設定する（例 `20G`）と、`VM_DISK` が無いとき起動時にこの大きさの qcow2 を作る（既にあるディスクは触らない） |
 | `VM_CDROM` | (空) | VirtualMedia の CD ドライブに最初から差しておく ISO（無くても空の CD ドライブは付く） |
 | `VM_BOOT` | `c` | ブートデバイス (c=ディスク, d=CD-ROM, n=ネットワーク) |
 | `VM_BOOT_MENU_TIMEOUT` | `0` | ブートメニュータイムアウト (ms、0=無効) |
@@ -710,7 +712,7 @@ go vet ./...
 
 # コンテナ統合テスト
 make container-test         # クイックスモークテスト
-make container-test-all     # 全 82 テスト (9 カテゴリ)
+make container-test-all     # 全 91 テスト (9 カテゴリ)
 ```
 
 ## アーキテクチャ

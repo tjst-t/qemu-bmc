@@ -116,6 +116,43 @@ test_disk_missing_no_error() {
     assert_not_contains "$cmdline" "disk.qcow2" "Missing disk should not add a disk -drive"
 }
 
+test_disk_size_creates_disk() {
+    local tmpdir
+    tmpdir=$(mktemp -d)
+    chmod 777 "$tmpdir"
+    stop_test_container
+    start_test_container -v "$tmpdir:/vm" -e "VM_DISK_SIZE=1G"
+    wait_for_qemu_running 30
+    local cmdline info
+    cmdline=$(qemu_cmdline) || return 1
+    assert_contains "$cmdline" "-drive file=/vm/disk.qcow2,format=qcow2,if=virtio" "Created disk should be attached"
+    info=$(container_exec qemu-img info -U /vm/disk.qcow2 2>&1)
+    assert_contains "$info" "virtual size: 1 GiB" "Disk should be created with VM_DISK_SIZE"
+    assert_contains "$(docker logs "$TEST_CONTAINER" 2>&1)" "Created VM disk /vm/disk.qcow2" "Disk creation should be logged"
+    stop_test_container
+    timeout 60 docker run --rm -v "$tmpdir:/vm" --entrypoint sh "$TEST_IMAGE" -c 'rm -rf /vm/*' 2>/dev/null || true
+    rm -rf "$tmpdir"
+}
+
+test_disk_size_keeps_existing() {
+    local tmpdir
+    tmpdir=$(mktemp -d)
+    chmod 777 "$tmpdir"
+    timeout 60 docker run --rm -v "$tmpdir:/vm" --entrypoint qemu-img "$TEST_IMAGE" create -q -f qcow2 /vm/disk.qcow2 2G
+    stop_test_container
+    start_test_container -v "$tmpdir:/vm" -e "VM_DISK_SIZE=1G"
+    wait_for_qemu_running 30
+    local cmdline info
+    cmdline=$(qemu_cmdline) || return 1
+    assert_contains "$cmdline" "-drive file=/vm/disk.qcow2,format=qcow2,if=virtio" "Existing disk should be attached"
+    info=$(container_exec qemu-img info -U /vm/disk.qcow2 2>&1)
+    assert_contains "$info" "virtual size: 2 GiB" "Existing disk should not be resized"
+    assert_not_contains "$(docker logs "$TEST_CONTAINER" 2>&1)" "Created VM disk" "Existing disk should not be re-created"
+    stop_test_container
+    timeout 60 docker run --rm -v "$tmpdir:/vm" --entrypoint sh "$TEST_IMAGE" -c 'rm -rf /vm/*' 2>/dev/null || true
+    rm -rf "$tmpdir"
+}
+
 test_cdrom_attached() {
     local tmpdir
     tmpdir=$(mktemp -d)
@@ -277,6 +314,8 @@ run_test test_kvm_fallback_tcg
 run_test test_custom_vnc_port
 run_test test_disk_attached
 run_test test_disk_missing_no_error
+run_test test_disk_size_creates_disk
+run_test test_disk_size_keeps_existing
 run_test test_cdrom_attached
 run_test test_boot_device_default
 run_test test_custom_ipmi_credentials

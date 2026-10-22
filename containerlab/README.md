@@ -16,12 +16,10 @@ Both use the published image `ghcr.io/tjst-t/qemu-bmc:0.8` (the latest 0.8.x rel
   node1 VM NIC (eth1) ───────────── node2 VM NIC (eth1)      data network
 ```
 
-node1 boots in BIOS mode, node2 in UEFI mode. Each node's `/vm` is `containerlab/vm/<node>/` and `/iso` is `containerlab/iso/` (both ignored by git).
+node1 boots in BIOS mode, node2 in UEFI mode. Each node's `/vm` is `containerlab/vm/<node>/` and `/iso` is `containerlab/iso/` (both ignored by git). `VM_DISK_SIZE: "20G"` creates an empty `disk.qcow2` there at the first start, so no `qemu-img create` is needed; to boot a cloud image instead, copy it to `containerlab/vm/<node>/disk.qcow2` before deploying (an existing disk is used as is, never resized). `VM_DISK_SIZE` needs qemu-bmc 0.9 or later; with the 0.8 image, run `qemu-img create -f qcow2 containerlab/vm/<node>/disk.qcow2 20G` first.
 
 ```bash
-mkdir -p containerlab/vm/node1 containerlab/vm/node2 containerlab/iso
-qemu-img create -f qcow2 containerlab/vm/node1/disk.qcow2 20G   # or copy a cloud image
-qemu-img create -f qcow2 containerlab/vm/node2/disk.qcow2 20G
+mkdir -p containerlab/vm/node1 containerlab/vm/node2 containerlab/iso   # containerlab needs the bind directories
 
 sudo containerlab deploy -t containerlab/example.yml
 
@@ -106,7 +104,7 @@ sudo containerlab destroy -t containerlab/mgmt-network.yml --cleanup
 
 ### example.yml
 
-2 ノードがそれぞれ自分のディスク（または ISO）から起動する構成です。BMC（Redfish・noVNC・IPMI）はホストに公開します（node1：`8441`・`6231/udp`、node2：`8442`・`6232/udp`）。VM の NIC は 2 ノード間のデータリンク（`eth1`）につながります。node1 は BIOS、node2 は UEFI で起動します。各ノードの `/vm` は `containerlab/vm/<ノード名>/`、`/iso` は `containerlab/iso/` です（git の管理外）。手順は上の「example.yml」を見てください。
+2 ノードがそれぞれ自分のディスク（または ISO）から起動する構成です。BMC（Redfish・noVNC・IPMI）はホストに公開します（node1：`8441`・`6231/udp`、node2：`8442`・`6232/udp`）。VM の NIC は 2 ノード間のデータリンク（`eth1`）につながります。node1 は BIOS、node2 は UEFI で起動します。各ノードの `/vm` は `containerlab/vm/<ノード名>/`、`/iso` は `containerlab/iso/` です（git の管理外）。`VM_DISK_SIZE: "20G"` により、初回の起動時に空の `disk.qcow2` が作られます（既にあるディスクはそのまま使い、大きさも変えません。qemu-bmc 0.9 以降。0.8 のイメージでは先に `qemu-img create` で作ってください）。手順は上の「example.yml」を見てください。
 
 ## mgmt-network.yml（日本語）
 
