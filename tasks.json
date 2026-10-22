@@ -819,7 +819,7 @@
       "number": 37,
       "kind": "task",
       "title": "Redfish: Storage/1 に Volumes（ディスクごとに1つ）を足す",
-      "status": "ready",
+      "status": "in-progress",
       "parent": "v0-9-0-ironic-metal3-sushy-bmclib-ipmito",
       "dependsOn": [
         "readme-redfish"
@@ -833,7 +833,7 @@
       "refs": [],
       "threads": [],
       "createdAt": "2026-10-22T01:13:46.508Z",
-      "updatedAt": "2026-10-22T01:13:46.508Z",
+      "updatedAt": "2026-10-22T01:20:01.818Z",
       "closedAt": null,
       "extra": {}
     }
