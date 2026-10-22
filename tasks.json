@@ -729,7 +729,7 @@
       "number": 33,
       "kind": "task",
       "title": "電源操作を足す：Redfish の PowerCycle・Nmi・ForceOn・PushPowerButton と IPMI の power diag（NMI）",
-      "status": "in-progress",
+      "status": "done",
       "parent": "v0-9-0-ironic-metal3-sushy-bmclib-ipmito",
       "dependsOn": [
         "redfish-systems-1-processors-storage-sim"
@@ -739,12 +739,12 @@
       "labels": [],
       "body": "## なぜ\nsushy・bmclib は PowerCycle（無ければ失敗）や Nmi（Ironic の inject_nmi）を使う。いまの Reset の AllowableValues は On・ForceOff・GracefulShutdown・ForceRestart・GracefulRestart だけ。IPMI の chassis power diag（Chassis Control 0x04）は何もしない（internal/ipmi/handler_chassis.go 72 行目付近）。Backlog #29 参照。\n\n## やること（internal/machine と internal/redfish、internal/ipmi）\n- `PowerCycle`：電源が入っていれば強制的に切ってから入れ直す（プロセス管理モードでは QEMU を止めて起こし直す＝起動先の上書きと VirtualMedia が効く。レガシーモードは system_reset と同じでよい）。切れていれば On と同じ\n- `ForceOn`：On と同じ\n- `Nmi`：QMP の `inject-nmi` を送る。電源が切れているときは 409 か 400 の Redfish エラー\n- `PushPowerButton`：切れていれば On、入っていれば GracefulShutdown と同じ（PoweringOff と GRACEFUL_TIMEOUT の扱いも同じ）\n- AllowableValues に足す\n- IPMI の Chassis Control 0x04（diag）で NMI を送る。IPMI の power cycle は今の実装を確かめ、PowerCycle と同じ動きにそろえる\n- README（英語・日本語）の Reset types の表と CLAUDE.md に書く\n\n## 確かめ方\nmachine と redfish・ipmi の単体テスト（モックの QMP に inject-nmi が届く、PowerCycle で止めて起こし直す 等）。",
       "doneWhen": "go test ./... -race が通り、4つの ResetType と IPMI の diag の動きを単体テストで確かめている。AllowableValues に4つが入っている",
-      "resolution": null,
+      "resolution": "Factory が取り込みました（factory/redfish-powercycle-nmi-forceon-pushpower）",
       "refs": [],
       "threads": [],
       "createdAt": "2026-10-22T00:37:05.903Z",
-      "updatedAt": "2026-10-22T01:12:51.572Z",
-      "closedAt": null,
+      "updatedAt": "2026-10-22T01:16:54.824Z",
+      "closedAt": "2026-10-22T01:16:54.824Z",
       "extra": {}
     },
     {
