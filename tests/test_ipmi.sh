@@ -87,6 +87,56 @@ test_cipher_suite_17_wrong_password() {
     assert_failure "$rc" "-C 17 with a wrong password should be rejected"
 }
 
+test_sdr_list() {
+    local result
+    result=$(ipmi_cmd sdr list 2>&1)
+    local rc=$?
+    assert_equals "0" "$rc" "sdr list should succeed: $result" || return 1
+    assert_not_contains "$result" "failed" "sdr list should not report errors" || return 1
+    result=$(ipmi_cmd sdr elist all 2>&1)
+    assert_contains "$result" "qemu-bmc" "sdr elist all should show the BMC's MC locator"
+}
+
+test_sel_info_and_list() {
+    local result
+    result=$(ipmi_cmd sel info 2>&1)
+    local rc=$?
+    assert_equals "0" "$rc" "sel info should succeed: $result" || return 1
+    assert_contains "$result" "Entries          : 0" "SEL should be empty" || return 1
+    result=$(ipmi_cmd sel list 2>&1)
+    rc=$?
+    assert_equals "0" "$rc" "sel list should succeed: $result" || return 1
+    assert_contains "$result" "SEL has no entries" "sel list should report no entries"
+}
+
+test_fru_print_serial_uuid() {
+    local guid result
+    guid=$(ipmi_cmd mc guid 2>/dev/null | sed -n 's/^System GUID *: *//p')
+    assert_equals "36" "${#guid}" "mc guid should report the system UUID: '$guid'" || return 1
+    result=$(ipmi_cmd fru print 0 2>&1)
+    local rc=$?
+    assert_equals "0" "$rc" "fru print should succeed: $result" || return 1
+    assert_contains "$result" "Product Manufacturer  : QEMU" "FRU should report manufacturer QEMU" || return 1
+    assert_contains "$result" "Product Name          : qemu-bmc VM" "FRU should report the product name" || return 1
+    assert_contains "$result" "Product Serial        : $guid" "FRU serial should be the system UUID ($guid)"
+}
+
+test_chassis_selftest() {
+    local result
+    result=$(ipmi_cmd chassis selftest 2>&1)
+    local rc=$?
+    assert_equals "0" "$rc" "chassis selftest should succeed: $result" || return 1
+    assert_contains "$result" "passed" "self test should pass"
+}
+
+test_mc_getenables() {
+    local result
+    result=$(ipmi_cmd mc getenables 2>&1)
+    local rc=$?
+    assert_equals "0" "$rc" "mc getenables should succeed: $result" || return 1
+    assert_contains "$result" "System Event Logging" "mc getenables should list the enables"
+}
+
 # --- Run tests ---
 start_test_container
 wait_for_ipmi_ready 60
@@ -103,3 +153,8 @@ run_test test_cipher_suite_3_power_status
 run_test test_cipher_suite_17_power_status
 run_test test_cipher_suite_17_bootdev_pxe
 run_test test_cipher_suite_17_wrong_password
+run_test test_sdr_list
+run_test test_sel_info_and_list
+run_test test_fru_print_serial_uuid
+run_test test_chassis_selftest
+run_test test_mc_getenables

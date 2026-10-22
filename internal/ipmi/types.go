@@ -33,8 +33,12 @@ const (
 const (
 	NetFnChassis           = 0x00
 	NetFnChassisResponse   = 0x01
+	NetFnSensorEvent       = 0x04
+	NetFnSensorEventResp   = 0x05
 	NetFnApp               = 0x06
 	NetFnAppResponse       = 0x07
+	NetFnStorage           = 0x0A
+	NetFnStorageResponse   = 0x0B
 	NetFnTransport         = 0x0C
 	NetFnTransportResponse = 0x0D
 )
@@ -48,6 +52,8 @@ const (
 // IPMI App Commands
 const (
 	CmdGetDeviceID                = 0x01
+	CmdGetSelfTestResults         = 0x04
+	CmdGetBMCGlobalEnables        = 0x2F
 	CmdGetSystemGUID              = 0x37
 	CmdGetChannelAuthCapabilities = 0x38
 	CmdGetSessionChallenge        = 0x39
@@ -67,6 +73,26 @@ const (
 	CmdSetUserName      = 0x45
 	CmdGetUserName      = 0x46
 	CmdSetUserPassword  = 0x47
+)
+
+// IPMI Storage Commands
+const (
+	CmdGetFRUInventoryAreaInfo = 0x10
+	CmdReadFRUData             = 0x11
+	CmdGetSDRRepositoryInfo    = 0x20
+	CmdReserveSDRRepository    = 0x22
+	CmdGetSDR                  = 0x23
+	CmdGetSELInfo              = 0x40
+	CmdReserveSEL              = 0x42
+	CmdGetSELEntry             = 0x43
+	CmdClearSEL                = 0x47
+)
+
+// IPMI Sensor/Event Commands
+const (
+	CmdGetDeviceSDRInfo           = 0x20
+	CmdGetDeviceSDR               = 0x21
+	CmdReserveDeviceSDRRepository = 0x22
 )
 
 // IPMI Chassis Commands
@@ -150,6 +176,7 @@ const (
 	CompletionCodeInvalidForLUN       CompletionCode = 0xC2
 	CompletionCodeTimeout             CompletionCode = 0xC3
 	CompletionCodeOutOfSpace          CompletionCode = 0xC4
+	CompletionCodeNotPresent          CompletionCode = 0xCB
 	CompletionCodeInvalidField        CompletionCode = 0xCC
 	CompletionCodeParameterOutOfRange CompletionCode = 0xC9
 	CompletionCodeUnspecified         CompletionCode = 0xFF

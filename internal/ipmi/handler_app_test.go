@@ -52,3 +52,15 @@ func TestHandleGetSystemGUID_Unset(t *testing.T) {
 	code, _ = handleAppCommand(&IPMIMessage{TargetLun: NetFnApp << 2, Command: CmdGetSystemGUID}, nil, nil)
 	assert.Equal(t, CompletionCodeInvalidCommand, code)
 }
+
+func TestHandleGetSelfTestResults(t *testing.T) {
+	code, data := handleAppCommand(&IPMIMessage{TargetLun: NetFnApp << 2, Command: CmdGetSelfTestResults}, nil, nil)
+	assert.Equal(t, CompletionCodeOK, code)
+	assert.Equal(t, []byte{0x55, 0x00}, data)
+}
+
+func TestHandleGetBMCGlobalEnables(t *testing.T) {
+	code, data := handleAppCommand(&IPMIMessage{TargetLun: NetFnApp << 2, Command: CmdGetBMCGlobalEnables}, nil, nil)
+	assert.Equal(t, CompletionCodeOK, code)
+	assert.Equal(t, []byte{0x0C}, data)
+}

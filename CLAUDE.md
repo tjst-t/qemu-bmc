@@ -23,7 +23,7 @@ docker/
   Dockerfile                   # Multi-stage build (Go builder + Debian runtime)
   entrypoint.sh                # Environment variables → QEMU args conversion
   setup-network.sh             # TAP/bridge network setup for VM passthrough
-tests/                         # Bash-based container integration tests (95 tests)
+tests/                         # Bash-based container integration tests (100 tests)
   run_tests.sh                 # Test runner (category-based)
   test_helper.sh               # Assertions, container mgmt, IPMI/Redfish helpers
   test_*.sh                    # Test categories (container, ipmi, redfish, power, boot, etc.)
@@ -79,7 +79,7 @@ make docker-build
 # Container integration tests (quick smoke tests)
 make container-test
 
-# Container integration tests (all 95 tests across 9 categories)
+# Container integration tests (all 100 tests across 9 categories)
 make container-test-all
 
 # Run specific test categories
@@ -169,6 +169,8 @@ Middleware: auth (X-Auth-Token session or Basic; GET /redfish, GET /redfish/v1 a
 | Command | NetFn | Cmd | Description |
 |---------|-------|-----|-------------|
 | Get Device ID | App (0x06) | 0x01 | Static BMC identity |
+| Get Self Test Results | App | 0x04 | 0x55 0x00 (passed) |
+| Get BMC Global Enables | App | 0x2F | Fixed 0x0C (event message buffer + system event logging) |
 | Get System GUID | App | 0x37 | System UUID (IPMI encoding, LSB first) |
 | Get Channel Auth Capabilities | App | 0x38 | Auth type negotiation |
 | Set Session Privilege | App | 0x3B | Privilege level |
@@ -179,6 +181,10 @@ Middleware: auth (X-Auth-Token session or Basic; GET /redfish, GET /redfish/v1 a
 | Chassis Identify | Chassis | 0x04 | Identify LED (log only) |
 | Set Boot Options | Chassis | 0x08 | Boot device override |
 | Get Boot Options | Chassis | 0x09 | Boot device query |
+| Get FRU Inventory Area Info / Read FRU Data | Storage (0x0A) | 0x10 / 0x11 | FRU 0: Common Header + Product Info Area (QEMU, qemu-bmc VM, serial = system UUID) |
+| Get SDR Repository Info / Reserve / Get SDR | Storage | 0x20 / 0x22 / 0x23 | One record: the BMC's MC Device Locator (an empty repository makes ipmitool try to rebuild it and print errors) |
+| Get SEL Info / Reserve SEL / Get SEL Entry / Clear SEL | Storage | 0x40 / 0x42 / 0x43 / 0x47 | Always-empty SEL (Get SEL Entry → 0xCB) |
+| Get Device SDR Info / Get Device SDR / Reserve | Sensor/Event (0x04) | 0x20 / 0x21 / 0x22 | No device SDRs (Get Device SDR → 0xCB) |
 
 Supports: RMCP v1.0, IPMI 1.5, RMCP+ cipher suite 3 (RAKP-HMAC-SHA1, HMAC-SHA1-96) and 17 (RAKP-HMAC-SHA256, HMAC-SHA256-128), AES-CBC-128 encryption
 

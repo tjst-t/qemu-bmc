@@ -653,6 +653,10 @@ func handleIPMICommand(msg *IPMIMessage, machine MachineInterface, state *bmc.St
 		return handleChassisCommand(msg, machine)
 	case NetFnTransport:
 		return handleTransportCommand(msg, state)
+	case NetFnStorage:
+		return handleStorageCommand(msg, state)
+	case NetFnSensorEvent:
+		return handleSensorEventCommand(msg)
 	default:
 		return CompletionCodeInvalidCommand, nil
 	}

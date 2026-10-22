@@ -282,11 +282,17 @@ Another power action (Redfish or IPMI) during `PoweringOff` / `PoweringOn` ends 
 | Command | Description |
 |---------|-------------|
 | Get Device ID | BMC identity |
+| Get Self Test Results | Always "passed" (`chassis selftest`, `mc selftest`) |
+| Get BMC Global Enables | Fixed value: event message buffer and system event logging enabled (`mc getenables`) |
 | Get Channel Auth Capabilities | Auth type negotiation |
 | Get Channel Cipher Suites | Cipher suite list (suites 3 and 17) |
 | Get Chassis Status | Power state query |
 | Chassis Control | Power on/off/cycle/reset |
 | Set/Get Boot Options | Boot device override |
+| Get SDR Repository Info / Reserve SDR Repository / Get SDR | One record only: the BMC's own MC Device Locator, so `sdr list` is empty (ipmitool rebuilds an empty repository and prints errors) |
+| Get Device SDR Info / Reserve Device SDR Repository / Get Device SDR | No device SDRs |
+| Get SEL Info / Reserve SEL / Get SEL Entry / Clear SEL | Always empty SEL (`sel info`, `sel list`, `sel clear`) |
+| Get FRU Inventory Area Info / Read FRU Data | FRU 0 only: Product Manufacturer `QEMU`, Product Name `qemu-bmc VM`, Product Serial = system UUID (`fru print`) |
 
 ## Environment Variables
 
@@ -352,7 +358,7 @@ go vet ./...
 
 # Container integration tests
 make container-test         # Quick smoke tests
-make container-test-all     # All 95 tests (9 categories)
+make container-test-all     # All 100 tests (9 categories)
 ```
 
 ## Architecture
@@ -667,10 +673,17 @@ ipmitool user enable 3
 | コマンド | 説明 |
 |---------|------|
 | Get Device ID | BMC 識別情報 |
+| Get Self Test Results | 常に「passed」（`chassis selftest`・`mc selftest`） |
+| Get BMC Global Enables | 固定値：Event Message Buffer と System Event Logging が有効（`mc getenables`） |
 | Get Channel Auth Capabilities | 認証方式ネゴシエーション |
+| Get Channel Cipher Suites | 暗号スイート一覧（3 と 17） |
 | Get Chassis Status | 電源状態取得 |
 | Chassis Control | 電源オン/オフ/サイクル/リセット |
 | Set/Get Boot Options | ブートデバイス変更 |
+| Get SDR Repository Info / Reserve SDR Repository / Get SDR | レコードは BMC 自身の MC Device Locator の1件だけ。`sdr list` は空（ipmitool はリポジトリが空だと作り直そうとしてエラーを出すため） |
+| Get Device SDR Info / Reserve Device SDR Repository / Get Device SDR | Device SDR は無い |
+| Get SEL Info / Reserve SEL / Get SEL Entry / Clear SEL | SEL は常に空（`sel info`・`sel list`・`sel clear`） |
+| Get FRU Inventory Area Info / Read FRU Data | FRU 0 だけ。Product Manufacturer `QEMU`、Product Name `qemu-bmc VM`、Product Serial はシステムの UUID（`fru print`） |
 
 ## 環境変数
 
@@ -736,7 +749,7 @@ go vet ./...
 
 # コンテナ統合テスト
 make container-test         # クイックスモークテスト
-make container-test-all     # 全 95 テスト (9 カテゴリ)
+make container-test-all     # 全 100 テスト (9 カテゴリ)
 ```
 
 ## アーキテクチャ

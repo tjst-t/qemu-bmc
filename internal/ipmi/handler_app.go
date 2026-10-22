@@ -17,6 +17,13 @@ func handleAppCommand(msg *IPMIMessage, machine MachineInterface, state *bmc.Sta
 	switch msg.Command {
 	case CmdGetDeviceID:
 		return handleGetDeviceID()
+	case CmdGetSelfTestResults:
+		// 0x55: no error; 0x00: no failure bits
+		return CompletionCodeOK, []byte{0x55, 0x00}
+	case CmdGetBMCGlobalEnables:
+		// Event message buffer (bit 2) and system event logging (bit 3)
+		// enabled, as on a typical BMC. The value is fixed.
+		return CompletionCodeOK, []byte{0x0C}
 	case CmdGetSystemGUID:
 		return handleGetSystemGUID(state)
 	case CmdGetChannelAuthCapabilities:
