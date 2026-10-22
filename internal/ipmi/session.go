@@ -16,9 +16,9 @@ type Session struct {
 	ManagedSystemGUID         [16]byte
 	UserName                  []byte
 	UserNameLength            uint8
-	SessionIntegrityKey       []byte // SIK - 20 bytes
-	IntegrityKey              []byte // K1 - 20 bytes
-	ConfidentialityKey        []byte // K2 - 20 bytes
+	SessionIntegrityKey       []byte // SIK - 20 bytes (SHA1) or 32 bytes (SHA256)
+	IntegrityKey              []byte // K1 - 20 bytes (SHA1) or 32 bytes (SHA256)
+	ConfidentialityKey        []byte // K2 - 20 bytes (SHA1) or 32 bytes (SHA256)
 	Authenticated             bool
 	// Negotiated algorithms (set during Open Session exchange)
 	AuthAlgorithm            uint8

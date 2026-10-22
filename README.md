@@ -25,7 +25,7 @@ A Go single binary that controls QEMU VMs via both Redfish API (HTTPS) and IPMI 
 ## Features
 
 - **Redfish API** - ServiceRoot, Systems, Managers, VirtualMedia, Chassis (gofish compatible)
-- **IPMI over LAN** - RMCP/RMCP+, RAKP HMAC-SHA1 authentication, AES-CBC-128 encryption
+- **IPMI over LAN** - RMCP/RMCP+, cipher suites 3 (RAKP-HMAC-SHA1) and 17 (RAKP-HMAC-SHA256, ipmitool `-C 17`), AES-CBC-128 encryption
 - **VM IPMI (In-Band)** - Guest OS IPMI via QEMU `ipmi-bmc-extern` KCS interface for MaaS commissioning
 - **noVNC** - Browser-based VNC console served on the Redfish HTTP port (no extra port needed)
 - **QMP Control** - Power operations, boot device changes, VirtualMedia mount
@@ -276,7 +276,7 @@ Another power action (Redfish or IPMI) during `PoweringOff` / `PoweringOn` ends 
 |---------|-------------|
 | Get Device ID | BMC identity |
 | Get Channel Auth Capabilities | Auth type negotiation |
-| Get Channel Cipher Suites | Cipher suite list (suite 3 only) |
+| Get Channel Cipher Suites | Cipher suite list (suites 3 and 17) |
 | Get Chassis Status | Power state query |
 | Chassis Control | Power on/off/cycle/reset |
 | Set/Get Boot Options | Boot device override |
@@ -345,7 +345,7 @@ go vet ./...
 
 # Container integration tests
 make container-test         # Quick smoke tests
-make container-test-all     # All 91 tests (9 categories)
+make container-test-all     # All 95 tests (9 categories)
 ```
 
 ## Architecture
@@ -409,7 +409,7 @@ QEMU VM を Redfish API (HTTPS) と IPMI over LAN (UDP) の両方で制御する
 ## 機能
 
 - **Redfish API** - ServiceRoot, Systems, Managers, VirtualMedia, Chassis (gofish 互換)
-- **IPMI over LAN** - RMCP/RMCP+, RAKP HMAC-SHA1 認証, AES-CBC-128 暗号化
+- **IPMI over LAN** - RMCP/RMCP+, 暗号スイート 3（RAKP-HMAC-SHA1）と 17（RAKP-HMAC-SHA256、ipmitool の `-C 17`）, AES-CBC-128 暗号化
 - **VM IPMI（イン・バンド）** - QEMU `ipmi-bmc-extern` KCS インターフェースによるゲスト OS IPMI（MaaS コミッショニング対応）
 - **noVNC** - Redfish HTTP ポートでブラウザから VNC コンソールにアクセス（追加ポート不要）
 - **QMP 制御** - 電源操作、ブートデバイス変更、VirtualMedia マウント
@@ -722,7 +722,7 @@ go vet ./...
 
 # コンテナ統合テスト
 make container-test         # クイックスモークテスト
-make container-test-all     # 全 91 テスト (9 カテゴリ)
+make container-test-all     # 全 95 テスト (9 カテゴリ)
 ```
 
 ## アーキテクチャ

@@ -110,20 +110,21 @@ func TestHandleGetChannelInfo_InvalidData(t *testing.T) {
 func TestHandleGetChannelCipherSuites_ListBySuite(t *testing.T) {
 	code, data := handleGetChannelCipherSuites([]byte{0x01, 0x00, 0x80})
 	assert.Equal(t, CompletionCodeOK, code)
-	// channel 1, then one record: suite 3 = HMAC-SHA1 / HMAC-SHA1-96 / AES-CBC-128
-	assert.Equal(t, []byte{0x01, 0xC0, 0x03, 0x01, 0x41, 0x81}, data)
+	// channel 1, then suite 3 = HMAC-SHA1 / HMAC-SHA1-96 / AES-CBC-128
+	// and suite 17 = HMAC-SHA256 / HMAC-SHA256-128 / AES-CBC-128
+	assert.Equal(t, []byte{0x01, 0xC0, 0x03, 0x01, 0x41, 0x81, 0xC0, 0x11, 0x03, 0x44, 0x81}, data)
 }
 
 func TestHandleGetChannelCipherSuites_CurrentChannel(t *testing.T) {
 	code, data := handleGetChannelCipherSuites([]byte{0x0E, 0x00, 0x80})
 	assert.Equal(t, CompletionCodeOK, code)
-	assert.Equal(t, []byte{0x01, 0xC0, 0x03, 0x01, 0x41, 0x81}, data)
+	assert.Equal(t, []byte{0x01, 0xC0, 0x03, 0x01, 0x41, 0x81, 0xC0, 0x11, 0x03, 0x44, 0x81}, data)
 }
 
 func TestHandleGetChannelCipherSuites_ListByAlgorithm(t *testing.T) {
 	code, data := handleGetChannelCipherSuites([]byte{0x01, 0x00, 0x00})
 	assert.Equal(t, CompletionCodeOK, code)
-	assert.Equal(t, []byte{0x01, 0x01, 0x41, 0x81}, data)
+	assert.Equal(t, []byte{0x01, 0x01, 0x03, 0x41, 0x44, 0x81}, data)
 }
 
 func TestHandleGetChannelCipherSuites_IndexPastEnd(t *testing.T) {
@@ -153,5 +154,5 @@ func TestHandleAppCommand_GetChannelCipherSuites(t *testing.T) {
 	msg := &IPMIMessage{Command: CmdGetChannelCipherSuites, Data: []byte{0x0E, 0x00, 0x80}}
 	code, data := handleAppCommand(msg, nil, newTestBMCState())
 	assert.Equal(t, CompletionCodeOK, code)
-	assert.Equal(t, []byte{0x01, 0xC0, 0x03, 0x01, 0x41, 0x81}, data)
+	assert.Equal(t, []byte{0x01, 0xC0, 0x03, 0x01, 0x41, 0x81, 0xC0, 0x11, 0x03, 0x44, 0x81}, data)
 }

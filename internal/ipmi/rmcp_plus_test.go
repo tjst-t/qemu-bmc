@@ -5,7 +5,9 @@ import (
 	"crypto/cipher"
 	"crypto/hmac"
 	"crypto/sha1"
+	"crypto/sha256"
 	"encoding/binary"
+	"encoding/hex"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -320,7 +322,7 @@ func TestOpenSession_UnsupportedConfAlgorithm(t *testing.T) {
 	assert.Equal(t, uint8(OpenSessionStatusInvalidConfAlgorithm), resp[13], "should reject unsupported conf algorithm")
 }
 
-func TestOpenSession_UnsupportedCipherSuite17(t *testing.T) {
+func TestOpenSession_CipherSuite17_AlgorithmsStoredInSession(t *testing.T) {
 	sm := NewSessionManager()
 
 	// Cipher suite 17: RAKP-HMAC-SHA256 (0x03) + HMAC-SHA256-128 (0x04) + AES-CBC-128 (0x01)
@@ -332,7 +334,156 @@ func TestOpenSession_UnsupportedCipherSuite17(t *testing.T) {
 	require.NotNil(t, resp)
 
 	assert.Equal(t, uint8(PayloadTypeOpenSessionResponse), resp[1])
-	assert.Equal(t, uint8(OpenSessionStatusInvalidAuthAlgorithm), resp[13], "should reject SHA256 auth algorithm")
+	assert.Equal(t, uint8(OpenSessionStatusSuccess), resp[13])
+
+	session, ok := sm.GetSession(binary.LittleEndian.Uint32(resp[20:24]))
+	require.True(t, ok)
+	assert.Equal(t, uint8(AuthAlgorithmHMACSHA256), session.AuthAlgorithm)
+	assert.Equal(t, uint8(IntegrityAlgorithmHMACSHA256_128), session.IntegrityAlgorithm)
+	assert.Equal(t, uint8(ConfAlgorithmAESCBC128), session.ConfidentialityAlgorithm)
+
+	assert.Equal(t, uint8(AuthAlgorithmHMACSHA256), resp[12+16], "auth algorithm in response")
+	assert.Equal(t, uint8(IntegrityAlgorithmHMACSHA256_128), resp[12+24], "integrity algorithm in response")
+	assert.Equal(t, uint8(ConfAlgorithmAESCBC128), resp[12+32], "conf algorithm in response")
+}
+
+func TestOpenSession_MixedSuiteRejected(t *testing.T) {
+	sm := NewSessionManager()
+
+	// RAKP-HMAC-SHA256 with HMAC-SHA1-96 is not a supported suite
+	req := buildOpenSessionRequestWithAlgorithms(0x01, 0x12345678, AuthAlgorithmHMACSHA256, IntegrityAlgorithmHMACSHA1_96, ConfAlgorithmAESCBC128)
+	data := wrapRMCPPlusPayload(PayloadTypeOpenSessionRequest, 0, 0, req)
+
+	resp, err := HandleRMCPPlusMessage(data, sm, "admin", "password", nil, bmc.NewState("admin", "password"))
+	require.NoError(t, err)
+	assert.Equal(t, uint8(OpenSessionStatusInvalidIntegrityAlgorithm), resp[13])
+}
+
+func mustHex(t *testing.T, s string) []byte {
+	t.Helper()
+	b, err := hex.DecodeString(s)
+	require.NoError(t, err)
+	return b
+}
+
+// newKnownSHA256Session registers a cipher suite 17 session with fixed IDs and
+// random numbers so the RAKP hashes can be checked against known values
+// (computed independently with Python hmac/hashlib).
+func newKnownSHA256Session(sm *SessionManager) *Session {
+	session := &Session{
+		RemoteConsoleSessionID:   0xAAAABBBB,
+		ManagedSystemSessionID:   0x11223344,
+		AuthAlgorithm:            AuthAlgorithmHMACSHA256,
+		IntegrityAlgorithm:       IntegrityAlgorithmHMACSHA256_128,
+		ConfidentialityAlgorithm: ConfAlgorithmAESCBC128,
+	}
+	for i := range session.ManagedSystemRandomNumber {
+		session.ManagedSystemRandomNumber[i] = byte(0x30 + i)
+		session.ManagedSystemGUID[i] = byte(0xA0 + i)
+	}
+	sm.sessions[session.ManagedSystemSessionID] = session
+	return session
+}
+
+func TestRAKP_CipherSuite17_KnownValues(t *testing.T) {
+	sm := NewSessionManager()
+	state := bmc.NewState("admin", "password")
+	session := newKnownSHA256Session(sm)
+
+	// RAKP 1 (remote console random = 08h..17h) -> RAKP 2 auth code is a full HMAC-SHA256
+	rakp1 := buildRAKPMessage1(0x02, session.ManagedSystemSessionID, "admin")
+	rakp2, err := HandleRMCPPlusMessage(wrapRMCPPlusPayload(PayloadTypeRAKPMessage1, 0, 0, rakp1), sm, "admin", "password", nil, state)
+	require.NoError(t, err)
+	assert.Equal(t, uint8(0x00), rakp2[13], "RAKP2 status")
+	require.Len(t, rakp2, 12+8+16+16+32)
+	assert.Equal(t, mustHex(t, "3eff06112d52bc13c15a7fb31f45d22f2a9c5871bab04aae0c090a7e076ca0ef"), rakp2[52:84])
+
+	// RAKP 3 with a 32-byte HMAC-SHA256 auth code -> RAKP 4 ICV is HMAC-SHA256-128
+	rakp3 := buildRAKPMessage3(0x03, session.ManagedSystemSessionID, mustHex(t, "26e3fc73b5c2283f6749060236110fc0d6c9ad93ceaba25d563ee54b72e1ec8f"))
+	rakp4, err := HandleRMCPPlusMessage(wrapRMCPPlusPayload(PayloadTypeRAKPMessage3, 0, 0, rakp3), sm, "admin", "password", nil, state)
+	require.NoError(t, err)
+	assert.Equal(t, uint8(0x00), rakp4[13], "RAKP4 status")
+	require.Len(t, rakp4, 12+8+16)
+	assert.Equal(t, mustHex(t, "fa6e764811c9c72b2a50b9f50c188d57"), rakp4[20:36])
+
+	assert.True(t, session.Authenticated)
+	assert.Equal(t, mustHex(t, "072e64fab19f43a8a8e951efed5fb1f077230e1468b22ca1d10c4b60d7733ff0"), session.SessionIntegrityKey)
+	assert.Equal(t, mustHex(t, "960fa93d053fb1d7f10c0ea194ab4fb61a59d85f3f9328996adcb8f49ee0d331"), session.IntegrityKey)
+	assert.Equal(t, mustHex(t, "c0e33f62d31b10c6471cc9629f24dabe760f3ab5282a2fb46570ecebbe719feb"), session.ConfidentialityKey)
+
+	// Packet integrity: HMAC-SHA256-128 with K1
+	pkt := make([]byte, 24)
+	for i := range pkt {
+		pkt[i] = byte(i)
+	}
+	assert.Equal(t, mustHex(t, "2020a45c7c67e2612b70b7246a0103cd"), integrityAuthCode(session, pkt))
+}
+
+func TestRAKP_CipherSuite17_WrongPassword(t *testing.T) {
+	sm := NewSessionManager()
+	state := bmc.NewState("admin", "password")
+	session := newKnownSHA256Session(sm)
+
+	rakp1 := buildRAKPMessage1(0x02, session.ManagedSystemSessionID, "admin")
+	_, err := HandleRMCPPlusMessage(wrapRMCPPlusPayload(PayloadTypeRAKPMessage1, 0, 0, rakp1), sm, "admin", "password", nil, state)
+	require.NoError(t, err)
+
+	authBuf := buildRAKP3AuthBuf(session.ManagedSystemRandomNumber[:], session.RemoteConsoleSessionID, session.RequestedPrivilegeLevel, session.UserNameLength, session.UserName)
+	mac := hmac.New(sha256.New, []byte("wrong-password"))
+	mac.Write(authBuf)
+	rakp3 := buildRAKPMessage3(0x03, session.ManagedSystemSessionID, mac.Sum(nil))
+	rakp4, err := HandleRMCPPlusMessage(wrapRMCPPlusPayload(PayloadTypeRAKPMessage3, 0, 0, rakp3), sm, "admin", "password", nil, state)
+	require.NoError(t, err)
+	assert.Equal(t, uint8(0x0F), rakp4[13], "RAKP4 should report invalid integrity check")
+	assert.False(t, session.Authenticated)
+}
+
+func TestRAKP_CipherSuite17_ShortAuthCode(t *testing.T) {
+	sm := NewSessionManager()
+	session := newKnownSHA256Session(sm)
+
+	// A 20-byte (SHA1-sized) auth code is too short for RAKP-HMAC-SHA256
+	rakp3 := buildRAKPMessage3(0x03, session.ManagedSystemSessionID, make([]byte, 20))
+	_, err := HandleRMCPPlusMessage(wrapRMCPPlusPayload(PayloadTypeRAKPMessage3, 0, 0, rakp3), sm, "admin", "password", nil, bmc.NewState("admin", "password"))
+	assert.Error(t, err)
+	assert.False(t, session.Authenticated)
+}
+
+func TestHandleEncryptedIPMI_CipherSuite17(t *testing.T) {
+	sm := NewSessionManager()
+	user := "admin"
+	pass := "password"
+	mock := newIPMIMockMachine(machine.PowerOn)
+	state := bmc.NewState(user, pass)
+
+	managedSessionID := setupRMCPSessionWithSuite(t, sm, user, pass, state, AuthAlgorithmHMACSHA256, IntegrityAlgorithmHMACSHA256_128)
+	session, ok := sm.GetSession(managedSessionID)
+	require.True(t, ok)
+	require.True(t, session.Authenticated)
+	require.Len(t, session.IntegrityKey, 32)
+
+	ipmiMsg := buildTestIPMIRequest(NetFnChassis, CmdGetChassisStatus, nil)
+	enc, err := encryptIPMISpecAESCBC(session.ConfidentialityKey, ipmiMsg)
+	require.NoError(t, err)
+
+	pkt := buildAuthenticatedRMCPPlusPacket(session, enc)
+	resp, err := HandleRMCPPlusMessage(pkt, sm, user, pass, mock, state)
+	require.NoError(t, err)
+
+	// Response AuthCode is HMAC-SHA256-128 with K1 over AuthType..Next Header
+	require.Greater(t, len(resp), 16)
+	body, authCode := resp[:len(resp)-16], resp[len(resp)-16:]
+	mac := hmac.New(sha256.New, session.IntegrityKey)
+	mac.Write(body)
+	assert.Equal(t, mac.Sum(nil)[:16], authCode)
+	assert.Equal(t, byte(0x07), body[len(body)-1], "next header")
+
+	payloadLen := int(binary.LittleEndian.Uint16(resp[10:12]))
+	dec, err := decryptAESCBC(session.ConfidentialityKey, resp[12:12+payloadLen])
+	require.NoError(t, err)
+	assert.Equal(t, byte(CmdGetChassisStatus), dec[5])
+	assert.Equal(t, uint8(CompletionCodeOK), uint8(dec[6]))
+	assert.Equal(t, byte(0x01), dec[7]&0x01, "power on")
 }
 
 func TestEncryptDecryptAESCBC(t *testing.T) {
@@ -527,8 +678,15 @@ func encryptIPMISpecAESCBC(key []byte, plaintext []byte) ([]byte, error) {
 // setupRMCPSession performs Open Session + RAKP 1-4 and returns the managed system session ID.
 func setupRMCPSession(t *testing.T, sm *SessionManager, user, pass string, state *bmc.State) uint32 {
 	t.Helper()
+	return setupRMCPSessionWithSuite(t, sm, user, pass, state, AuthAlgorithmHMACSHA1, IntegrityAlgorithmHMACSHA1_96)
+}
 
-	openReq := buildOpenSessionRequest(0x01, 0xAAAABBBB)
+// setupRMCPSessionWithSuite is setupRMCPSession with the given auth/integrity algorithms
+// (AES-CBC-128 confidentiality).
+func setupRMCPSessionWithSuite(t *testing.T, sm *SessionManager, user, pass string, state *bmc.State, authAlg, intAlg uint8) uint32 {
+	t.Helper()
+
+	openReq := buildOpenSessionRequestWithAlgorithms(0x01, 0xAAAABBBB, authAlg, intAlg, ConfAlgorithmAESCBC128)
 	openData := wrapRMCPPlusPayload(PayloadTypeOpenSessionRequest, 0, 0, openReq)
 	openResp, err := HandleRMCPPlusMessage(openData, sm, user, pass, nil, state)
 	require.NoError(t, err)
@@ -544,7 +702,7 @@ func setupRMCPSession(t *testing.T, sm *SessionManager, user, pass string, state
 	require.True(t, ok)
 
 	rakp3AuthBuf := buildRAKP3AuthBuf(session.ManagedSystemRandomNumber[:], session.RemoteConsoleSessionID, session.RequestedPrivilegeLevel, session.UserNameLength, session.UserName)
-	mac := hmac.New(sha1.New, []byte(pass))
+	mac := hmac.New(authHash(authAlg), []byte(pass))
 	mac.Write(rakp3AuthBuf)
 
 	rakp3 := buildRAKPMessage3(0x03, managedSessionID, mac.Sum(nil))
@@ -578,10 +736,14 @@ func buildAuthenticatedRMCPPlusPacket(session *Session, encryptedPayload []byte)
 	pkt = append(pkt, byte(padNeeded)) // Pad Length
 	pkt = append(pkt, 0x07)             // Next Header
 
-	// HMAC-SHA1-96 over the entire packet so far
-	mac := hmac.New(sha1.New, session.IntegrityKey)
+	// HMAC-SHA1-96 (suite 3) or HMAC-SHA256-128 (suite 17) over the entire packet so far
+	h, n := sha1.New, 12
+	if session.IntegrityAlgorithm == IntegrityAlgorithmHMACSHA256_128 {
+		h, n = sha256.New, 16
+	}
+	mac := hmac.New(h, session.IntegrityKey)
 	mac.Write(pkt)
-	pkt = append(pkt, mac.Sum(nil)[:12]...)
+	pkt = append(pkt, mac.Sum(nil)[:n]...)
 
 	return pkt
 }
@@ -667,11 +829,11 @@ func buildRAKP3AuthBuf(managedSystemRandom []byte, remoteConsoleSessionID uint32
 }
 
 func buildRAKPMessage3(tag uint8, managedSessionID uint32, authCode []byte) []byte {
-	buf := make([]byte, 28)
+	buf := make([]byte, 8+len(authCode))
 	buf[0] = tag
 	buf[1] = 0x00 // status
 	binary.LittleEndian.PutUint32(buf[4:], managedSessionID)
-	copy(buf[8:], authCode[:20])
+	copy(buf[8:], authCode)
 	return buf
 }
 

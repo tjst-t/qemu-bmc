@@ -114,23 +114,41 @@ func handleGetChannelInfo(reqData []byte, state *bmc.State) (CompletionCode, []b
 	return CompletionCodeOK, data
 }
 
-// Cipher suite 3 (RAKP-HMAC-SHA1 + HMAC-SHA1-96 + AES-CBC-128) is the only one
-// accepted by handleOpenSession. Algorithm tags follow IPMI 2.0 Table 22-19.
+// Records for the cipher suites accepted by handleOpenSession
+// (supportedCipherSuites). Algorithm tags follow IPMI 2.0 Table 22-19.
 var (
 	// Records listed by cipher suite: [0xC0][suite ID][auth][integrity][conf]
-	cipherSuiteRecords = []byte{
-		0xC0, 0x03,
-		0x00 | AuthAlgorithmHMACSHA1,
-		0x40 | IntegrityAlgorithmHMACSHA1_96,
-		0x80 | ConfAlgorithmAESCBC128,
-	}
-	// Records listed by supported algorithm: [auth][integrity][conf]
-	cipherAlgorithmRecords = []byte{
-		0x00 | AuthAlgorithmHMACSHA1,
-		0x40 | IntegrityAlgorithmHMACSHA1_96,
-		0x80 | ConfAlgorithmAESCBC128,
-	}
+	cipherSuiteRecords = buildCipherSuiteRecords()
+	// Records listed by supported algorithm: [auth][integrity][conf] once per algorithm
+	cipherAlgorithmRecords = buildCipherAlgorithmRecords()
 )
+
+func buildCipherSuiteRecords() []byte {
+	var records []byte
+	for _, cs := range supportedCipherSuites {
+		records = append(records, 0xC0, cs.ID, 0x00|cs.Auth, 0x40|cs.Integrity, 0x80|cs.Confidentiality)
+	}
+	return records
+}
+
+func buildCipherAlgorithmRecords() []byte {
+	var auth, integrity, conf []byte
+	for _, cs := range supportedCipherSuites {
+		auth = appendUnique(auth, 0x00|cs.Auth)
+		integrity = appendUnique(integrity, 0x40|cs.Integrity)
+		conf = appendUnique(conf, 0x80|cs.Confidentiality)
+	}
+	return append(append(auth, integrity...), conf...)
+}
+
+func appendUnique(s []byte, b byte) []byte {
+	for _, v := range s {
+		if v == b {
+			return s
+		}
+	}
+	return append(s, b)
+}
 
 // handleGetChannelCipherSuites returns the cipher suites supported on the LAN channel.
 // Request (3 bytes):

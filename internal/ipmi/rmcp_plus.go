@@ -7,8 +7,10 @@ import (
 	"crypto/hmac"
 	"crypto/rand"
 	"crypto/sha1"
+	"crypto/sha256"
 	"encoding/binary"
 	"fmt"
+	"hash"
 
 	"github.com/tjst-t/qemu-bmc/internal/bmc"
 )
@@ -57,13 +59,72 @@ type RAKPMessage1 struct {
 	UserName               []byte
 }
 
-// RAKPMessage3 from client
+// RAKPMessage3 from client (parsed manually: the auth code is 20 bytes for
+// RAKP-HMAC-SHA1 and 32 bytes for RAKP-HMAC-SHA256)
 type RAKPMessage3 struct {
 	MessageTag             uint8
 	StatusCode             uint8
 	Reserved               [2]byte
 	ManagedSystemSessionID uint32
-	KeyExchangeAuthCode    [20]byte // HMAC-SHA1
+	KeyExchangeAuthCode    []byte
+}
+
+// cipherSuite is a supported combination of RMCP+ algorithms.
+type cipherSuite struct {
+	ID              uint8
+	Auth            uint8
+	Integrity       uint8
+	Confidentiality uint8
+}
+
+// supportedCipherSuites lists the cipher suites accepted by handleOpenSession,
+// in the order reported by Get Channel Cipher Suites.
+var supportedCipherSuites = []cipherSuite{
+	// Suite 3: RAKP-HMAC-SHA1 + HMAC-SHA1-96 + AES-CBC-128
+	{3, AuthAlgorithmHMACSHA1, IntegrityAlgorithmHMACSHA1_96, ConfAlgorithmAESCBC128},
+	// Suite 17: RAKP-HMAC-SHA256 + HMAC-SHA256-128 + AES-CBC-128
+	{17, AuthAlgorithmHMACSHA256, IntegrityAlgorithmHMACSHA256_128, ConfAlgorithmAESCBC128},
+}
+
+// authHash returns the hash used by the RAKP authentication algorithm for the
+// RAKP 2/3 auth codes, the RAKP 4 ICV and the SIK/K1/K2 derivation.
+func authHash(authAlg uint8) func() hash.Hash {
+	if authAlg == AuthAlgorithmHMACSHA256 {
+		return sha256.New
+	}
+	return sha1.New
+}
+
+// authCodeLength returns the length of the RAKP 2/3 key exchange auth code.
+func authCodeLength(authAlg uint8) int {
+	return authHash(authAlg)().Size()
+}
+
+// rakp4ICVLength returns the length of the RAKP 4 integrity check value:
+// HMAC-SHA1-96 for RAKP-HMAC-SHA1, HMAC-SHA256-128 for RAKP-HMAC-SHA256.
+func rakp4ICVLength(authAlg uint8) int {
+	if authAlg == AuthAlgorithmHMACSHA256 {
+		return 16
+	}
+	return 12
+}
+
+// integrityHash returns the hash and the truncated AuthCode length of the
+// packet integrity algorithm (HMAC-SHA1-96 or HMAC-SHA256-128).
+func integrityHash(integrityAlg uint8) (func() hash.Hash, int) {
+	if integrityAlg == IntegrityAlgorithmHMACSHA256_128 {
+		return sha256.New, 16
+	}
+	return sha1.New, 12
+}
+
+// integrityAuthCode computes the AuthCode of an authenticated RMCP+ packet over
+// data (AuthType through Next Header) with the session's integrity key K1.
+func integrityAuthCode(session *Session, data []byte) []byte {
+	h, n := integrityHash(session.IntegrityAlgorithm)
+	mac := hmac.New(h, session.IntegrityKey)
+	mac.Write(data)
+	return mac.Sum(nil)[:n]
 }
 
 // HandleRMCPPlusMessage processes an RMCP+ message and returns a response
@@ -104,18 +165,24 @@ func handleOpenSession(payload []byte, header *RMCPPlusSessionHeader, sessionMgr
 		return nil, fmt.Errorf("parsing open session request: %w", err)
 	}
 
-	// Validate proposed algorithms against supported set.
-	// Only cipher suite 3 is supported: RAKP-HMAC-SHA1 + HMAC-SHA1-96 + AES-CBC-128.
+	// Validate proposed algorithms against the supported cipher suites (3 and 17).
 	// Reject unsupported suites with the appropriate IPMI 2.0 error status code so that
 	// strict clients (e.g. FreeIPMI) get a proper error instead of a false success that
 	// later causes a session timeout.
-	if req.AuthPayloadAlgorithm != AuthAlgorithmHMACSHA1 {
+	var suite *cipherSuite
+	for i := range supportedCipherSuites {
+		if supportedCipherSuites[i].Auth == req.AuthPayloadAlgorithm {
+			suite = &supportedCipherSuites[i]
+			break
+		}
+	}
+	if suite == nil {
 		return buildOpenSessionError(req.MessageTag, req.RemoteConsoleSessionID, OpenSessionStatusInvalidAuthAlgorithm), nil
 	}
-	if req.IntegrityPayloadAlgorithm != IntegrityAlgorithmHMACSHA1_96 {
+	if req.IntegrityPayloadAlgorithm != suite.Integrity {
 		return buildOpenSessionError(req.MessageTag, req.RemoteConsoleSessionID, OpenSessionStatusInvalidIntegrityAlgorithm), nil
 	}
-	if req.ConfPayloadAlgorithm != ConfAlgorithmAESCBC128 {
+	if req.ConfPayloadAlgorithm != suite.Confidentiality {
 		return buildOpenSessionError(req.MessageTag, req.RemoteConsoleSessionID, OpenSessionStatusInvalidConfAlgorithm), nil
 	}
 
@@ -125,9 +192,9 @@ func handleOpenSession(payload []byte, header *RMCPPlusSessionHeader, sessionMgr
 	}
 
 	// Store the negotiated algorithms in the session for use in later RAKP steps.
-	session.AuthAlgorithm = AuthAlgorithmHMACSHA1
-	session.IntegrityAlgorithm = IntegrityAlgorithmHMACSHA1_96
-	session.ConfidentialityAlgorithm = ConfAlgorithmAESCBC128
+	session.AuthAlgorithm = suite.Auth
+	session.IntegrityAlgorithm = suite.Integrity
+	session.ConfidentialityAlgorithm = suite.Confidentiality
 
 	// Build response - return BMC's chosen algorithms (not an echo-back of the client's
 	// proposal). Responding with the BMC's own values satisfies strict clients like
@@ -231,7 +298,7 @@ func handleRAKPMessage1(payload []byte, header *RMCPPlusSessionHeader, sessionMg
 		authPass = pass
 	}
 
-	// Build RAKP Message 2 auth code: HMAC-SHA1(password, data)
+	// Build RAKP Message 2 auth code: HMAC-SHA1/SHA256(password, data)
 	authBuf := new(bytes.Buffer)
 	binary.Write(authBuf, binary.LittleEndian, session.RemoteConsoleSessionID)
 	binary.Write(authBuf, binary.LittleEndian, session.ManagedSystemSessionID)
@@ -242,7 +309,7 @@ func handleRAKPMessage1(payload []byte, header *RMCPPlusSessionHeader, sessionMg
 	binary.Write(authBuf, binary.LittleEndian, session.UserNameLength)
 	authBuf.Write(session.UserName)
 
-	mac := hmac.New(sha1.New, []byte(authPass))
+	mac := hmac.New(authHash(session.AuthAlgorithm), []byte(authPass))
 	mac.Write(authBuf.Bytes())
 	authCode := mac.Sum(nil)
 
@@ -254,22 +321,30 @@ func handleRAKPMessage1(payload []byte, header *RMCPPlusSessionHeader, sessionMg
 	binary.Write(resp, binary.LittleEndian, session.RemoteConsoleSessionID)
 	resp.Write(session.ManagedSystemRandomNumber[:])
 	resp.Write(session.ManagedSystemGUID[:])
-	resp.Write(authCode[:20])
+	resp.Write(authCode)
 
 	return wrapRMCPPlusResponse(PayloadTypeRAKPMessage2, 0, 0, resp.Bytes()), nil
 }
 
 func handleRAKPMessage3(payload []byte, header *RMCPPlusSessionHeader, sessionMgr *SessionManager, pass string, state *bmc.State) ([]byte, error) {
-	var req RAKPMessage3
-	buf := bytes.NewBuffer(payload)
-	if err := binary.Read(buf, binary.LittleEndian, &req); err != nil {
-		return nil, fmt.Errorf("parsing RAKP message 3: %w", err)
+	if len(payload) < 8 {
+		return nil, fmt.Errorf("RAKP message 3 too short: %d bytes", len(payload))
 	}
+	var req RAKPMessage3
+	req.MessageTag = payload[0]
+	req.StatusCode = payload[1]
+	req.ManagedSystemSessionID = binary.LittleEndian.Uint32(payload[4:8])
 
 	session, ok := sessionMgr.GetSession(req.ManagedSystemSessionID)
 	if !ok {
 		return nil, fmt.Errorf("session not found: 0x%08x", req.ManagedSystemSessionID)
 	}
+
+	codeLen := authCodeLength(session.AuthAlgorithm)
+	if len(payload) < 8+codeLen {
+		return nil, fmt.Errorf("RAKP message 3 too short for auth code: need %d, have %d", 8+codeLen, len(payload))
+	}
+	req.KeyExchangeAuthCode = payload[8 : 8+codeLen]
 
 	// Resolve password: try BMC state first, fall back to hardcoded
 	authPass := pass
@@ -290,11 +365,12 @@ func handleRAKPMessage3(payload []byte, header *RMCPPlusSessionHeader, sessionMg
 	binary.Write(verifyBuf, binary.LittleEndian, session.UserNameLength)
 	verifyBuf.Write(session.UserName)
 
-	mac := hmac.New(sha1.New, []byte(authPass))
+	h := authHash(session.AuthAlgorithm)
+	mac := hmac.New(h, []byte(authPass))
 	mac.Write(verifyBuf.Bytes())
 	expectedAuthCode := mac.Sum(nil)
 
-	if !hmac.Equal(req.KeyExchangeAuthCode[:], expectedAuthCode) {
+	if !hmac.Equal(req.KeyExchangeAuthCode, expectedAuthCode) {
 		resp := new(bytes.Buffer)
 		binary.Write(resp, binary.LittleEndian, req.MessageTag)
 		binary.Write(resp, binary.LittleEndian, uint8(0x0F)) // invalid integrity check
@@ -311,25 +387,26 @@ func handleRAKPMessage3(payload []byte, header *RMCPPlusSessionHeader, sessionMg
 	binary.Write(sikBuf, binary.LittleEndian, session.UserNameLength)
 	sikBuf.Write(session.UserName)
 
-	sikMac := hmac.New(sha1.New, []byte(authPass))
+	sikMac := hmac.New(h, []byte(authPass))
 	sikMac.Write(sikBuf.Bytes())
 	session.SessionIntegrityKey = sikMac.Sum(nil)
 
-	// Derive K1 (Integrity Key) = HMAC-SHA1(SIK, constant1)
+	// Derive K1 (Integrity Key) = HMAC(SIK, constant1). The constants are
+	// 20 bytes for SHA256 as well (IPMI 2.0 errata, same as ipmitool/FreeIPMI).
 	k1Const := make([]byte, 20)
 	for i := range k1Const {
 		k1Const[i] = 0x01
 	}
-	k1Mac := hmac.New(sha1.New, session.SessionIntegrityKey)
+	k1Mac := hmac.New(h, session.SessionIntegrityKey)
 	k1Mac.Write(k1Const)
 	session.IntegrityKey = k1Mac.Sum(nil)
 
-	// Derive K2 (Confidentiality Key) = HMAC-SHA1(SIK, constant2)
+	// Derive K2 (Confidentiality Key) = HMAC(SIK, constant2)
 	k2Const := make([]byte, 20)
 	for i := range k2Const {
 		k2Const[i] = 0x02
 	}
-	k2Mac := hmac.New(sha1.New, session.SessionIntegrityKey)
+	k2Mac := hmac.New(h, session.SessionIntegrityKey)
 	k2Mac.Write(k2Const)
 	session.ConfidentialityKey = k2Mac.Sum(nil)
 
@@ -341,9 +418,9 @@ func handleRAKPMessage3(payload []byte, header *RMCPPlusSessionHeader, sessionMg
 	binary.Write(icvBuf, binary.LittleEndian, session.ManagedSystemSessionID)
 	icvBuf.Write(session.ManagedSystemGUID[:])
 
-	icvMac := hmac.New(sha1.New, session.SessionIntegrityKey)
+	icvMac := hmac.New(h, session.SessionIntegrityKey)
 	icvMac.Write(icvBuf.Bytes())
-	icv := icvMac.Sum(nil)[:12] // HMAC-SHA1-96
+	icv := icvMac.Sum(nil)[:rakp4ICVLength(session.AuthAlgorithm)] // HMAC-SHA1-96 / HMAC-SHA256-128
 
 	resp := new(bytes.Buffer)
 	binary.Write(resp, binary.LittleEndian, req.MessageTag)
@@ -401,8 +478,9 @@ func handleEncryptedIPMI(data []byte, header *RMCPPlusSessionHeader, sessionMgr 
 	if isAuthenticated {
 		// The integrity data starts after the payload
 		integrityStart := payloadEnd
-		// Need at least: pad(variable) + padLen(1) + nextHeader(1) + authCode(12)
-		if len(data) < integrityStart+14 { // minimum: 0 pad + 1 padLen + 1 nextHeader + 12 authCode
+		// Need at least: pad(variable) + padLen(1) + nextHeader(1) + authCode(12 or 16)
+		_, authCodeLen := integrityHash(session.IntegrityAlgorithm)
+		if len(data) < integrityStart+2+authCodeLen {
 			return nil, fmt.Errorf("RMCP+ data too short for integrity: %d bytes after payload", len(data)-integrityStart)
 		}
 	}
@@ -458,11 +536,8 @@ func handleEncryptedIPMI(data []byte, header *RMCPPlusSessionHeader, sessionMgr 
 		respBuf = append(respBuf, byte(padNeeded)) // Pad Length
 		respBuf = append(respBuf, 0x07)             // Next Header
 
-		// HMAC-SHA1-96 over everything from AuthType to end of Next Header
-		mac := hmac.New(sha1.New, session.IntegrityKey)
-		mac.Write(respBuf)
-		authCode := mac.Sum(nil)[:12]
-		respBuf = append(respBuf, authCode...)
+		// HMAC-SHA1-96 / HMAC-SHA256-128 over everything from AuthType to end of Next Header
+		respBuf = append(respBuf, integrityAuthCode(session, respBuf)...)
 	}
 
 	return respBuf, nil

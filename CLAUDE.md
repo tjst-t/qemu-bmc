@@ -23,7 +23,7 @@ docker/
   Dockerfile                   # Multi-stage build (Go builder + Debian runtime)
   entrypoint.sh                # Environment variables → QEMU args conversion
   setup-network.sh             # TAP/bridge network setup for VM passthrough
-tests/                         # Bash-based container integration tests (91 tests)
+tests/                         # Bash-based container integration tests (95 tests)
   run_tests.sh                 # Test runner (category-based)
   test_helper.sh               # Assertions, container mgmt, IPMI/Redfish helpers
   test_*.sh                    # Test categories (container, ipmi, redfish, power, boot, etc.)
@@ -79,7 +79,7 @@ make docker-build
 # Container integration tests (quick smoke tests)
 make container-test
 
-# Container integration tests (all 91 tests across 9 categories)
+# Container integration tests (all 95 tests across 9 categories)
 make container-test-all
 
 # Run specific test categories
@@ -166,14 +166,14 @@ Middleware: auth (X-Auth-Token session or Basic; GET /redfish, GET /redfish/v1 a
 | Get Channel Auth Capabilities | App | 0x38 | Auth type negotiation |
 | Set Session Privilege | App | 0x3B | Privilege level |
 | Close Session | App | 0x3C | Session teardown |
-| Get Channel Cipher Suites | App | 0x54 | Cipher suite list (suite 3 only) |
+| Get Channel Cipher Suites | App | 0x54 | Cipher suite list (suites 3 and 17) |
 | Get Chassis Status | Chassis (0x00) | 0x01 | Power state query |
 | Chassis Control | Chassis | 0x02 | Power on/off/cycle/reset, soft off (ACPI power button, never forced); diag pulse is a no-op |
 | Chassis Identify | Chassis | 0x04 | Identify LED (log only) |
 | Set Boot Options | Chassis | 0x08 | Boot device override |
 | Get Boot Options | Chassis | 0x09 | Boot device query |
 
-Supports: RMCP v1.0, IPMI 1.5, RMCP+ with RAKP HMAC-SHA1 auth, AES-CBC-128 encryption
+Supports: RMCP v1.0, IPMI 1.5, RMCP+ cipher suite 3 (RAKP-HMAC-SHA1, HMAC-SHA1-96) and 17 (RAKP-HMAC-SHA256, HMAC-SHA256-128), AES-CBC-128 encryption
 
 ## VM IPMI (In-Band)
 

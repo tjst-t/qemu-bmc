@@ -54,6 +54,39 @@ test_auth_wrong_username() {
     assert_failure "$rc" "Wrong username should be rejected"
 }
 
+test_cipher_suite_3_power_status() {
+    local result
+    result=$(ipmi_cmd -C 3 power status 2>&1)
+    local rc=$?
+    assert_equals "0" "$rc" "-C 3 power status should succeed: $result"
+    assert_contains "$result" "Chassis Power is" "-C 3 power status should report the power state"
+}
+
+test_cipher_suite_17_power_status() {
+    local result
+    result=$(ipmi_cmd -C 17 power status 2>&1)
+    local rc=$?
+    assert_equals "0" "$rc" "-C 17 power status should succeed: $result"
+    assert_contains "$result" "Chassis Power is" "-C 17 power status should report the power state"
+}
+
+test_cipher_suite_17_bootdev_pxe() {
+    local result
+    result=$(ipmi_cmd -C 17 chassis bootdev pxe 2>&1)
+    local rc=$?
+    assert_equals "0" "$rc" "-C 17 chassis bootdev pxe should succeed: $result"
+    result=$(ipmi_cmd -C 17 chassis bootparam get 5 2>&1)
+    assert_contains "$result" "PXE" "-C 17 boot device should read back as PXE"
+}
+
+test_cipher_suite_17_wrong_password() {
+    local result
+    result=$(timeout "$CMD_TIMEOUT" ipmitool -I lanplus -C 17 -H "$IPMI_HOST" -p "$IPMI_PORT" \
+        -U "$IPMI_USER" -P "wrongpassword" power status 2>&1)
+    local rc=$?
+    assert_failure "$rc" "-C 17 with a wrong password should be rejected"
+}
+
 # --- Run tests ---
 start_test_container
 wait_for_ipmi_ready 60
@@ -66,3 +99,7 @@ run_test test_ipmi_version_2
 run_test test_auth_correct
 run_test test_auth_wrong_password
 run_test test_auth_wrong_username
+run_test test_cipher_suite_3_power_status
+run_test test_cipher_suite_17_power_status
+run_test test_cipher_suite_17_bootdev_pxe
+run_test test_cipher_suite_17_wrong_password
