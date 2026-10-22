@@ -836,6 +836,27 @@
       "updatedAt": "2026-10-22T01:22:00.161Z",
       "closedAt": "2026-10-22T01:22:00.161Z",
       "extra": {}
+    },
+    {
+      "id": "v0-9-0-uefi-http-secureboot",
+      "number": 38,
+      "kind": "story",
+      "title": "v0.9.0 に UEFI HTTP ブートと SecureBoot を足してからリリースする",
+      "status": "ready",
+      "parent": null,
+      "dependsOn": [],
+      "milestone": null,
+      "priority": "high",
+      "labels": [],
+      "body": "## なぜ\n人の指示（2026-10-22「足してから出して」）。UEFI HTTP ブートは Ironic/Metal3 の redfish-https ブート（BootSourceOverrideTarget=UefiHttp と Boot.HttpBootUri に ISO の URL）に要る。SecureBoot は Ironic の Secure Boot での展開を試す環境になる。\n\n## 調べて分かったこと（2026-10-22）\n- イメージの OVMF（Debian 2022.11）は HTTP ブートに対応：NIC の起動は PXEv4 → PXEv6 → HTTPv4 → HTTPv6 の順に試す（`-netdev user` ＋ `virtio-net-pci,romfile=` で確認。romfile が iPXE のままだと iPXE が先に出る）。OVMF の fw_cfg `opt/org.tianocore/IPv4PXESupport`・`IPv6PXESupport` を `n` にすると PXE を飛ばせるはず（未確認）\n- sushy の set_system_boot_options は、GET の Boot に `HttpBootUri` キーがあるとき（値は null でも）だけ HttpBootUri を送る。Ironic は使い終わると null で消す\n- sushy の SecureBoot：`SecureBootEnable`（PATCH で変える）・`SecureBootCurrentBoot`・`SecureBootMode`、Action `#SecureBoot.ResetKeys`（`ResetKeysType`）\n- イメージに Secure Boot 用の OVMF（OVMF_CODE.secboot.fd・OVMF_CODE_4M.secboot.fd）と Microsoft の鍵入りの VARS（OVMF_VARS.ms.fd・OVMF_VARS_4M.ms.fd）がある\n\n## 進め方\nタスク2つを順に Factory で作り、そのあと実機（Alpine の ISO を HTTP で配る・Debian 12 の qcow2 を Secure Boot で起動）・sushy・validator で確かめて v0.9.0 をリリースする。",
+      "doneWhen": "",
+      "resolution": null,
+      "refs": [],
+      "threads": [],
+      "createdAt": "2026-10-22T03:12:09.311Z",
+      "updatedAt": "2026-10-22T03:12:09.311Z",
+      "closedAt": null,
+      "extra": {}
     }
   ]
 }
