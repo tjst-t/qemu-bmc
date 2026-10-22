@@ -344,3 +344,25 @@ func TestState_SystemGUID(t *testing.T) {
 	got[0] = 0xff
 	assert.Equal(t, byte(1), s.SystemGUID()[0])
 }
+
+func TestAuthenticate(t *testing.T) {
+	s := NewState("admin", "password")
+	require.NoError(t, s.SetUserName(3, "maas"))
+	require.NoError(t, s.SetUserPassword(3, "secret"))
+	require.NoError(t, s.SetUserAccess(1, 3, UserAccess{PrivilegeLimit: 4, Enabled: true}))
+
+	assert.True(t, s.Authenticate("admin", "password"))
+	assert.True(t, s.Authenticate("maas", "secret"))
+	assert.False(t, s.Authenticate("maas", "wrong"))
+	assert.False(t, s.Authenticate("nobody", "secret"))
+	assert.False(t, s.Authenticate("", ""))
+
+	// Disabled user is rejected
+	require.NoError(t, s.SetUserAccess(1, 3, UserAccess{PrivilegeLimit: 4, Enabled: false}))
+	assert.False(t, s.Authenticate("maas", "secret"))
+
+	// Enabled user without a password is rejected
+	require.NoError(t, s.SetUserName(4, "nopass"))
+	require.NoError(t, s.SetUserAccess(1, 4, UserAccess{PrivilegeLimit: 4, Enabled: true}))
+	assert.False(t, s.Authenticate("nopass", ""))
+}

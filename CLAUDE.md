@@ -162,7 +162,7 @@ make container-test-all
 | GET | `/redfish/v1/Chassis` | Chassis collection |
 | GET | `/redfish/v1/Chassis/1` | Chassis resource (PowerState same as Systems/1 incl. PoweringOff/PoweringOn, Status, Links.ComputerSystems → Systems/1, Links.ManagedBy → Managers/1) |
 
-Middleware: auth (X-Auth-Token session or Basic; GET /redfish, GET /redfish/v1 and POST Sessions are exempt), ETag (If-Match), trailing slash normalization
+Middleware: auth (X-Auth-Token session or Basic; Basic and session login accept IPMI_USER/IPMI_PASS and any enabled bmc.State user with a name and password, e.g. created in-band; GET /redfish, GET /redfish/v1 and POST Sessions are exempt), ETag (If-Match), trailing slash normalization
 
 ## IPMI Commands
 

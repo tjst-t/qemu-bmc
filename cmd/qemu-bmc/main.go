@@ -164,6 +164,7 @@ func main() {
 	// Start Redfish server
 	redfishServer := redfish.NewServer(m, cfg.IPMIUser, cfg.IPMIPass, cfg.VNCAddr)
 	redfishServer.SetSystemInfo(systemInfo)
+	redfishServer.SetUserStore(bmcState)
 	redfishServer.SetSystemUUID(systemUUID)
 	redfishServer.SetFirmwareVersion(version)
 	addr := fmt.Sprintf(":%s", cfg.RedfishPort)

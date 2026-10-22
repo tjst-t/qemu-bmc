@@ -32,6 +32,13 @@ type Server struct {
 	systemUUID   string
 	firmware     string
 	sessions     *sessionStore
+	users        UserStore
+}
+
+// UserStore authenticates BMC users in addition to the configured
+// IPMI_USER/IPMI_PASS (implemented by *bmc.State).
+type UserStore interface {
+	Authenticate(name, password string) bool
 }
 
 // SystemInfo is the static VM hardware configuration reported on Systems/1.
@@ -67,6 +74,12 @@ func NewServer(m MachineInterface, user, pass, vncAddr string) *Server {
 // SetSystemUUID sets the UUID reported in Systems/1.
 func (s *Server) SetSystemUUID(uuid string) {
 	s.systemUUID = uuid
+}
+
+// SetUserStore makes Redfish authentication also accept the enabled users of
+// the given store (e.g. users created in-band via the VM IPMI interface).
+func (s *Server) SetUserStore(users UserStore) {
+	s.users = users
 }
 
 // SetFirmwareVersion sets the qemu-bmc version reported as the Managers/1

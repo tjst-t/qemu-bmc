@@ -10,9 +10,14 @@ func (s *Server) authEnabled() bool {
 	return s.user != "" && s.pass != ""
 }
 
+// validCredentials accepts IPMI_USER/IPMI_PASS and, if a user store is set,
+// any enabled BMC user (e.g. created in-band).
 func (s *Server) validCredentials(user, pass string) bool {
-	return subtle.ConstantTimeCompare([]byte(user), []byte(s.user)) == 1 &&
-		subtle.ConstantTimeCompare([]byte(pass), []byte(s.pass)) == 1
+	if subtle.ConstantTimeCompare([]byte(user), []byte(s.user)) == 1 &&
+		subtle.ConstantTimeCompare([]byte(pass), []byte(s.pass)) == 1 {
+		return true
+	}
+	return s.users != nil && s.users.Authenticate(user, pass)
 }
 
 // authMiddleware accepts a session token (X-Auth-Token) or HTTP Basic auth.

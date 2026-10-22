@@ -210,6 +210,24 @@ func (s *State) LookupUserByName(name string) (uint8, bool) {
 	return 0, false
 }
 
+// Authenticate reports whether name/password match an enabled user that has
+// both a name and a password set.
+func (s *State) Authenticate(name, password string) bool {
+	if name == "" || password == "" {
+		return false
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	for i := 1; i <= maxUsers; i++ {
+		u := s.users[i]
+		if u.name == name && u.password != "" && u.access.Enabled &&
+			subtle.ConstantTimeCompare([]byte(u.password), []byte(password)) == 1 {
+			return true
+		}
+	}
+	return false
+}
+
 // GetLANConfig returns a copy of the LAN configuration parameter value.
 // Returns nil if the parameter is not found.
 func (s *State) GetLANConfig(param uint8) []byte {
