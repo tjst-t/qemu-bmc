@@ -41,7 +41,7 @@ func TestGetChassis(t *testing.T) {
 	var chassis Chassis
 	err := json.Unmarshal(w.Body.Bytes(), &chassis)
 	require.NoError(t, err)
-	assert.Equal(t, "#Chassis.v1_0_0.Chassis", chassis.ODataType)
+	assert.Equal(t, "#Chassis.v1_14_0.Chassis", chassis.ODataType)
 	assert.Equal(t, "RackMount", chassis.ChassisType)
 }
 

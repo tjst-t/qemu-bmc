@@ -48,7 +48,7 @@ func (s *Server) handleGetSystem(w http.ResponseWriter, r *http.Request) {
 	etag := generateETag(powerState, boot)
 
 	system := ComputerSystem{
-		ODataType:  "#ComputerSystem.v1_5_0.ComputerSystem",
+		ODataType:  "#ComputerSystem.v1_13_0.ComputerSystem",
 		ODataID:    "/redfish/v1/Systems/1",
 		ODataEtag:  etag,
 		ID:         "1",

@@ -242,6 +242,7 @@ type Chassis struct {
 	ChassisType  string         `json:"ChassisType"`
 	PowerState   string         `json:"PowerState"`
 	Status       ResourceStatus `json:"Status"`
+	Drives       *ODataID       `json:"Drives,omitempty"`
 	Links        ChassisLinks   `json:"Links"`
 }
 

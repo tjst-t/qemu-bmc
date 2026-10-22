@@ -25,7 +25,7 @@ func (s *Server) handleGetChassis(w http.ResponseWriter, r *http.Request) {
 	}
 
 	chassis := Chassis{
-		ODataType:    "#Chassis.v1_0_0.Chassis",
+		ODataType:    "#Chassis.v1_14_0.Chassis",
 		ODataID:      "/redfish/v1/Chassis/1",
 		ODataContext: "/redfish/v1/$metadata#Chassis.Chassis",
 		ID:           "1",
@@ -37,6 +37,9 @@ func (s *Server) handleGetChassis(w http.ResponseWriter, r *http.Request) {
 			ComputerSystems: []ODataID{{ODataID: systemPath}},
 			ManagedBy:       []ODataID{{ODataID: managerPath}},
 		},
+	}
+	if len(s.systemInfo.Disks) > 0 {
+		chassis.Drives = &ODataID{ODataID: drivesPath}
 	}
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(chassis)

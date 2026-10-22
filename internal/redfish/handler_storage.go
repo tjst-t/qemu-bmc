@@ -13,9 +13,11 @@ import (
 // volume per disk and as SimpleStorage/1 (deprecated, but read first by Ironic inspection). Both
 // collections are empty when no disk is known (legacy mode).
 const (
-	storagePath       = systemPath + "/Storage"
-	storage1Path      = storagePath + "/1"
-	drivesPath        = storage1Path + "/Drives"
+	storagePath  = systemPath + "/Storage"
+	storage1Path = storagePath + "/1"
+	// Drives live under the chassis (Redfish deprecates
+	// Storage/{id}/Drives/{id}); the old URI is still served as an alias.
+	drivesPath        = chassisPath + "/Drives"
 	volumesPath       = storage1Path + "/Volumes"
 	simpleStoragePath = systemPath + "/SimpleStorage"
 	simpleStorage1    = simpleStoragePath + "/1"
@@ -41,6 +43,35 @@ func (s *Server) storageMembers(path string) []ODataID {
 // there are disks to report.
 func (s *Server) hasStorage(r *http.Request) bool {
 	return len(s.systemInfo.Disks) > 0 && mux.Vars(r)["stid"] == "1"
+}
+
+// driveRouteOK reports whether the storage or chassis id in a drive URI is
+// the single one (Systems/1/Storage/1/Drives/{id} or Chassis/1/Drives/{id}).
+func driveRouteOK(r *http.Request) bool {
+	vars := mux.Vars(r)
+	if stid, ok := vars["stid"]; ok {
+		return stid == "1"
+	}
+	return vars["id"] == "1"
+}
+
+// handleChassisDriveCollection lists the drives of chassis 1.
+func (s *Server) handleChassisDriveCollection(w http.ResponseWriter, r *http.Request) {
+	if mux.Vars(r)["id"] != "1" {
+		writeError(w, http.StatusNotFound, "ResourceNotFound", "chassis not found")
+		return
+	}
+	members := make([]ODataID, 0, len(s.systemInfo.Disks))
+	for i := range s.systemInfo.Disks {
+		members = append(members, ODataID{ODataID: drivePath(i + 1)})
+	}
+	writeJSON(w, http.StatusOK, Collection{
+		ODataType:    "#DriveCollection.DriveCollection",
+		ODataID:      drivesPath,
+		Name:         "Drive Collection",
+		MembersCount: len(members),
+		Members:      members,
+	})
 }
 
 func (s *Server) handleStorageCollection(w http.ResponseWriter, r *http.Request) {
@@ -83,7 +114,7 @@ func (s *Server) handleGetDrive(w http.ResponseWriter, r *http.Request) {
 	if n, ok := strings.CutPrefix(mux.Vars(r)["driveid"], "Disk"); ok {
 		idx, _ = strconv.Atoi(n)
 	}
-	if !s.hasStorage(r) || idx < 1 || idx > len(s.systemInfo.Disks) {
+	if !driveRouteOK(r) || idx < 1 || idx > len(s.systemInfo.Disks) {
 		writeError(w, http.StatusNotFound, "ResourceNotFound", "drive not found")
 		return
 	}

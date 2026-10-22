@@ -85,8 +85,8 @@ func TestStorage(t *testing.T) {
 		assert.NotEmpty(t, st.ODataContext)
 		assert.Equal(t, "1", st.ID)
 		assert.Equal(t, []ODataID{
-			{ODataID: "/redfish/v1/Systems/1/Storage/1/Drives/Disk1"},
-			{ODataID: "/redfish/v1/Systems/1/Storage/1/Drives/Disk2"},
+			{ODataID: "/redfish/v1/Chassis/1/Drives/Disk1"},
+			{ODataID: "/redfish/v1/Chassis/1/Drives/Disk2"},
 		}, st.Drives)
 		assert.Equal(t, 2, st.DrivesCount)
 		assert.Equal(t, "/redfish/v1/Systems/1/Storage/1/Volumes", st.Volumes.ODataID)
@@ -95,7 +95,7 @@ func TestStorage(t *testing.T) {
 		var drive Drive
 		require.Equal(t, http.StatusOK, getJSON(t, srv, "/redfish/v1/Systems/1/Storage/1/Drives/Disk1"+p, &drive))
 		assert.Equal(t, "#Drive.v1_7_0.Drive", drive.ODataType)
-		assert.Equal(t, "/redfish/v1/Systems/1/Storage/1/Drives/Disk1", drive.ODataID)
+		assert.Equal(t, "/redfish/v1/Chassis/1/Drives/Disk1", drive.ODataID)
 		assert.NotEmpty(t, drive.ODataContext)
 		assert.Equal(t, "Disk1", drive.ID)
 		assert.Equal(t, "Disk 1", drive.Name)
@@ -145,7 +145,7 @@ func TestVolumes(t *testing.T) {
 		assert.Equal(t, "Volume 1", vol.Name)
 		assert.Equal(t, int64(20<<30), vol.CapacityBytes)
 		assert.Equal(t, statusOK, vol.Status)
-		assert.Equal(t, []ODataID{{ODataID: "/redfish/v1/Systems/1/Storage/1/Drives/Disk1"}}, vol.Links.Drives)
+		assert.Equal(t, []ODataID{{ODataID: "/redfish/v1/Chassis/1/Drives/Disk1"}}, vol.Links.Drives)
 		assert.Equal(t, 1, vol.Links.DrivesCount)
 	}
 
@@ -155,7 +155,7 @@ func TestVolumes(t *testing.T) {
 	assert.NotContains(t, raw, "CapacityBytes")
 	assert.NotContains(t, raw, "RAIDType")
 	assert.Equal(t, map[string]interface{}{
-		"Drives":             []interface{}{map[string]interface{}{"@odata.id": "/redfish/v1/Systems/1/Storage/1/Drives/Disk2"}},
+		"Drives":             []interface{}{map[string]interface{}{"@odata.id": "/redfish/v1/Chassis/1/Drives/Disk2"}},
 		"Drives@odata.count": float64(1),
 	}, raw["Links"])
 
@@ -219,4 +219,44 @@ func TestStorage_NoDisks(t *testing.T) {
 	} {
 		assert.Equal(t, http.StatusNotFound, getJSON(t, srv, path, &raw), path)
 	}
+}
+
+func TestChassisDrives(t *testing.T) {
+	srv := newInfoTestServer(SystemInfo{Disks: testDisks})
+
+	var chassis Chassis
+	require.Equal(t, http.StatusOK, getJSON(t, srv, "/redfish/v1/Chassis/1", &chassis))
+	require.NotNil(t, chassis.Drives)
+	assert.Equal(t, "/redfish/v1/Chassis/1/Drives", chassis.Drives.ODataID)
+
+	for _, p := range []string{"", "/"} {
+		var col Collection
+		require.Equal(t, http.StatusOK, getJSON(t, srv, "/redfish/v1/Chassis/1/Drives"+p, &col))
+		assert.Equal(t, "#DriveCollection.DriveCollection", col.ODataType)
+		assert.Equal(t, []ODataID{
+			{ODataID: "/redfish/v1/Chassis/1/Drives/Disk1"},
+			{ODataID: "/redfish/v1/Chassis/1/Drives/Disk2"},
+		}, col.Members)
+		assert.Equal(t, 2, col.MembersCount)
+	}
+
+	// The drive is also served at the deprecated Storage URI, with the
+	// chassis URI as its id
+	for _, path := range []string{"/redfish/v1/Chassis/1/Drives/Disk1", "/redfish/v1/Systems/1/Storage/1/Drives/Disk1"} {
+		var drive Drive
+		require.Equal(t, http.StatusOK, getJSON(t, srv, path, &drive), path)
+		assert.Equal(t, "/redfish/v1/Chassis/1/Drives/Disk1", drive.ODataID)
+		assert.Equal(t, int64(20<<30), drive.CapacityBytes)
+	}
+	for _, path := range []string{"/redfish/v1/Chassis/2/Drives", "/redfish/v1/Chassis/2/Drives/Disk1", "/redfish/v1/Chassis/1/Drives/Disk3"} {
+		var raw map[string]interface{}
+		assert.Equal(t, http.StatusNotFound, getJSON(t, srv, path, &raw), path)
+	}
+}
+
+func TestChassis_NoDisksNoDrives(t *testing.T) {
+	srv := newInfoTestServer(SystemInfo{})
+	var raw map[string]interface{}
+	require.Equal(t, http.StatusOK, getJSON(t, srv, "/redfish/v1/Chassis/1", &raw))
+	assert.NotContains(t, raw, "Drives")
 }
