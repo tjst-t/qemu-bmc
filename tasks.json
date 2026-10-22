@@ -907,7 +907,7 @@
       "number": 41,
       "kind": "task",
       "title": "VM_NET_MTU：VM に渡す NIC（TAP・ブリッジ・コンテナ側・virtio の host_mtu）の MTU をそろえて設定する",
-      "status": "ready",
+      "status": "in-progress",
       "parent": "v0-9-0-uefi-http-secureboot",
       "dependsOn": [
         "uefi-http-bootsourceoverridetarget-uefih"
@@ -921,7 +921,7 @@
       "refs": [],
       "threads": [],
       "createdAt": "2026-10-22T03:23:22.575Z",
-      "updatedAt": "2026-10-22T03:23:22.575Z",
+      "updatedAt": "2026-10-22T03:40:57.961Z",
       "closedAt": null,
       "extra": {}
     }
