@@ -51,7 +51,34 @@ MSG
     return 1
 }
 
+# Check VM_NET_MTU (empty = leave MTUs alone). Prints the reason and
+# returns 1 if it is not a number in the range Linux and QEMU accept.
+validate_net_mtu() {
+    [ -z "$VM_NET_MTU" ] && return 0
+    case "$VM_NET_MTU" in
+        *[!0-9]*)
+            echo "ERROR: VM_NET_MTU='$VM_NET_MTU' is not a number (e.g. 9000)" >&2
+            return 1 ;;
+    esac
+    if [ "${#VM_NET_MTU}" -gt 5 ] || [ "$VM_NET_MTU" -lt 68 ] || [ "$VM_NET_MTU" -gt 65535 ]; then
+        echo "ERROR: VM_NET_MTU=$VM_NET_MTU is out of range (68-65535)" >&2
+        return 1
+    fi
+}
+
+# Raise the MTU of a container interface to VM_NET_MTU if it is smaller
+# (a larger MTU, e.g. containerlab's default 9500, is kept)
+raise_iface_mtu() {
+    local iface="$1"
+    local cur
+    cur=$(cat "/sys/class/net/$iface/mtu" 2>/dev/null) || return 1
+    if [ "$cur" -lt "$VM_NET_MTU" ]; then
+        ip link set "$iface" mtu "$VM_NET_MTU" || return 1
+    fi
+}
+
 # Create TAP device, bridge, and connect host interface
+# With VM_NET_MTU the host interface, TAP and bridge get (at least) that MTU
 # Args: $1=interface name, $2=tap index
 setup_bridge() {
     local iface="$1"
@@ -59,8 +86,15 @@ setup_bridge() {
     local tap="tap${idx}"
     local bridge="br${idx}"
 
+    if [ -n "$VM_NET_MTU" ]; then
+        raise_iface_mtu "$iface" || return 1
+    fi
+
     # Create TAP device
     ip tuntap add "$tap" mode tap || return 1
+    if [ -n "$VM_NET_MTU" ]; then
+        ip link set "$tap" mtu "$VM_NET_MTU" || return 1
+    fi
     ip link set "$tap" up || return 1
 
     # Create bridge
@@ -76,13 +110,21 @@ setup_bridge() {
 
     # Bring up host interface
     ip link set "$iface" up || return 1
+
+    # A bridge takes the smallest MTU of its ports; set it explicitly too
+    if [ -n "$VM_NET_MTU" ]; then
+        ip link set "$bridge" mtu "$VM_NET_MTU" || return 1
+    fi
 }
 
 # Build QEMU network arguments for all detected interfaces
 # Outputs -netdev/-device argument pairs to stdout
 # NIC MAC addresses are not set here: qemu-bmc assigns them (VM_MACS, or
 # derived from the system UUID so they differ between nodes)
+# With VM_NET_MTU, virtio-net NICs get host_mtu= so the guest uses that MTU
 build_network_args() {
+    validate_net_mtu || return 1
+
     local interfaces
     interfaces=$(detect_interfaces)
 
@@ -105,6 +147,9 @@ build_network_args() {
 
         args="$args -netdev tap,id=net${idx},ifname=${tap},script=no,downscript=no"
         args="$args -device virtio-net-pci,netdev=net${idx}"
+        if [ -n "$VM_NET_MTU" ]; then
+            args="$args,host_mtu=${VM_NET_MTU}"
+        fi
 
         idx=$((idx + 1))
     done

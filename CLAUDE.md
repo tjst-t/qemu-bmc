@@ -23,7 +23,7 @@ docker/
   Dockerfile                   # Multi-stage build (Go builder + Debian runtime)
   entrypoint.sh                # Environment variables → QEMU args conversion
   setup-network.sh             # TAP/bridge network setup for VM passthrough
-tests/                         # Bash-based container integration tests (100 tests)
+tests/                         # Bash-based container integration tests (103 tests)
   run_tests.sh                 # Test runner (category-based)
   test_helper.sh               # Assertions, container mgmt, IPMI/Redfish helpers
   test_*.sh                    # Test categories (container, ipmi, redfish, power, boot, etc.)
@@ -79,7 +79,7 @@ make docker-build
 # Container integration tests (quick smoke tests)
 make container-test
 
-# Container integration tests (all 100 tests across 9 categories)
+# Container integration tests (all 103 tests across 9 categories)
 make container-test-all
 
 # Run specific test categories
@@ -127,6 +127,7 @@ make container-test-all
 | `VM_BOOT` | `c` | Boot device (c=disk, d=cdrom, n=network) |
 | `VM_BOOT_MENU_TIMEOUT` | `0` | Boot menu timeout in ms (0=disabled) |
 | `VM_NETWORKS` | (empty) | Comma-separated host interfaces for TAP passthrough (default: eth2+). Needs `/dev/net/tun` (`--device /dev/net/tun`); entrypoint creates it with mknod if missing, else exits with an error |
+| `VM_NET_MTU` | (empty) | MTU for the VM NICs (e.g. `9000` for FCoE / jumbo frames): TAP and bridge set to it, container interface raised to it if smaller, `host_mtu=` added to virtio-net NICs. Empty = MTUs untouched. Not a number (68-65535) or failing to apply → exits with an error |
 | `QEMU_EXTRA_ARGS` | (empty) | Additional QEMU arguments |
 | `DEBUG` | `false` | Enable debug output |
 

@@ -114,6 +114,47 @@ test_qemu_network_args() {
     assert_contains "$cmdline" "nic" "QEMU should have network argument"
 }
 
+# Starts a container passing a veth "mtu0" (MTU 1500, created in the container
+# while entrypoint.sh waits for VM_NETWORKS) through to the VM
+start_mtu_test_container() {
+    stop_test_container
+    start_test_container -e "VM_NETWORKS=mtu0" "$@" || return 1
+    container_exec ip link add mtu0 type veth peer name mtu0p || return 1
+    wait_for_qemu_running 60
+}
+
+link_mtu() {
+    container_exec cat "/sys/class/net/$1/mtu" 2>/dev/null
+}
+
+test_net_mtu() {
+    start_mtu_test_container -e "VM_NET_MTU=9000" || return 1
+    assert_equals 9000 "$(link_mtu tap0)" "tap0 MTU should be VM_NET_MTU" || return 1
+    assert_equals 9000 "$(link_mtu br0)" "br0 MTU should be VM_NET_MTU" || return 1
+    assert_equals 9000 "$(link_mtu mtu0)" "Container interface MTU should be raised to VM_NET_MTU" || return 1
+    local cmdline
+    cmdline=$(qemu_cmdline) || return 1
+    assert_contains "$cmdline" "virtio-net-pci,netdev=net0,host_mtu=9000" "QEMU virtio-net NIC should get host_mtu"
+}
+
+test_net_mtu_unset() {
+    start_mtu_test_container || return 1
+    assert_equals 1500 "$(link_mtu tap0)" "tap0 MTU should be left at the default" || return 1
+    assert_equals 1500 "$(link_mtu br0)" "br0 MTU should be left at the default" || return 1
+    local cmdline
+    cmdline=$(qemu_cmdline) || return 1
+    assert_not_contains "$cmdline" "host_mtu" "QEMU should not get host_mtu without VM_NET_MTU"
+}
+
+test_net_mtu_invalid() {
+    local result
+    result=$(container_exec bash -c 'source /scripts/setup-network.sh; VM_NET_MTU=9k build_network_args; echo "rc=$?"' 2>&1)
+    assert_contains "$result" "rc=1" "Non-numeric VM_NET_MTU should fail" || return 1
+    assert_contains "$result" "VM_NET_MTU='9k' is not a number" "The error should say why" || return 1
+    result=$(container_exec bash -c 'source /scripts/setup-network.sh; VM_NET_MTU=100000 build_network_args; echo "rc=$?"' 2>&1)
+    assert_contains "$result" "out of range" "Out-of-range VM_NET_MTU should fail"
+}
+
 # --- Run tests ---
 start_test_container
 wait_for_ipmi_ready 60
@@ -128,3 +169,6 @@ run_test test_nic_mac_matches_qemu
 run_test test_nic_mac_stable_and_unique_per_node
 run_test test_nic_mac_explicit
 run_test test_qemu_network_args
+run_test test_net_mtu
+run_test test_net_mtu_unset
+run_test test_net_mtu_invalid

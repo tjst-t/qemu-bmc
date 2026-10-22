@@ -150,3 +150,19 @@ func TestBuildCommandLine_MACConflict(t *testing.T) {
 	})
 	assert.Error(t, err)
 }
+
+// VM_NET_MTU adds host_mtu= to the virtio-net NICs (setup-network.sh); the
+// MAC and HTTP boot rewrites must keep it
+func TestAssignMACs_KeepsHostMTU(t *testing.T) {
+	args := []string{
+		"-netdev", "tap,id=net0,ifname=tap0,script=no,downscript=no",
+		"-device", "virtio-net-pci,netdev=net0,host_mtu=9000",
+	}
+	result, err := AssignMACs(args, nil, testDeriveMAC)
+	require.NoError(t, err)
+	assert.Equal(t, "virtio-net-pci,netdev=net0,host_mtu=9000,mac=52:54:aa:bb:cc:00", result[3])
+
+	uefi := append([]string{"-drive", "if=pflash,format=raw,file=/OVMF_CODE.fd"}, result...)
+	booted := ApplyHTTPBoot(uefi, "")
+	assert.Equal(t, "virtio-net-pci,netdev=net0,host_mtu=9000,mac=52:54:aa:bb:cc:00,romfile=,bootindex=0", booted[5])
+}

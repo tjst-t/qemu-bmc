@@ -363,6 +363,7 @@ These variables are used by `docker/entrypoint.sh` to construct QEMU arguments:
 | `VM_BOOT` | `c` | Boot device (c=disk, d=cdrom, n=network) |
 | `VM_BOOT_MENU_TIMEOUT` | `0` | Boot menu timeout in ms (0=disabled) |
 | `VM_NETWORKS` | (empty) | Comma-separated host interfaces for TAP passthrough (waits up to 30s for interfaces to appear, useful for containerlab; the container exits with an error if one does not appear). Without it, eth2+ are passed through. Requires `/dev/net/tun` (`--device /dev/net/tun`) and `NET_ADMIN`; the container exits with an error if the TUN device is unusable |
+| `VM_NET_MTU` | (empty) | MTU for the VM NICs, e.g. `9000` for FCoE or other jumbo frames. Sets the TAP devices and bridges to it, raises the passed-through container interfaces to it if smaller (larger ones are kept), and adds `host_mtu=` to the virtio-net NICs so the guest uses it. Empty leaves all MTUs alone. The container exits with an error if it is not a number (68-65535) or cannot be applied |
 | `QEMU_EXTRA_ARGS` | (empty) | Additional QEMU arguments |
 | `DEBUG` | `false` | Enable debug output |
 
@@ -385,7 +386,7 @@ go vet ./...
 
 # Container integration tests
 make container-test         # Quick smoke tests
-make container-test-all     # All 100 tests (9 categories)
+make container-test-all     # All 103 tests (9 categories)
 ```
 
 ## Architecture
@@ -781,6 +782,7 @@ ipmitool user enable 3
 | `VM_BOOT` | `c` | ブートデバイス (c=ディスク, d=CD-ROM, n=ネットワーク) |
 | `VM_BOOT_MENU_TIMEOUT` | `0` | ブートメニュータイムアウト (ms、0=無効) |
 | `VM_NETWORKS` | (空) | TAP パススルー用ホストインターフェース (カンマ区切り、インターフェース出現まで最大30秒待機、containerlab 対応。現れなければエラーで終了する)。未指定時は eth2 以降をパススルー。`/dev/net/tun` (`--device /dev/net/tun`) と `NET_ADMIN` が必要で、TUN デバイスが使えないとエラーで終了する |
+| `VM_NET_MTU` | (空) | VM の NIC の MTU。FCoE やジャンボフレームを流すときに使う（例 `9000`）。TAP とブリッジをその MTU にし、パススルーするコンテナ側のインタフェースはそれより小さければ上げ（大きければそのまま）、virtio-net の NIC に `host_mtu=` を付けてゲストに知らせる。空なら MTU は触らない。数字（68〜65535）でないか設定できなければエラーで終了する |
 | `QEMU_EXTRA_ARGS` | (空) | 追加 QEMU 引数 |
 | `DEBUG` | `false` | デバッグ出力を有効化 |
 
@@ -803,7 +805,7 @@ go vet ./...
 
 # コンテナ統合テスト
 make container-test         # クイックスモークテスト
-make container-test-all     # 全 100 テスト (9 カテゴリ)
+make container-test-all     # 全 103 テスト (9 カテゴリ)
 ```
 
 ## アーキテクチャ

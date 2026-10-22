@@ -44,6 +44,7 @@ To install from an ISO, put it in `containerlab/iso/`, set `VM_CDROM: "/iso/<fil
 
 - **Management network** (`eth1` of each node): only qemu-bmc's Redfish and IPMI are used on it. The `operator` container sits on the same network and drives the nodes from there. Nothing is published on the host.
 - **Data network** (`eth2`): passed through to the VM as its NIC (`VM_NETWORKS: eth2`). The container has no IP on it and the BMC is not reachable over it.
+- **Jumbo frames**: the VM NIC path is MTU 1500 by default. To carry FCoE (2158-byte frames) or other jumbo frames, set `VM_NET_MTU` (e.g. `"9000"`) on the nodes: the TAP device and bridge get that MTU, the data interface is raised to it if smaller (containerlab links default to 9500, so they are kept), and the virtio-net NIC gets `host_mtu=` so the guest uses it.
 - **Fixed identity**: `SYSTEM_UUID` and `VM_MACS` per node. They are reported as Redfish `Systems/1` `UUID` / `EthernetInterfaces`, IPMI Get System GUID, and used as QEMU `-uuid` / NIC `mac=`.
 
 qemu-bmc listens on all container addresses, so the BMC is also reachable on the containerlab management network (`eth0`, `172.20.20.0/24`) from the host. Use `192.168.100.0/24` from `operator` to exercise the separated management network.
@@ -109,6 +110,8 @@ sudo containerlab destroy -t containerlab/mgmt-network.yml --cleanup
 ## mgmt-network.yml（日本語）
 
 BMC 管理ネットワーク（各ノードの `eth1`、`192.168.100.0/24`）と、VM のデータネットワーク（`eth2`、VM の NIC にパススルー）を分けた構成です。管理ネットワーク上の `operator` コンテナ（curl・ipmitool 入り）から各ノードを Redfish と IPMI で操作します。ホストへのポート公開はしません。各ノードの UUID・MAC は `SYSTEM_UUID`・`VM_MACS` で固定しています。
+
+VM の NIC の経路は既定で MTU 1500 です。FCoE（1 フレーム 2158 バイト）やジャンボフレームを流すときは各ノードに `VM_NET_MTU`（例 `"9000"`）を設定してください。TAP とブリッジがその MTU になり、データ側のインタフェースはそれより小さければ上げ（containerlab のリンクは既定 9500 なのでそのまま）、virtio-net の NIC に `host_mtu=` が付いてゲストもその MTU を使います。
 
 qemu-bmc はコンテナの全アドレスで待ち受けるため、containerlab の管理ネットワーク（`eth0`、`172.20.20.0/24`）からも BMC に届きます。分けた管理ネットワークを確かめるときは `operator` から `192.168.100.0/24` を使ってください。
 
