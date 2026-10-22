@@ -29,6 +29,7 @@ A Go single binary that controls QEMU VMs via both Redfish API (HTTPS) and IPMI 
 - **VM IPMI (In-Band)** - Guest OS IPMI via QEMU `ipmi-bmc-extern` KCS interface for MaaS commissioning
 - **noVNC** - Browser-based VNC console served on the Redfish HTTP port (no extra port needed)
 - **QMP Control** - Power operations, boot device changes, VirtualMedia mount
+- **UEFI HTTP boot and Secure Boot** - `UefiHttp` boot target with `Boot.HttpBootUri`; `Systems/1/SecureBoot` switches OVMF to its Secure Boot variant (Microsoft keys)
 - **Compatibility** - MAAS, Tinkerbell/Rufio
 
 ## Quick Start
@@ -157,6 +158,30 @@ curl -k -u admin:password -X PATCH https://localhost/redfish/v1/Systems/1 \
 - IPMI reports `UefiHttp` as PXE in Get Boot Options.
 - Not available in legacy mode (external QEMU), since qemu-bmc cannot change its arguments: PATCHing `UefiHttp` or a `HttpBootUri` returns `400` (clearing with `null` is accepted).
 
+#### Secure Boot
+
+With UEFI firmware (`VM_BOOT_MODE=uefi`: OVMF as `-drive if=pflash` drives) in process management mode, `Systems/1/SecureBoot` turns UEFI Secure Boot on and off (as used by Ironic's `redfish` management interface):
+
+```bash
+# Boot with Secure Boot from the next power on / reset
+curl -k -u admin:password -X PATCH https://localhost/redfish/v1/Systems/1/SecureBoot \
+  -H 'Content-Type: application/json' -d '{"SecureBootEnable": true}'
+curl -k -u admin:password -X POST https://localhost/redfish/v1/Systems/1/Actions/ComputerSystem.Reset \
+  -H 'Content-Type: application/json' -d '{"ResetType": "ForceRestart"}'
+# SecureBootCurrentBoot is now "Enabled"
+curl -k -u admin:password https://localhost/redfish/v1/Systems/1/SecureBoot
+# Reset the keys to the defaults (Microsoft keys)
+curl -k -u admin:password -X POST https://localhost/redfish/v1/Systems/1/SecureBoot/Actions/SecureBoot.ResetKeys \
+  -H 'Content-Type: application/json' -d '{"ResetKeysType": "ResetAllKeysToDefault"}'
+```
+
+- With `SecureBootEnable`, QEMU is started with the Secure Boot OVMF from the directory of the configured code: `OVMF_CODE.secboot.fd` for `OVMF_CODE.fd` (2 MB), `OVMF_CODE_4M.secboot.fd` for `OVMF_CODE_4M*.fd` (4 MB). Its VARS is a separate file next to the configured one (e.g. `/vm/OVMF_VARS.secboot.fd` for `/vm/OVMF_VARS.fd`), copied from `OVMF_VARS.ms.fd` / `OVMF_VARS_4M.ms.fd` (Microsoft keys enrolled) when missing. `-machine` gets `smm=on` and `-global driver=cfi.pflash01,property=secure,value=on` is added, as the Secure Boot OVMF requires SMM. Turning it off boots the original code and VARS again; both VARS files are kept.
+- `SecureBootEnable` applies from the next time QEMU starts (as in Redfish, from the next reset): power on, `PowerCycle`, `GracefulRestart`, and `ForceRestart`, which restarts QEMU instead of a plain `system_reset` when the setting changed. `SecureBootCurrentBoot` is `Enabled` when the running (or last started) QEMU booted the Secure Boot OVMF. `SecureBootMode` is `UserMode` (a PK is enrolled).
+- `SecureBootEnable` takes `true` / `false` only (else `400`), and enabling returns `400` if the Secure Boot code or the `.ms.fd` VARS template is missing. The resource has an ETag (`If-Match` is checked if sent).
+- `ResetKeys` only takes `ResetAllKeysToDefault` (else `400`). It deletes the Secure Boot VARS, which is copied from the template again at the next start; a VM running with Secure Boot keeps its keys until the next reset, which restarts QEMU.
+- `VM_SECURE_BOOT` sets the initial `SecureBootEnable`. A PATCHed value is kept in memory only: after qemu-bmc restarts it is `VM_SECURE_BOOT` again (the VARS files stay).
+- In BIOS mode and legacy mode `Systems/1` has no `SecureBoot` link and `/SecureBoot` returns `404`.
+
 ### Authentication and sessions
 
 Every request needs credentials (`IPMI_USER` / `IPMI_PASS`), except `GET /redfish`, `GET /redfish/v1` and the login request. Use HTTP Basic auth, or log in once and send the session token in `X-Auth-Token`:
@@ -258,6 +283,8 @@ ipmitool user enable 3
 | GET | `/redfish/v1/Systems/1` | Computer system (Status, Processors, Storage, SimpleStorage, VirtualMedia; Links: ManagedBy Managers/1, Chassis Chassis/1) |
 | PATCH | `/redfish/v1/Systems/1` | Boot device override (`BootSourceOverrideTarget` incl. `UefiHttp`, `Boot.HttpBootUri`; see [UEFI HTTP boot](#uefi-http-boot)) |
 | POST | `/redfish/v1/Systems/1/Actions/ComputerSystem.Reset` | Power control |
+| GET/PATCH | `/redfish/v1/Systems/1/SecureBoot` | Secure Boot (`SecureBootEnable`, `SecureBootCurrentBoot`, `SecureBootMode`; UEFI in process management mode only, else `404`; see [Secure Boot](#secure-boot)) |
+| POST | `/redfish/v1/Systems/1/SecureBoot/Actions/SecureBoot.ResetKeys` | Reset the Secure Boot keys (`ResetAllKeysToDefault`) |
 | GET | `/redfish/v1/Systems/1/EthernetInterfaces` | NIC collection |
 | GET | `/redfish/v1/Systems/1/EthernetInterfaces/{n}` | NIC (MACAddress, LinkStatus) |
 | GET | `/redfish/v1/Systems/1/Processors` | Processor collection (CPU1; empty if the CPU count is unknown) |
@@ -346,6 +373,7 @@ Another power action (Redfish or IPMI) during `PoweringOff` / `PoweringOn` ends 
 | `SYSTEM_UUID` | (derived) | Fixed system UUID, passed to QEMU as `-uuid` and reported by Redfish `Systems/1` `UUID` and IPMI `mc guid`. If unset, it is read from `SYSTEM_UUID_FILE`, or derived from the hostname and saved there. Set it (or use a fixed `--hostname` / a mounted `/vm`) to keep it across container re-creation |
 | `SYSTEM_UUID_FILE` | `<VM_DISK dir>/system-uuid` | Where a derived UUID is persisted |
 | `VM_MACS` | (derived) | Comma-separated MAC addresses of the VM NICs, in order (an empty entry is derived). Unset MACs are derived from the system UUID, so they stay fixed per node and do not overlap between nodes. Reported by Redfish `Systems/1/EthernetInterfaces` |
+| `VM_SECURE_BOOT` | `false` | Initial Redfish `SecureBootEnable` (`true` boots the Secure Boot OVMF; needs `VM_BOOT_MODE=uefi`, else qemu-bmc exits with an error; ignored in legacy mode). A value PATCHed over Redfish is kept in memory only and reverts to this one when qemu-bmc restarts. See [Secure Boot](#secure-boot) |
 
 ### Container Configuration
 
@@ -454,6 +482,7 @@ QEMU VM を Redfish API (HTTPS) と IPMI over LAN (UDP) の両方で制御する
 - **VM IPMI（イン・バンド）** - QEMU `ipmi-bmc-extern` KCS インターフェースによるゲスト OS IPMI（MaaS コミッショニング対応）
 - **noVNC** - Redfish HTTP ポートでブラウザから VNC コンソールにアクセス（追加ポート不要）
 - **QMP 制御** - 電源操作、ブートデバイス変更、VirtualMedia マウント
+- **UEFI HTTP ブートと Secure Boot** - 起動先 `UefiHttp` と `Boot.HttpBootUri`。`Systems/1/SecureBoot` で OVMF を Secure Boot 用（Microsoft の鍵入り）に切り替える
 - **互換性** - MAAS, Tinkerbell/Rufio
 
 ## クイックスタート
@@ -576,6 +605,30 @@ curl -k -u admin:password -X PATCH https://localhost/redfish/v1/Systems/1 \
 - IPMI の Get Boot Options では `UefiHttp` を PXE として答える。
 - レガシーモード（外部の QEMU）では QEMU の引数を変えられないので使えない。`UefiHttp` や `HttpBootUri` を PATCH すると `400`（`null` で消すのは受け付ける）。
 
+#### Secure Boot
+
+プロセス管理モードで UEFI（`VM_BOOT_MODE=uefi`。OVMF を `-drive if=pflash` で使う）のとき、`Systems/1/SecureBoot` で UEFI Secure Boot を切り替えられる（Ironic の `redfish` management が使う）。
+
+```bash
+# 次の電源オン・リセットから Secure Boot で起動する
+curl -k -u admin:password -X PATCH https://localhost/redfish/v1/Systems/1/SecureBoot \
+  -H 'Content-Type: application/json' -d '{"SecureBootEnable": true}'
+curl -k -u admin:password -X POST https://localhost/redfish/v1/Systems/1/Actions/ComputerSystem.Reset \
+  -H 'Content-Type: application/json' -d '{"ResetType": "ForceRestart"}'
+# SecureBootCurrentBoot が "Enabled" になる
+curl -k -u admin:password https://localhost/redfish/v1/Systems/1/SecureBoot
+# 鍵を既定（Microsoft の鍵）に戻す
+curl -k -u admin:password -X POST https://localhost/redfish/v1/Systems/1/SecureBoot/Actions/SecureBoot.ResetKeys \
+  -H 'Content-Type: application/json' -d '{"ResetKeysType": "ResetAllKeysToDefault"}'
+```
+
+- `SecureBootEnable` が有効なら、指定した CODE と同じディレクトリの Secure Boot 用の OVMF で QEMU を起動する：`OVMF_CODE.fd`（2MB）なら `OVMF_CODE.secboot.fd`、`OVMF_CODE_4M*.fd`（4MB）なら `OVMF_CODE_4M.secboot.fd`。VARS は指定した VARS と同じディレクトリの別ファイル（`/vm/OVMF_VARS.fd` なら `/vm/OVMF_VARS.secboot.fd`）を使い、無ければ `OVMF_VARS.ms.fd` / `OVMF_VARS_4M.ms.fd`（Microsoft の鍵入り）からコピーする。Secure Boot 用の OVMF は SMM が要るので、`-machine` に `smm=on` を足し、`-global driver=cfi.pflash01,property=secure,value=on` を足す。無効に戻すと元の CODE と VARS で起動する（VARS は両方とも残す）。
+- `SecureBootEnable` は次に QEMU を起動するときから効く（Redfish でも「次のリセットから」）：電源オン・`PowerCycle`・`GracefulRestart`、それに `ForceRestart`（設定が変わっていれば `system_reset` ではなく QEMU を起こし直す）。`SecureBootCurrentBoot` は、動いている（または最後に起動した）QEMU が Secure Boot 用の OVMF なら `Enabled`。`SecureBootMode` は `UserMode`（PK が入っている）。
+- `SecureBootEnable` は `true` / `false` だけ受ける（それ以外は `400`）。Secure Boot 用の CODE か `.ms.fd` の VARS の雛形が無いと、有効にする PATCH は `400`。ETag があり、`If-Match` を送れば確かめる。
+- `ResetKeys` は `ResetAllKeysToDefault` だけ受ける（それ以外は `400`）。Secure Boot 用の VARS を消し、次の起動で雛形からコピーし直す。Secure Boot で動いている VM は次のリセットまで今の鍵のままで、そのリセットで QEMU を起こし直す。
+- `VM_SECURE_BOOT` が起動時の `SecureBootEnable`。PATCH した値はメモリにだけ持つので、qemu-bmc を起動し直すと `VM_SECURE_BOOT` の値に戻る（VARS のファイルは残る）。
+- BIOS モードとレガシーモードでは `Systems/1` に `SecureBoot` のリンクを出さず、`/SecureBoot` は `404`。
+
 ### 認証とセッション
 
 `GET /redfish`・`GET /redfish/v1` とログインの要求のほかは、認証情報（`IPMI_USER` / `IPMI_PASS`）が要る。HTTP の Basic 認証か、一度ログインして得たセッションのトークンを `X-Auth-Token` で送る：
@@ -677,6 +730,8 @@ ipmitool user enable 3
 | GET | `/redfish/v1/Systems/1` | コンピュータシステム（Status、Processors、Storage、SimpleStorage、VirtualMedia。Links: ManagedBy に Managers/1、Chassis に Chassis/1） |
 | PATCH | `/redfish/v1/Systems/1` | ブートデバイス変更（`BootSourceOverrideTarget`（`UefiHttp` も）、`Boot.HttpBootUri`。「UEFI HTTP ブート」を参照） |
 | POST | `/redfish/v1/Systems/1/Actions/ComputerSystem.Reset` | 電源制御 |
+| GET/PATCH | `/redfish/v1/Systems/1/SecureBoot` | Secure Boot（`SecureBootEnable`・`SecureBootCurrentBoot`・`SecureBootMode`。プロセス管理モードの UEFI だけ、それ以外は `404`。「Secure Boot」を参照） |
+| POST | `/redfish/v1/Systems/1/SecureBoot/Actions/SecureBoot.ResetKeys` | Secure Boot の鍵を戻す（`ResetAllKeysToDefault`） |
 | GET | `/redfish/v1/Systems/1/EthernetInterfaces` | NIC 一覧 |
 | GET | `/redfish/v1/Systems/1/EthernetInterfaces/{n}` | NIC（MACAddress・LinkStatus） |
 | GET | `/redfish/v1/Systems/1/Processors` | プロセッサ一覧（CPU1。CPU 数が分からないときは空） |
@@ -765,6 +820,7 @@ ipmitool user enable 3
 | `SYSTEM_UUID` | （導出） | システム UUID を固定する。QEMU に `-uuid` で渡し、Redfish `Systems/1` の `UUID` と IPMI `mc guid` で返す。未指定なら `SYSTEM_UUID_FILE` から読み、無ければホスト名から導出してそこへ保存する。コンテナを作り直しても保つには、これを指定するか、`--hostname` を固定するか、`/vm` をマウントする |
 | `SYSTEM_UUID_FILE` | `<VM_DISK のディレクトリ>/system-uuid` | 導出した UUID の保存先 |
 | `VM_MACS` | （導出） | VM の NIC の MAC アドレスを順にカンマ区切りで指定する（空の項目は導出）。未指定の MAC はシステム UUID から導出するので、ノードごとに固定され、ノード間で重ならない。Redfish `Systems/1/EthernetInterfaces` で返す |
+| `VM_SECURE_BOOT` | `false` | 起動時の Redfish `SecureBootEnable`（`true` で Secure Boot 用の OVMF で起動する。`VM_BOOT_MODE=uefi` が要り、そうでなければ qemu-bmc はエラーで終わる。レガシーモードでは無視）。Redfish で PATCH した値はメモリだけで、qemu-bmc を起動し直すとこの値に戻る。「Secure Boot」を参照 |
 
 ### コンテナ設定
 
