@@ -796,7 +796,7 @@
       "number": 36,
       "kind": "task",
       "title": "IPMI: SDR・SEL・FRU を空・最小で答え、Get Self Test Results・Get Global Enables に答える",
-      "status": "in-progress",
+      "status": "done",
       "parent": "v0-9-0-ironic-metal3-sushy-bmclib-ipmito",
       "dependsOn": [
         "ipmi-cipher-suite-17-rakp-hmac-sha256-hm"
@@ -806,12 +806,12 @@
       "labels": [],
       "body": "## なぜ\nipmitool の sdr list・sel info・sel list・fru print・chassis selftest・mc getenables が Invalid command になる。管理ツールの在庫集め（bmclib・MAAS 等）で、エラーではなく「空」として返す方が扱いやすい。Backlog #29 参照。\n\n## やること（internal/ipmi）\n- Storage NetFn（0x0A）：Get SDR Repository Info（レコード 0 件）、Reserve SDR Repository、Get SDR（無いので completion code 0xCB）、Get SEL Info（0 件）、Reserve SEL、Get SEL Entry（0xCB）、Clear SEL（成功）、Get FRU Inventory Area Info と Read FRU Data（FRU 0 に最小の FRU：Common Header ＋ Product Info Area。Manufacturer \"QEMU\"、Product Name \"qemu-bmc VM\"、Serial Number はシステムの UUID）\n- Sensor/Event NetFn に Get SDR 系があれば同様に空\n- App NetFn：Get Self Test Results（0x55 0x00＝問題なし）、Get BMC Global Enables（妥当な固定値）\n- README（英語・日本語）の IPMI コマンド表に足す\n\n## 確かめ方\n単体テストと、実機の ipmitool（ホストにある 1.8.19）で `sdr list`・`sel info`・`sel list`・`fru print`・`chassis selftest`・`mc getenables` がエラーなく終わること。統合テストに sdr/sel/fru の試験を足す（試験の数も直す）。",
       "doneWhen": "ipmitool の sdr list・sel info・sel list・fru print（Product Serial に UUID）・chassis selftest・mc getenables がエラーなく終わり、go test ./... -race と make container-test-all が通る",
-      "resolution": null,
+      "resolution": "Factory が取り込みました（factory/ipmi-sdr-sel-fru-get-self-test-results-g）",
       "refs": [],
       "threads": [],
       "createdAt": "2026-10-22T00:37:05.903Z",
-      "updatedAt": "2026-10-22T00:59:28.814Z",
-      "closedAt": null,
+      "updatedAt": "2026-10-22T01:12:44.440Z",
+      "closedAt": "2026-10-22T01:12:44.440Z",
       "extra": {}
     }
   ]
