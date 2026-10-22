@@ -24,6 +24,7 @@ type mockMachine struct {
 	media         machine.Media
 	mediaErr      error
 	resetErr      error
+	statusErr     error
 }
 
 func newMockMachine(status qmp.Status) *mockMachine {
@@ -50,7 +51,7 @@ func (m *mockMachine) GetPowerState() (machine.PowerState, error) {
 }
 
 func (m *mockMachine) GetQMPStatus() (qmp.Status, error) {
-	return m.qmpStatus, nil
+	return m.qmpStatus, m.statusErr
 }
 
 func (m *mockMachine) Reset(resetType string) error {

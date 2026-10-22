@@ -24,13 +24,19 @@ func (s *Server) handleManagerCollection(w http.ResponseWriter, r *http.Request)
 
 func (s *Server) handleGetManager(w http.ResponseWriter, r *http.Request) {
 	mgr := Manager{
-		ODataType:    "#Manager.v1_3_0.Manager",
-		ODataID:      "/redfish/v1/Managers/1",
-		ODataContext: "/redfish/v1/$metadata#Manager.Manager",
-		ID:           "1",
-		Name:         "QEMU BMC",
-		ManagerType:  "BMC",
-		VirtualMedia: ODataID{ODataID: "/redfish/v1/Managers/1/VirtualMedia"},
+		ODataType:       "#Manager.v1_3_0.Manager",
+		ODataID:         "/redfish/v1/Managers/1",
+		ODataContext:    "/redfish/v1/$metadata#Manager.Manager",
+		ID:              "1",
+		Name:            "QEMU BMC",
+		ManagerType:     "BMC",
+		FirmwareVersion: s.firmware,
+		Status:          statusOK,
+		VirtualMedia:    ODataID{ODataID: "/redfish/v1/Managers/1/VirtualMedia"},
+		Links: ManagerLinks{
+			ManagerForServers: []ODataID{{ODataID: systemPath}},
+			ManagerInChassis:  ODataID{ODataID: chassisPath},
+		},
 	}
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(mgr)

@@ -30,6 +30,7 @@ type Server struct {
 	novncHandler *novnc.Handler
 	systemInfo   SystemInfo
 	systemUUID   string
+	firmware     string
 	sessions     *sessionStore
 }
 
@@ -58,6 +59,12 @@ func NewServer(m MachineInterface, user, pass, vncAddr string) *Server {
 // SetSystemUUID sets the UUID reported in Systems/1.
 func (s *Server) SetSystemUUID(uuid string) {
 	s.systemUUID = uuid
+}
+
+// SetFirmwareVersion sets the qemu-bmc version reported as the Managers/1
+// FirmwareVersion.
+func (s *Server) SetFirmwareVersion(version string) {
+	s.firmware = version
 }
 
 func (s *Server) setupRoutes() {

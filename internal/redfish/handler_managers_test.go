@@ -47,6 +47,27 @@ func TestGetManager(t *testing.T) {
 	assert.Equal(t, "BMC", mgr.ManagerType)
 }
 
+func TestGetManager_LinksStatusFirmware(t *testing.T) {
+	srv := NewServer(newMockMachine(qmp.StatusRunning), "", "", "")
+	srv.SetFirmwareVersion("0.9.0")
+
+	mgr := getResource(t, srv, "/redfish/v1/Managers/1")
+	assert.Equal(t, "BMC", mgr["ManagerType"])
+	assert.Equal(t, "0.9.0", mgr["FirmwareVersion"])
+	assert.Equal(t, map[string]interface{}{"State": "Enabled", "Health": "OK"}, mgr["Status"])
+	assert.Equal(t, map[string]interface{}{
+		"ManagerForServers": []interface{}{map[string]interface{}{"@odata.id": "/redfish/v1/Systems/1"}},
+		"ManagerInChassis":  map[string]interface{}{"@odata.id": "/redfish/v1/Chassis/1"},
+	}, mgr["Links"])
+}
+
+func TestGetManager_FirmwareVersionOmittedWhenUnset(t *testing.T) {
+	srv := NewServer(newMockMachine(qmp.StatusRunning), "", "", "")
+
+	mgr := getResource(t, srv, "/redfish/v1/Managers/1")
+	assert.NotContains(t, mgr, "FirmwareVersion")
+}
+
 func TestGetVirtualMediaCollection(t *testing.T) {
 	mock := newMockMachine(qmp.StatusRunning)
 	srv := NewServer(mock, "", "", "")
@@ -92,7 +113,7 @@ func TestGetVirtualMedia_NotInserted(t *testing.T) {
 	assert.NotEmpty(t, vm["@odata.context"])
 	assert.Equal(t, false, vm["Inserted"])
 	assert.Equal(t, "", vm["Image"])
-	assert.Equal(t, "", vm["ImageName"])
+	assert.NotContains(t, vm, "ImageName")
 	assert.Equal(t, "NotConnected", vm["ConnectedVia"])
 	assert.Equal(t, true, vm["WriteProtected"])
 	assert.Equal(t, []interface{}{"CD", "DVD"}, vm["MediaTypes"])

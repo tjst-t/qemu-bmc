@@ -34,9 +34,9 @@ func TestGetSystems(t *testing.T) {
 
 func TestGetSystem_PowerState(t *testing.T) {
 	tests := []struct {
-		name           string
-		qmpStatus      qmp.Status
-		expectedPower  string
+		name          string
+		qmpStatus     qmp.Status
+		expectedPower string
 	}{
 		{"running maps to On", qmp.StatusRunning, "On"},
 		{"shutdown maps to Off", qmp.StatusShutdown, "Off"},
@@ -269,4 +269,27 @@ func TestGetSystem_HardwareSummary_Unknown(t *testing.T) {
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &raw))
 	assert.NotContains(t, raw, "MemorySummary")
 	assert.NotContains(t, raw, "ProcessorSummary")
+}
+
+// getResource GETs path and decodes the response into a generic map.
+func getResource(t *testing.T, srv *Server, path string) map[string]interface{} {
+	t.Helper()
+	req := httptest.NewRequest("GET", path, nil)
+	w := httptest.NewRecorder()
+	srv.ServeHTTP(w, req)
+	require.Equal(t, http.StatusOK, w.Code)
+	var body map[string]interface{}
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &body))
+	return body
+}
+
+func TestGetSystem_LinksAndStatus(t *testing.T) {
+	srv := NewServer(newMockMachine(qmp.StatusRunning), "", "", "")
+
+	system := getResource(t, srv, "/redfish/v1/Systems/1")
+	assert.Equal(t, map[string]interface{}{
+		"ManagedBy": []interface{}{map[string]interface{}{"@odata.id": "/redfish/v1/Managers/1"}},
+		"Chassis":   []interface{}{map[string]interface{}{"@odata.id": "/redfish/v1/Chassis/1"}},
+	}, system["Links"])
+	assert.Equal(t, map[string]interface{}{"State": "Enabled", "Health": "OK"}, system["Status"])
 }

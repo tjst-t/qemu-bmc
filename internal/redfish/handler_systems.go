@@ -10,6 +10,15 @@ import (
 	"github.com/tjst-t/qemu-bmc/internal/qmp"
 )
 
+const (
+	systemPath  = "/redfish/v1/Systems/1"
+	managerPath = "/redfish/v1/Managers/1"
+	chassisPath = "/redfish/v1/Chassis/1"
+)
+
+// statusOK is the Status of the always-present system, manager and chassis
+var statusOK = ResourceStatus{State: "Enabled", Health: "OK"}
+
 func (s *Server) handleSystemCollection(w http.ResponseWriter, r *http.Request) {
 	collection := SystemCollection{
 		ODataType:    "#ComputerSystemCollection.ComputerSystemCollection",
@@ -37,10 +46,10 @@ func (s *Server) handleGetSystem(w http.ResponseWriter, r *http.Request) {
 	etag := generateETag(powerState, boot)
 
 	system := ComputerSystem{
-		ODataType: "#ComputerSystem.v1_5_0.ComputerSystem",
-		ODataID:   "/redfish/v1/Systems/1",
-		ODataEtag: etag,
-		ID:        "1",
+		ODataType:  "#ComputerSystem.v1_5_0.ComputerSystem",
+		ODataID:    "/redfish/v1/Systems/1",
+		ODataEtag:  etag,
+		ID:         "1",
 		Name:       "QEMU Virtual Machine",
 		UUID:       s.systemUUID,
 		PowerState: powerState,
@@ -57,6 +66,11 @@ func (s *Server) handleGetSystem(w http.ResponseWriter, r *http.Request) {
 			},
 		},
 		EthernetInterfaces: ODataID{ODataID: ethernetInterfacesPath},
+		Status:             statusOK,
+		Links: SystemLinks{
+			ManagedBy: []ODataID{{ODataID: managerPath}},
+			Chassis:   []ODataID{{ODataID: chassisPath}},
+		},
 	}
 	if s.systemInfo.MemoryMiB > 0 {
 		system.MemorySummary = &MemorySummary{

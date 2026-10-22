@@ -50,6 +50,14 @@ type ComputerSystem struct {
 	MemorySummary      *MemorySummary    `json:"MemorySummary,omitempty"`
 	ProcessorSummary   *ProcessorSummary `json:"ProcessorSummary,omitempty"`
 	EthernetInterfaces ODataID           `json:"EthernetInterfaces"`
+	Status             ResourceStatus    `json:"Status"`
+	Links              SystemLinks       `json:"Links"`
+}
+
+// SystemLinks are the links from a computer system to its manager and chassis
+type SystemLinks struct {
+	ManagedBy []ODataID `json:"ManagedBy"`
+	Chassis   []ODataID `json:"Chassis"`
 }
 
 // MemorySummary describes the system memory
@@ -148,13 +156,22 @@ type ManagerCollection struct {
 
 // Manager represents a BMC manager
 type Manager struct {
-	ODataType    string  `json:"@odata.type"`
-	ODataID      string  `json:"@odata.id"`
-	ODataContext string  `json:"@odata.context,omitempty"`
-	ID           string  `json:"Id"`
-	Name         string  `json:"Name"`
-	ManagerType  string  `json:"ManagerType"`
-	VirtualMedia ODataID `json:"VirtualMedia"`
+	ODataType       string         `json:"@odata.type"`
+	ODataID         string         `json:"@odata.id"`
+	ODataContext    string         `json:"@odata.context,omitempty"`
+	ID              string         `json:"Id"`
+	Name            string         `json:"Name"`
+	ManagerType     string         `json:"ManagerType"`
+	FirmwareVersion string         `json:"FirmwareVersion,omitempty"`
+	Status          ResourceStatus `json:"Status"`
+	VirtualMedia    ODataID        `json:"VirtualMedia"`
+	Links           ManagerLinks   `json:"Links"`
+}
+
+// ManagerLinks are the links from a manager to the system and chassis it manages
+type ManagerLinks struct {
+	ManagerForServers []ODataID `json:"ManagerForServers"`
+	ManagerInChassis  ODataID   `json:"ManagerInChassis"`
 }
 
 // VirtualMediaCollection is a collection of virtual media
@@ -175,7 +192,7 @@ type VirtualMedia struct {
 	Name           string              `json:"Name"`
 	MediaTypes     []string            `json:"MediaTypes"`
 	Image          string              `json:"Image"`
-	ImageName      string              `json:"ImageName"`
+	ImageName      string              `json:"ImageName,omitempty"`
 	Inserted       bool                `json:"Inserted"`
 	WriteProtected bool                `json:"WriteProtected"`
 	ConnectedVia   string              `json:"ConnectedVia"`
@@ -213,10 +230,19 @@ type ChassisCollection struct {
 
 // Chassis represents a chassis resource
 type Chassis struct {
-	ODataType    string `json:"@odata.type"`
-	ODataID      string `json:"@odata.id"`
-	ODataContext string `json:"@odata.context,omitempty"`
-	ID           string `json:"Id"`
-	Name         string `json:"Name"`
-	ChassisType  string `json:"ChassisType"`
+	ODataType    string         `json:"@odata.type"`
+	ODataID      string         `json:"@odata.id"`
+	ODataContext string         `json:"@odata.context,omitempty"`
+	ID           string         `json:"Id"`
+	Name         string         `json:"Name"`
+	ChassisType  string         `json:"ChassisType"`
+	PowerState   string         `json:"PowerState"`
+	Status       ResourceStatus `json:"Status"`
+	Links        ChassisLinks   `json:"Links"`
+}
+
+// ChassisLinks are the links from a chassis to the system and manager in it
+type ChassisLinks struct {
+	ComputerSystems []ODataID `json:"ComputerSystems"`
+	ManagedBy       []ODataID `json:"ManagedBy"`
 }

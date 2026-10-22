@@ -234,19 +234,19 @@ ipmitool user enable 3
 | GET | `/redfish/v1/SessionService/Sessions/{id}` | Session |
 | DELETE | `/redfish/v1/SessionService/Sessions/{id}` | Log out (204) |
 | GET | `/redfish/v1/Systems` | System collection |
-| GET | `/redfish/v1/Systems/1` | Computer system |
+| GET | `/redfish/v1/Systems/1` | Computer system (Status; Links: ManagedBy Managers/1, Chassis Chassis/1) |
 | PATCH | `/redfish/v1/Systems/1` | Boot device override |
 | POST | `/redfish/v1/Systems/1/Actions/ComputerSystem.Reset` | Power control |
 | GET | `/redfish/v1/Systems/1/EthernetInterfaces` | NIC collection |
 | GET | `/redfish/v1/Systems/1/EthernetInterfaces/{n}` | NIC (MACAddress, LinkStatus) |
 | GET | `/redfish/v1/Managers` | Manager collection |
-| GET | `/redfish/v1/Managers/1` | BMC manager |
+| GET | `/redfish/v1/Managers/1` | BMC manager (ManagerType BMC, FirmwareVersion = qemu-bmc version, Status; Links: ManagerForServers Systems/1, ManagerInChassis Chassis/1) |
 | GET | `/redfish/v1/Managers/1/VirtualMedia` | VirtualMedia collection |
-| GET | `/redfish/v1/Managers/1/VirtualMedia/CD1` | VirtualMedia resource |
+| GET | `/redfish/v1/Managers/1/VirtualMedia/CD1` | VirtualMedia resource (ImageName only while inserted) |
 | POST | `.../VirtualMedia.InsertMedia` | Insert an ISO (container path or HTTP(S) URL; 204) |
 | POST | `.../VirtualMedia.EjectMedia` | Eject media (204) |
 | GET | `/redfish/v1/Chassis` | Chassis collection |
-| GET | `/redfish/v1/Chassis/1` | Chassis resource |
+| GET | `/redfish/v1/Chassis/1` | Chassis resource (PowerState same as Systems/1, Status; Links: ComputerSystems Systems/1, ManagedBy Managers/1) |
 | GET | `/novnc/` | Redirect to noVNC UI |
 | GET | `/novnc/vnc.html` | Browser-based VNC console |
 | GET | `/websockify` | WebSocket-to-VNC proxy |
@@ -606,19 +606,19 @@ ipmitool user enable 3
 | GET | `/redfish/v1/SessionService/Sessions/{id}` | セッション |
 | DELETE | `/redfish/v1/SessionService/Sessions/{id}` | ログアウト（204） |
 | GET | `/redfish/v1/Systems` | システムコレクション |
-| GET | `/redfish/v1/Systems/1` | コンピュータシステム |
+| GET | `/redfish/v1/Systems/1` | コンピュータシステム（Status。Links: ManagedBy に Managers/1、Chassis に Chassis/1） |
 | PATCH | `/redfish/v1/Systems/1` | ブートデバイス変更 |
 | POST | `/redfish/v1/Systems/1/Actions/ComputerSystem.Reset` | 電源制御 |
 | GET | `/redfish/v1/Systems/1/EthernetInterfaces` | NIC 一覧 |
 | GET | `/redfish/v1/Systems/1/EthernetInterfaces/{n}` | NIC（MACAddress・LinkStatus） |
 | GET | `/redfish/v1/Managers` | マネージャコレクション |
-| GET | `/redfish/v1/Managers/1` | BMC マネージャ |
+| GET | `/redfish/v1/Managers/1` | BMC マネージャ（ManagerType は BMC、FirmwareVersion は qemu-bmc のバージョン、Status。Links: ManagerForServers に Systems/1、ManagerInChassis に Chassis/1） |
 | GET | `/redfish/v1/Managers/1/VirtualMedia` | VirtualMedia コレクション |
-| GET | `/redfish/v1/Managers/1/VirtualMedia/CD1` | VirtualMedia リソース |
+| GET | `/redfish/v1/Managers/1/VirtualMedia/CD1` | VirtualMedia リソース（ImageName は差しているときだけ） |
 | POST | `.../VirtualMedia.InsertMedia` | ISO を差す（コンテナ内のパスか HTTP(S) の URL、204） |
 | POST | `.../VirtualMedia.EjectMedia` | メディア取り出し（204） |
 | GET | `/redfish/v1/Chassis` | シャーシコレクション |
-| GET | `/redfish/v1/Chassis/1` | シャーシリソース |
+| GET | `/redfish/v1/Chassis/1` | シャーシリソース（PowerState は Systems/1 と同じ値、Status。Links: ComputerSystems に Systems/1、ManagedBy に Managers/1） |
 | GET | `/novnc/` | noVNC UI へリダイレクト |
 | GET | `/novnc/vnc.html` | ブラウザ VNC コンソール |
 | GET | `/websockify` | WebSocket-to-VNC プロキシ |

@@ -2,12 +2,14 @@ package redfish
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"github.com/tjst-t/qemu-bmc/internal/machine"
 	"github.com/tjst-t/qemu-bmc/internal/qmp"
 )
 
@@ -41,4 +43,54 @@ func TestGetChassis(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "#Chassis.v1_0_0.Chassis", chassis.ODataType)
 	assert.Equal(t, "RackMount", chassis.ChassisType)
+}
+
+func TestGetChassis_LinksAndStatus(t *testing.T) {
+	srv := NewServer(newMockMachine(qmp.StatusRunning), "", "", "")
+
+	chassis := getResource(t, srv, "/redfish/v1/Chassis/1")
+	assert.Equal(t, map[string]interface{}{"State": "Enabled", "Health": "OK"}, chassis["Status"])
+	assert.Equal(t, map[string]interface{}{
+		"ComputerSystems": []interface{}{map[string]interface{}{"@odata.id": "/redfish/v1/Systems/1"}},
+		"ManagedBy":       []interface{}{map[string]interface{}{"@odata.id": "/redfish/v1/Managers/1"}},
+	}, chassis["Links"])
+}
+
+func TestGetChassis_PowerState(t *testing.T) {
+	tests := []struct {
+		name       string
+		qmpStatus  qmp.Status
+		powerState machine.PowerState
+		expected   string
+	}{
+		{"running", qmp.StatusRunning, "", "On"},
+		{"shutdown", qmp.StatusShutdown, "", "Off"},
+		{"powering off", qmp.StatusRunning, machine.PoweringOff, "PoweringOff"},
+		{"powering on", qmp.StatusShutdown, machine.PoweringOn, "PoweringOn"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			mock := newMockMachine(tt.qmpStatus)
+			if tt.powerState != "" {
+				mock.powerState = tt.powerState
+			}
+			srv := NewServer(mock, "", "", "")
+
+			chassis := getResource(t, srv, "/redfish/v1/Chassis/1")
+			assert.Equal(t, tt.expected, chassis["PowerState"])
+			system := getResource(t, srv, "/redfish/v1/Systems/1")
+			assert.Equal(t, system["PowerState"], chassis["PowerState"])
+		})
+	}
+}
+
+func TestGetChassis_PowerStateError(t *testing.T) {
+	mock := newMockMachine(qmp.StatusRunning)
+	mock.statusErr = errors.New("QMP down")
+	srv := NewServer(mock, "", "", "")
+
+	req := httptest.NewRequest("GET", "/redfish/v1/Chassis/1", nil)
+	w := httptest.NewRecorder()
+	srv.ServeHTTP(w, req)
+	assert.Equal(t, http.StatusInternalServerError, w.Code)
 }

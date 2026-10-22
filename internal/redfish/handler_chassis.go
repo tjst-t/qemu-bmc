@@ -18,6 +18,12 @@ func (s *Server) handleChassisCollection(w http.ResponseWriter, r *http.Request)
 }
 
 func (s *Server) handleGetChassis(w http.ResponseWriter, r *http.Request) {
+	powerState, err := s.systemPowerState()
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "InternalError", "failed to get system status")
+		return
+	}
+
 	chassis := Chassis{
 		ODataType:    "#Chassis.v1_0_0.Chassis",
 		ODataID:      "/redfish/v1/Chassis/1",
@@ -25,6 +31,12 @@ func (s *Server) handleGetChassis(w http.ResponseWriter, r *http.Request) {
 		ID:           "1",
 		Name:         "QEMU Virtual Machine Chassis",
 		ChassisType:  "RackMount",
+		PowerState:   powerState,
+		Status:       statusOK,
+		Links: ChassisLinks{
+			ComputerSystems: []ODataID{{ODataID: systemPath}},
+			ManagedBy:       []ODataID{{ODataID: managerPath}},
+		},
 	}
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(chassis)
