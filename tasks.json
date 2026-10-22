@@ -884,7 +884,7 @@
       "number": 40,
       "kind": "task",
       "title": "SecureBoot：Systems/1/SecureBoot（SecureBootEnable で次の起動から Secure Boot 用の OVMF に切り替える）",
-      "status": "ready",
+      "status": "in-progress",
       "parent": "v0-9-0-uefi-http-secureboot",
       "dependsOn": [
         "uefi-http-bootsourceoverridetarget-uefih"
@@ -898,7 +898,7 @@
       "refs": [],
       "threads": [],
       "createdAt": "2026-10-22T03:13:59.466Z",
-      "updatedAt": "2026-10-22T03:13:59.466Z",
+      "updatedAt": "2026-10-22T03:40:56.611Z",
       "closedAt": null,
       "extra": {}
     },
