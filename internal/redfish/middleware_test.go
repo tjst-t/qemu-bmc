@@ -23,7 +23,7 @@ func TestBasicAuth(t *testing.T) {
 	})
 
 	t.Run("wrong password returns 401", func(t *testing.T) {
-		req := httptest.NewRequest("GET", "/redfish/v1", nil)
+		req := httptest.NewRequest("GET", "/redfish/v1/Systems", nil)
 		req.SetBasicAuth("admin", "wrong")
 		w := httptest.NewRecorder()
 		srv.ServeHTTP(w, req)
@@ -32,7 +32,7 @@ func TestBasicAuth(t *testing.T) {
 	})
 
 	t.Run("no auth returns 401", func(t *testing.T) {
-		req := httptest.NewRequest("GET", "/redfish/v1", nil)
+		req := httptest.NewRequest("GET", "/redfish/v1/Systems", nil)
 		w := httptest.NewRecorder()
 		srv.ServeHTTP(w, req)
 

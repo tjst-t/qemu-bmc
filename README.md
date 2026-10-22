@@ -136,6 +136,25 @@ curl -k -u admin:password -X POST \
 - `GET .../VirtualMedia/CD1` reports `Image`, `ImageName`, `Inserted`, `ConnectedVia` (`URI` / `NotConnected`), `WriteProtected` (always `true`) and `MediaTypes`.
 - Legacy mode (external QEMU) only changes the medium over QMP; the path refers to the external QEMU's filesystem. The CD drive is located with `query-block` (first removable drive) in both modes.
 
+### Authentication and sessions
+
+Every request needs credentials (`IPMI_USER` / `IPMI_PASS`), except `GET /redfish`, `GET /redfish/v1` and the login request. Use HTTP Basic auth, or log in once and send the session token in `X-Auth-Token`:
+
+```bash
+# Log in: the token is in the X-Auth-Token header, the session URI in Location
+curl -sk -D - -o /dev/null -H 'Content-Type: application/json' \
+  -d '{"UserName": "admin", "Password": "password"}' \
+  https://localhost/redfish/v1/SessionService/Sessions
+
+curl -sk -H "X-Auth-Token: $TOKEN" https://localhost/redfish/v1/Systems/1
+
+# Log out
+curl -sk -X DELETE -H "X-Auth-Token: $TOKEN" https://localhost/redfish/v1/SessionService/Sessions/1
+```
+
+- A session expires after `SessionTimeout` seconds without use (1800 by default; `PATCH /redfish/v1/SessionService` with `{"SessionTimeout": n}`, 30–86400).
+- Sessions are kept in memory: they are lost when qemu-bmc restarts. Up to 64 sessions; creating more returns `503` until one is deleted or expires.
+
 ### IPMI
 
 ```bash
@@ -206,7 +225,14 @@ ipmitool user enable 3
 
 | Method | Path | Description |
 |--------|------|-------------|
-| GET | `/redfish/v1` | ServiceRoot |
+| GET | `/redfish` | Protocol versions (no auth) |
+| GET | `/redfish/v1` | ServiceRoot (no auth) |
+| GET | `/redfish/v1/SessionService` | Session service (SessionTimeout) |
+| PATCH | `/redfish/v1/SessionService` | Change SessionTimeout (30–86400 s) |
+| GET | `/redfish/v1/SessionService/Sessions` | Session collection |
+| POST | `/redfish/v1/SessionService/Sessions` | Log in (no auth; 201, X-Auth-Token and Location headers) |
+| GET | `/redfish/v1/SessionService/Sessions/{id}` | Session |
+| DELETE | `/redfish/v1/SessionService/Sessions/{id}` | Log out (204) |
 | GET | `/redfish/v1/Systems` | System collection |
 | GET | `/redfish/v1/Systems/1` | Computer system |
 | PATCH | `/redfish/v1/Systems/1` | Boot device override |
@@ -313,7 +339,7 @@ go vet ./...
 
 # Container integration tests
 make container-test         # Quick smoke tests
-make container-test-all     # All 88 tests (9 categories)
+make container-test-all     # All 89 tests (9 categories)
 ```
 
 ## Architecture
@@ -482,6 +508,25 @@ curl -k -u admin:password -X POST \
 - `GET .../VirtualMedia/CD1` は `Image`・`ImageName`・`Inserted`・`ConnectedVia`（`URI` / `NotConnected`）・`WriteProtected`（常に `true`）・`MediaTypes` を返す。
 - レガシーモード（外部の QEMU）は QMP で差し替えるだけ。パスは外部 QEMU 側のファイルシステムのもの。どちらのモードも CD ドライブは `query-block` で探す（最初の取り外し可能なドライブ）。
 
+### 認証とセッション
+
+`GET /redfish`・`GET /redfish/v1` とログインの要求のほかは、認証情報（`IPMI_USER` / `IPMI_PASS`）が要る。HTTP の Basic 認証か、一度ログインして得たセッションのトークンを `X-Auth-Token` で送る：
+
+```bash
+# ログイン：トークンは X-Auth-Token ヘッダ、セッションの URI は Location に入る
+curl -sk -D - -o /dev/null -H 'Content-Type: application/json' \
+  -d '{"UserName": "admin", "Password": "password"}' \
+  https://localhost/redfish/v1/SessionService/Sessions
+
+curl -sk -H "X-Auth-Token: $TOKEN" https://localhost/redfish/v1/Systems/1
+
+# ログアウト
+curl -sk -X DELETE -H "X-Auth-Token: $TOKEN" https://localhost/redfish/v1/SessionService/Sessions/1
+```
+
+- セッションは `SessionTimeout` 秒使われないと切れる（既定 1800。`PATCH /redfish/v1/SessionService` に `{"SessionTimeout": n}` で 30〜86400 に変えられる）。
+- セッションはメモリにだけあり、qemu-bmc を起動し直すと消える。同時に 64 個まで。それを超えて作ると、どれかが消えるか切れるまで `503` を返す。
+
 ### IPMI
 
 ```bash
@@ -552,7 +597,14 @@ ipmitool user enable 3
 
 | メソッド | パス | 説明 |
 |---------|------|------|
-| GET | `/redfish/v1` | サービスルート |
+| GET | `/redfish` | プロトコルのバージョン（認証なし） |
+| GET | `/redfish/v1` | サービスルート（認証なし） |
+| GET | `/redfish/v1/SessionService` | セッションサービス（SessionTimeout） |
+| PATCH | `/redfish/v1/SessionService` | SessionTimeout を変える（30〜86400 秒） |
+| GET | `/redfish/v1/SessionService/Sessions` | セッション一覧 |
+| POST | `/redfish/v1/SessionService/Sessions` | ログイン（認証なし。201、X-Auth-Token と Location ヘッダ） |
+| GET | `/redfish/v1/SessionService/Sessions/{id}` | セッション |
+| DELETE | `/redfish/v1/SessionService/Sessions/{id}` | ログアウト（204） |
 | GET | `/redfish/v1/Systems` | システムコレクション |
 | GET | `/redfish/v1/Systems/1` | コンピュータシステム |
 | PATCH | `/redfish/v1/Systems/1` | ブートデバイス変更 |

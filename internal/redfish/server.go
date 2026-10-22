@@ -30,6 +30,7 @@ type Server struct {
 	novncHandler *novnc.Handler
 	systemInfo   SystemInfo
 	systemUUID   string
+	sessions     *sessionStore
 }
 
 // SystemInfo is the static VM hardware configuration reported on Systems/1.
@@ -48,6 +49,7 @@ func NewServer(m MachineInterface, user, pass, vncAddr string) *Server {
 		user:         user,
 		pass:         pass,
 		novncHandler: novnc.NewHandler(vncAddr),
+		sessions:     newSessionStore(),
 	}
 	s.setupRoutes()
 	return s
@@ -61,13 +63,27 @@ func (s *Server) SetSystemUUID(uuid string) {
 func (s *Server) setupRoutes() {
 	// Apply middleware
 	s.router.Use(s.trailingSlashMiddleware)
-	if s.user != "" && s.pass != "" {
-		s.router.Use(s.basicAuthMiddleware)
+	if s.authEnabled() {
+		s.router.Use(s.authMiddleware)
 	}
+
+	// Version document
+	s.router.HandleFunc("/redfish", s.handleVersions).Methods("GET")
+	s.router.HandleFunc("/redfish/", s.handleVersions).Methods("GET")
 
 	// Service Root
 	s.router.HandleFunc("/redfish/v1", s.handleServiceRoot).Methods("GET")
 	s.router.HandleFunc("/redfish/v1/", s.handleServiceRoot).Methods("GET")
+
+	// Sessions
+	for _, p := range []string{"", "/"} {
+		s.router.HandleFunc("/redfish/v1/SessionService"+p, s.handleGetSessionService).Methods("GET")
+		s.router.HandleFunc("/redfish/v1/SessionService"+p, s.handlePatchSessionService).Methods("PATCH")
+		s.router.HandleFunc(sessionsPath+p, s.handleSessionCollection).Methods("GET")
+		s.router.HandleFunc(sessionsPath+p, s.handleCreateSession).Methods("POST")
+		s.router.HandleFunc(sessionsPath+"/{sid}"+p, s.handleGetSession).Methods("GET")
+		s.router.HandleFunc(sessionsPath+"/{sid}"+p, s.handleDeleteSession).Methods("DELETE")
+	}
 
 	// Systems
 	s.router.HandleFunc("/redfish/v1/Systems", s.handleSystemCollection).Methods("GET")

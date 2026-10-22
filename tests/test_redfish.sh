@@ -60,6 +60,26 @@ test_redfish_chassis() {
     assert_contains "$result" "@odata.type" "Chassis/1 should contain @odata.type"
 }
 
+test_redfish_session_login_logout() {
+    local headers token location status
+    headers=$(curl -sk --max-time "$CMD_TIMEOUT" -D - -o /dev/null \
+        -H "Content-Type: application/json" \
+        -d "{\"UserName\":\"${IPMI_USER}\",\"Password\":\"${IPMI_PASS}\"}" \
+        "https://${IPMI_HOST}:${REDFISH_PORT}/redfish/v1/SessionService/Sessions" | tr -d "\r")
+    assert_contains "$headers" " 201" "Login should return 201"
+    token=$(echo "$headers" | sed -n "s/^[Xx]-[Aa]uth-[Tt]oken: //p")
+    location=$(echo "$headers" | sed -n "s/^[Ll]ocation: //p")
+    status=$(curl -sk --max-time "$CMD_TIMEOUT" -H "X-Auth-Token: $token" -o /dev/null -w "%{http_code}" \
+        "https://${IPMI_HOST}:${REDFISH_PORT}/redfish/v1/Systems/1")
+    assert_equals "200" "$status" "X-Auth-Token should authenticate"
+    status=$(curl -sk --max-time "$CMD_TIMEOUT" -X DELETE -H "X-Auth-Token: $token" -o /dev/null -w "%{http_code}" \
+        "https://${IPMI_HOST}:${REDFISH_PORT}${location}")
+    assert_equals "204" "$status" "Logout should return 204"
+    status=$(curl -sk --max-time "$CMD_TIMEOUT" -H "X-Auth-Token: $token" -o /dev/null -w "%{http_code}" \
+        "https://${IPMI_HOST}:${REDFISH_PORT}/redfish/v1/Systems/1")
+    assert_equals "401" "$status" "Token should be invalid after logout"
+}
+
 # --- Run tests ---
 start_test_container
 wait_for_ipmi_ready 60
@@ -68,6 +88,7 @@ wait_for_redfish_ready 60
 run_test test_redfish_port_listening
 run_test test_redfish_service_root
 run_test test_redfish_no_auth_rejected
+run_test test_redfish_session_login_logout
 run_test test_redfish_systems
 run_test test_redfish_power_off
 run_test test_redfish_power_on

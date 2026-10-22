@@ -7,15 +7,22 @@ type ODataID struct {
 
 // ServiceRoot is the Redfish service root
 type ServiceRoot struct {
-	ODataType      string  `json:"@odata.type"`
-	ODataID        string  `json:"@odata.id"`
-	ODataContext   string  `json:"@odata.context,omitempty"`
-	ID             string  `json:"Id"`
-	Name           string  `json:"Name"`
-	RedfishVersion string  `json:"RedfishVersion"`
-	Systems        ODataID `json:"Systems"`
-	Managers       ODataID `json:"Managers"`
-	Chassis        ODataID `json:"Chassis"`
+	ODataType      string           `json:"@odata.type"`
+	ODataID        string           `json:"@odata.id"`
+	ODataContext   string           `json:"@odata.context,omitempty"`
+	ID             string           `json:"Id"`
+	Name           string           `json:"Name"`
+	RedfishVersion string           `json:"RedfishVersion"`
+	Systems        ODataID          `json:"Systems"`
+	Managers       ODataID          `json:"Managers"`
+	Chassis        ODataID          `json:"Chassis"`
+	SessionService ODataID          `json:"SessionService"`
+	Links          ServiceRootLinks `json:"Links"`
+}
+
+// ServiceRootLinks are the service root links
+type ServiceRootLinks struct {
+	Sessions ODataID `json:"Sessions"`
 }
 
 // SystemCollection is a collection of computer systems

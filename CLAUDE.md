@@ -23,7 +23,7 @@ docker/
   Dockerfile                   # Multi-stage build (Go builder + Debian runtime)
   entrypoint.sh                # Environment variables → QEMU args conversion
   setup-network.sh             # TAP/bridge network setup for VM passthrough
-tests/                         # Bash-based container integration tests (88 tests)
+tests/                         # Bash-based container integration tests (89 tests)
   run_tests.sh                 # Test runner (category-based)
   test_helper.sh               # Assertions, container mgmt, IPMI/Redfish helpers
   test_*.sh                    # Test categories (container, ipmi, redfish, power, boot, etc.)
@@ -79,7 +79,7 @@ make docker-build
 # Container integration tests (quick smoke tests)
 make container-test
 
-# Container integration tests (all 88 tests across 9 categories)
+# Container integration tests (all 89 tests across 9 categories)
 make container-test-all
 
 # Run specific test categories
@@ -133,7 +133,10 @@ make container-test-all
 
 | Method | Path | Description |
 |--------|------|-------------|
-| GET | `/redfish/v1` | ServiceRoot |
+| GET | `/redfish`, `/redfish/v1` | Version document, ServiceRoot (no auth; root has SessionService and Links.Sessions) |
+| GET/PATCH | `/redfish/v1/SessionService` | SessionTimeout (default 1800 s, 30–86400) |
+| GET/POST | `/redfish/v1/SessionService/Sessions` | Session collection / log in (POST needs no auth; 201 with X-Auth-Token and Location; 401 bad credentials; 503 over 64 sessions) |
+| GET/DELETE | `/redfish/v1/SessionService/Sessions/{id}` | Session / log out (204). Sessions are in memory and expire after SessionTimeout idle |
 | GET | `/redfish/v1/Systems` | System collection |
 | GET | `/redfish/v1/Systems/1` | Computer system (PowerState, Boot, MemorySummary, ProcessorSummary, EthernetInterfaces, Actions) |
 | GET | `/redfish/v1/Systems/1/EthernetInterfaces` | NIC collection (one per guest NIC, command-line order) |
@@ -149,7 +152,7 @@ make container-test-all
 | GET | `/redfish/v1/Chassis` | Chassis collection |
 | GET | `/redfish/v1/Chassis/1` | Chassis resource |
 
-Middleware: Basic Auth, ETag (If-Match), trailing slash normalization
+Middleware: auth (X-Auth-Token session or Basic; GET /redfish, GET /redfish/v1 and POST Sessions are exempt), ETag (If-Match), trailing slash normalization
 
 ## IPMI Commands
 
