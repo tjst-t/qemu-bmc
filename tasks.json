@@ -706,7 +706,7 @@
       "number": 32,
       "kind": "task",
       "title": "Redfish: Systems/1 に Processors と Storage・SimpleStorage（ディスク容量）を足す",
-      "status": "ready",
+      "status": "in-progress",
       "parent": "v0-9-0-ironic-metal3-sushy-bmclib-ipmito",
       "dependsOn": [
         "redfish-virtualmedia-systems-1-virtualme"
@@ -720,7 +720,7 @@
       "refs": [],
       "threads": [],
       "createdAt": "2026-10-22T00:37:05.903Z",
-      "updatedAt": "2026-10-22T00:37:05.903Z",
+      "updatedAt": "2026-10-22T00:59:27.630Z",
       "closedAt": null,
       "extra": {}
     },
