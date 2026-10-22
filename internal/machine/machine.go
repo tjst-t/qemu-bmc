@@ -53,8 +53,9 @@ var ErrPoweredOff = errors.New("VM is powered off")
 type ProcessManager interface {
 	// Start launches QEMU with the given boot target and CD image ("" =
 	// empty drive). For the UefiHttp target, httpBootImage is the image to
-	// boot from a hidden CD drive ("" = boot from the network).
-	Start(bootTarget, cdImage, httpBootImage string) error
+	// boot from a hidden CD drive ("" = boot from the network). With
+	// secureBoot the Secure Boot variant of the OVMF is booted.
+	Start(bootTarget, cdImage, httpBootImage string, secureBoot bool) error
 	Stop(timeout time.Duration) error
 	Kill() error
 	IsRunning() bool
@@ -79,6 +80,7 @@ type Machine struct {
 	runningBootTarget string
 	runningHTTPBoot   string
 	httpBoot          httpBootState
+	secureBoot        secureBootState
 	// media is the virtual CD state, kept while QEMU is not running and
 	// applied when it starts. mediaPath is the local path of media.Image
 	// ("" while an http(s) image is downloading); mediaFile is the file
@@ -404,13 +406,16 @@ func (m *Machine) resetProcessMode(resetType string, mediaDeadline time.Time) er
 			log.Printf("HTTP boot: image of %s not available, booting without it", RedactImage(m.httpBoot.uri))
 		}
 		cdImage := m.insertedPath()
+		secureBoot := m.secureBoot.enable
 		m.mu.RUnlock()
 
-		if err := m.processManager.Start(target, cdImage, httpBootImage); err != nil {
+		if err := m.processManager.Start(target, cdImage, httpBootImage, secureBoot); err != nil {
+			log.Printf("Cannot start QEMU: %v", err)
 			return fmt.Errorf("starting QEMU: %w", err)
 		}
 		m.mu.Lock()
 		m.runningBootTarget, m.runningHTTPBoot = target, httpBootImage
+		m.secureBoot.running, m.secureBoot.keysReset = secureBoot, false
 		m.mu.Unlock()
 
 		if err := m.waitForQMP(30 * time.Second); err != nil {
@@ -431,9 +436,10 @@ func (m *Machine) resetProcessMode(resetType string, mediaDeadline time.Time) er
 
 	case "ForceRestart":
 		m.waitMediaDownload(mediaDeadline)
-		if m.processManager.IsRunning() && m.bootTargetChanged() {
-			// -boot is fixed at QEMU startup, so system_reset would boot the
-			// old device. Restart the process to apply the new boot target.
+		if m.processManager.IsRunning() && m.restartNeeded() {
+			// -boot and the firmware are fixed at QEMU startup, so
+			// system_reset would boot the old device or firmware. Restart
+			// the process to apply the new settings.
 			if err := m.processManager.Stop(30 * time.Second); err != nil {
 				return fmt.Errorf("stopping QEMU: %w", err)
 			}
@@ -543,10 +549,10 @@ func (m *Machine) guestPoweredOff() bool {
 	return err == nil && status == qmp.StatusShutdown
 }
 
-// bootTargetChanged reports whether the boot target (or HTTP boot image) for
-// the next boot differs from the one the running QEMU process was started
-// with.
-func (m *Machine) bootTargetChanged() bool {
+// restartNeeded reports whether the boot target (or HTTP boot image) or the
+// Secure Boot setting for the next boot differs from the one the running
+// QEMU process was started with, or its Secure Boot keys were reset.
+func (m *Machine) restartNeeded() bool {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	normalize := func(t string) string {
@@ -556,7 +562,8 @@ func (m *Machine) bootTargetChanged() bool {
 		return t
 	}
 	target, httpBootImage := m.nextBoot()
-	return normalize(target) != normalize(m.runningBootTarget) || httpBootImage != m.runningHTTPBoot
+	return normalize(target) != normalize(m.runningBootTarget) || httpBootImage != m.runningHTTPBoot ||
+		m.secureBoot.enable != m.secureBoot.running || m.secureBoot.keysReset
 }
 
 // nextBootTarget returns the boot target for the next boot: the override

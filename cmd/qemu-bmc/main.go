@@ -81,6 +81,22 @@ func main() {
 		if err := m.SetBootMode(cfg.RedfishBootMode()); err != nil {
 			log.Fatalf("Invalid VM_BOOT_MODE: %v", err)
 		}
+		// Secure Boot switches the OVMF pflash drives to their Secure Boot
+		// variant
+		if fw, ok := qemu.FindSecureBootFirmware(cmdArgs); ok {
+			if err := m.SetSecureBootFirmware(fw); err != nil {
+				log.Fatalf("Secure Boot: %v", err)
+			}
+			if err := fw.Check(); err != nil {
+				log.Printf("WARN: Secure Boot cannot be enabled: %v", err)
+			}
+		}
+		if cfg.VMSecureBoot {
+			if err := m.SetSecureBootEnable(true); err != nil {
+				log.Fatalf("VM_SECURE_BOOT=true: %v", err)
+			}
+			log.Printf("Secure Boot enabled (VM_SECURE_BOOT)")
+		}
 
 		if cfg.PowerOnAtStart {
 			log.Printf("Starting QEMU: %s %v", cfg.QEMUBinary, cmdArgs)
@@ -101,6 +117,9 @@ func main() {
 		log.Println("Connected to QMP socket")
 
 		m = machine.New(qmpClient)
+		if cfg.VMSecureBoot {
+			log.Printf("WARN: VM_SECURE_BOOT is ignored in legacy mode: %v", machine.ErrSecureBootUnsupported)
+		}
 
 		// The external QEMU's UUID is unknown here, so only report one
 		// when explicitly configured (it must match QEMU's -uuid).

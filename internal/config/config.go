@@ -32,6 +32,7 @@ type Config struct {
 	SystemUUID     string   // Fixed system UUID (QEMU -uuid, Redfish UUID, IPMI GUID)
 	SystemUUIDFile string   // File where a derived system UUID is persisted
 	VMMACs         []string // Per-NIC MAC addresses (VM_MACS); empty entries are derived from the system UUID
+	VMSecureBoot   bool     // Initial SecureBootEnable (VM_SECURE_BOOT)
 
 	// GracefulTimeout bounds how long GracefulShutdown/GracefulRestart
 	// report PoweringOff before going back to On (GRACEFUL_TIMEOUT, seconds)
@@ -65,6 +66,7 @@ func Load() *Config {
 		SystemUUID:     getEnv("SYSTEM_UUID", ""),
 		SystemUUIDFile: getEnv("SYSTEM_UUID_FILE", ""),
 		VMMACs:         getListEnv("VM_MACS"),
+		VMSecureBoot:   getBoolEnv("VM_SECURE_BOOT", false),
 
 		GracefulTimeout: getSecondsEnv("GRACEFUL_TIMEOUT", 120*time.Second),
 

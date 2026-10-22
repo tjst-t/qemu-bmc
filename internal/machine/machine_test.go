@@ -166,6 +166,7 @@ type mockProcessManager struct {
 	startCalls []string // boot targets passed to Start
 	startMedia []string // CD images passed to Start
 	startHTTP  []string // HTTP boot images passed to Start
+	startSB    []bool   // secureBoot passed to Start
 	calls      []string
 	exitCh     chan struct{}
 	startGate  chan struct{} // if set, Start blocks until it is closed
@@ -182,7 +183,7 @@ func newMockProcessManager(running bool) *mockProcessManager {
 	}
 }
 
-func (m *mockProcessManager) Start(bootTarget, cdImage, httpBootImage string) error {
+func (m *mockProcessManager) Start(bootTarget, cdImage, httpBootImage string, secureBoot bool) error {
 	m.mu.Lock()
 	gate := m.startGate
 	m.mu.Unlock()
@@ -195,6 +196,7 @@ func (m *mockProcessManager) Start(bootTarget, cdImage, httpBootImage string) er
 	m.startCalls = append(m.startCalls, bootTarget)
 	m.startMedia = append(m.startMedia, cdImage)
 	m.startHTTP = append(m.startHTTP, httpBootImage)
+	m.startSB = append(m.startSB, secureBoot)
 	m.running = true
 	m.exitCh = make(chan struct{})
 	return nil

@@ -79,6 +79,9 @@ func (s *Server) handleGetSystem(w http.ResponseWriter, r *http.Request) {
 			Chassis:   []ODataID{{ODataID: chassisPath}},
 		},
 	}
+	if s.machine.SecureBootSupported() {
+		system.SecureBoot = &ODataID{ODataID: secureBootPath}
+	}
 	if httpBootURI != "" {
 		system.Boot.HttpBootUri = &httpBootURI
 	}

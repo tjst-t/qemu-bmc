@@ -27,6 +27,8 @@ type mockMachine struct {
 	statusErr     error
 	httpBootURI   string
 	legacy        bool // HTTP boot unsupported
+	secureBoot    *machine.SecureBoot // nil = Secure Boot unsupported
+	secureBootErr error               // returned by SetSecureBootEnable(true)
 }
 
 func newMockMachine(status qmp.Status) *mockMachine {
@@ -131,6 +133,37 @@ func (m *mockMachine) EjectMedia() error {
 		return m.mediaErr
 	}
 	m.media = machine.Media{}
+	return nil
+}
+
+func (m *mockMachine) SecureBootSupported() bool {
+	return m.secureBoot != nil
+}
+
+func (m *mockMachine) GetSecureBoot() machine.SecureBoot {
+	if m.secureBoot == nil {
+		return machine.SecureBoot{}
+	}
+	return *m.secureBoot
+}
+
+func (m *mockMachine) SetSecureBootEnable(enable bool) error {
+	if m.secureBoot == nil {
+		return machine.ErrSecureBootUnsupported
+	}
+	if enable && m.secureBootErr != nil {
+		return m.secureBootErr
+	}
+	m.calls = append(m.calls, fmt.Sprintf("SetSecureBootEnable:%t", enable))
+	m.secureBoot.Enable = enable
+	return nil
+}
+
+func (m *mockMachine) ResetSecureBootKeys() error {
+	if m.secureBoot == nil {
+		return machine.ErrSecureBootUnsupported
+	}
+	m.calls = append(m.calls, "ResetSecureBootKeys")
 	return nil
 }
 

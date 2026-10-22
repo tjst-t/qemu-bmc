@@ -101,7 +101,7 @@ func TestApplyBootOverride_CdBootIndexConflict(t *testing.T) {
 func TestProcessManager_Start_SetsCDImage(t *testing.T) {
 	f := &trackingFactory{}
 	pm := NewProcessManager("qemu-system-x86_64", EnsureCDROM([]string{"-m", "2048"}), f.create)
-	require.NoError(t, pm.Start("Cd", "/iso/a.iso", ""))
+	require.NoError(t, pm.Start("Cd", "/iso/a.iso", "", false))
 	defer pm.Kill()
 
 	assert.Contains(t, f.lastArgs, emptyCDDrive+",format=raw,file=/iso/a.iso")

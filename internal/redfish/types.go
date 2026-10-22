@@ -56,6 +56,7 @@ type ComputerSystem struct {
 	SimpleStorage      ODataID           `json:"SimpleStorage"`
 	EthernetInterfaces ODataID           `json:"EthernetInterfaces"`
 	VirtualMedia       ODataID           `json:"VirtualMedia"`
+	SecureBoot         *ODataID          `json:"SecureBoot,omitempty"`
 	Status             ResourceStatus    `json:"Status"`
 	Links              SystemLinks       `json:"Links"`
 }
@@ -124,6 +125,36 @@ type ComputerSystemActions struct {
 type ResetAction struct {
 	Target          string   `json:"target"`
 	AllowableValues []string `json:"ResetType@Redfish.AllowableValues"`
+}
+
+// SecureBootResource is Systems/1/SecureBoot
+type SecureBootResource struct {
+	ODataType             string            `json:"@odata.type"`
+	ODataID               string            `json:"@odata.id"`
+	ODataContext          string            `json:"@odata.context,omitempty"`
+	ODataEtag             string            `json:"@odata.etag,omitempty"`
+	ID                    string            `json:"Id"`
+	Name                  string            `json:"Name"`
+	SecureBootEnable      bool              `json:"SecureBootEnable"`
+	SecureBootCurrentBoot string            `json:"SecureBootCurrentBoot"`
+	SecureBootMode        string            `json:"SecureBootMode"`
+	Actions               SecureBootActions `json:"Actions"`
+}
+
+// SecureBootActions are the actions of the SecureBoot resource
+type SecureBootActions struct {
+	ResetKeys ResetKeysAction `json:"#SecureBoot.ResetKeys"`
+}
+
+// ResetKeysAction describes the SecureBoot.ResetKeys action
+type ResetKeysAction struct {
+	Target          string   `json:"target"`
+	AllowableValues []string `json:"ResetKeysType@Redfish.AllowableValues"`
+}
+
+// ResetKeysRequest is the request body of the SecureBoot.ResetKeys action
+type ResetKeysRequest struct {
+	ResetKeysType string `json:"ResetKeysType"`
 }
 
 // ResetRequest is the request body for reset action

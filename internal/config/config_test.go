@@ -12,7 +12,7 @@ import (
 
 func TestLoad_Defaults(t *testing.T) {
 	// Clear any env vars that might be set
-	for _, key := range []string{"QMP_SOCK", "IPMI_USER", "IPMI_PASS", "REDFISH_PORT", "IPMI_PORT", "SERIAL_ADDR", "TLS_CERT", "TLS_KEY", "VM_BOOT_MODE", "VM_IPMI_ADDR", "QEMU_BINARY", "POWER_ON_AT_START", "SYSTEM_UUID", "SYSTEM_UUID_FILE", "VM_MACS", "GRACEFUL_TIMEOUT", "VMEDIA_DIR", "VMEDIA_INSECURE_TLS", "VMEDIA_TIMEOUT"} {
+	for _, key := range []string{"QMP_SOCK", "IPMI_USER", "IPMI_PASS", "REDFISH_PORT", "IPMI_PORT", "SERIAL_ADDR", "TLS_CERT", "TLS_KEY", "VM_BOOT_MODE", "VM_IPMI_ADDR", "QEMU_BINARY", "POWER_ON_AT_START", "SYSTEM_UUID", "SYSTEM_UUID_FILE", "VM_MACS", "GRACEFUL_TIMEOUT", "VMEDIA_DIR", "VMEDIA_INSECURE_TLS", "VMEDIA_TIMEOUT", "VM_SECURE_BOOT"} {
 		os.Unsetenv(key)
 	}
 
@@ -32,6 +32,7 @@ func TestLoad_Defaults(t *testing.T) {
 	assert.Equal(t, "", cfg.SystemUUID)
 	assert.Equal(t, "", cfg.SystemUUIDFile)
 	assert.Nil(t, cfg.VMMACs)
+	assert.False(t, cfg.VMSecureBoot)
 	assert.Equal(t, 120*time.Second, cfg.GracefulTimeout)
 	assert.Equal(t, defaultVMediaDir("/vm"), cfg.VMediaDir)
 	assert.True(t, cfg.VMediaInsecureTLS)
@@ -75,6 +76,11 @@ func TestLoad_VMMACs(t *testing.T) {
 	defer os.Unsetenv("VM_MACS")
 	cfg := Load()
 	assert.Equal(t, []string{"52:54:00:11:22:33", "", "02:00:00:00:00:01"}, cfg.VMMACs)
+}
+
+func TestLoad_VMSecureBoot(t *testing.T) {
+	t.Setenv("VM_SECURE_BOOT", "true")
+	assert.True(t, Load().VMSecureBoot)
 }
 
 func TestLoad_SystemUUID(t *testing.T) {

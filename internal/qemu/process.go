@@ -14,8 +14,10 @@ type ProcessManager interface {
 	// Start launches QEMU with the given boot target and the image in the
 	// managed CD drive ("" = empty). For the UefiHttp target, httpBootImage
 	// is the image to boot from a hidden CD drive ("" = boot from the
-	// network); it is ignored for other targets.
-	Start(bootTarget, cdImage, httpBootImage string) error
+	// network); it is ignored for other targets. With secureBoot the
+	// Secure Boot variant of the OVMF is booted (see
+	// FindSecureBootFirmware).
+	Start(bootTarget, cdImage, httpBootImage string, secureBoot bool) error
 	Stop(timeout time.Duration) error
 	Kill() error
 	IsRunning() bool
@@ -54,7 +56,7 @@ func NewProcessManager(binary string, baseArgs []string, factory CommandFactory)
 	}
 }
 
-func (p *processManager) Start(bootTarget, cdImage, httpBootImage string) error {
+func (p *processManager) Start(bootTarget, cdImage, httpBootImage string, secureBoot bool) error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
@@ -62,7 +64,22 @@ func (p *processManager) Start(bootTarget, cdImage, httpBootImage string) error 
 		return nil // already running, no-op
 	}
 
-	args := ApplyBootOverride(SetCDImage(p.baseArgs, cdImage), bootTarget)
+	args := p.baseArgs
+	if secureBoot {
+		// First, as FindSecureBootFirmware's positions are in baseArgs
+		fw, ok := FindSecureBootFirmware(args)
+		if !ok {
+			return fmt.Errorf("Secure Boot needs OVMF pflash drives (-drive if=pflash,...OVMF_CODE*.fd)")
+		}
+		if err := fw.Check(); err != nil {
+			return err
+		}
+		if err := fw.PrepareVars(); err != nil {
+			return fmt.Errorf("preparing Secure Boot VARS: %w", err)
+		}
+		args = fw.Apply(args)
+	}
+	args = ApplyBootOverride(SetCDImage(args, cdImage), bootTarget)
 	if bootTarget == "UefiHttp" {
 		args = ApplyHTTPBoot(args, httpBootImage)
 	}
