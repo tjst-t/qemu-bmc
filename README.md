@@ -137,6 +137,26 @@ curl -k -u admin:password -X POST \
 - `GET .../VirtualMedia/CD1` reports `Image`, `ImageName`, `Inserted`, `ConnectedVia` (`URI` / `NotConnected`), `WriteProtected` (always `true`) and `MediaTypes`.
 - Legacy mode (external QEMU) only changes the medium over QMP; the path refers to the external QEMU's filesystem. The CD drive is located with `query-block` (first removable drive) in both modes.
 
+#### UEFI HTTP boot
+
+Boot target `UefiHttp` (as used by Ironic/Metal3 `redfish-https` boot) works in two ways, depending on `Boot.HttpBootUri`:
+
+```bash
+curl -k -u admin:password -X PATCH https://localhost/redfish/v1/Systems/1 \
+  -H 'Content-Type: application/json' \
+  -d '{"Boot": {"BootSourceOverrideTarget": "UefiHttp", "HttpBootUri": "https://10.0.0.1/boot.iso", "BootSourceOverrideEnabled": "Once", "BootSourceOverrideMode": "UEFI"}}'
+# Clear the URI after use
+curl -k -u admin:password -X PATCH https://localhost/redfish/v1/Systems/1 \
+  -H 'Content-Type: application/json' -d '{"Boot": {"HttpBootUri": null}}'
+```
+
+- **With `HttpBootUri`**: qemu-bmc downloads the image like a VirtualMedia image (`VMEDIA_DIR`, `VMEDIA_INSECURE_TLS`, `VMEDIA_TIMEOUT`; the download starts when the URI is PATCHed) and attaches it as a hidden CD drive, separate from VirtualMedia `CD1` (not listed under VirtualMedia, `CD1` is unchanged), which the VM boots first (`bootindex=0`). A power on or reset during the download waits for it like for VirtualMedia. If the download fails (logged) or is not done within `VMEDIA_TIMEOUT`, that boot goes ahead without it, as without an override. The image is handled as an ISO (CD); a bare EFI executable (e.g. `.efi`) is not supported. Same in BIOS mode.
+- **Without `HttpBootUri`**: the VM boots from the network (`-boot n` as for `Pxe`). With UEFI firmware (OVMF), PXE is turned off over fw_cfg (`opt/org.tianocore/IPv4PXESupport` / `IPv6PXESupport` = `n`) and the first NIC gets `bootindex=0` and no option ROM (`romfile=`, otherwise its iPXE would boot before OVMF's HTTP boot), so OVMF only tries HTTP boot. The boot URL comes from your DHCP server (its answer to the `HTTPClient` vendor class). In BIOS mode it is the same as `Pxe`.
+- `HttpBootUri` takes an `http://` / `https://` URL, or `null` / `""` to clear it (anything else is `400`). It is reported in `Boot` at all times (`null` when unset, so that sushy sends it) and is part of the ETag. It stays set after a `Once` override has been used (the target goes back to `None`) until it is cleared; setting it again downloads it again, and changing or clearing it deletes the downloaded file. Leftovers (`httpboot-*.iso`) are deleted at startup.
+- The hidden CD and the fw_cfg/NIC changes are only applied to a boot the `UefiHttp` override applies to (not after a `Once` override has been used).
+- IPMI reports `UefiHttp` as PXE in Get Boot Options.
+- Not available in legacy mode (external QEMU), since qemu-bmc cannot change its arguments: PATCHing `UefiHttp` or a `HttpBootUri` returns `400` (clearing with `null` is accepted).
+
 ### Authentication and sessions
 
 Every request needs credentials (`IPMI_USER` / `IPMI_PASS`), except `GET /redfish`, `GET /redfish/v1` and the login request. Use HTTP Basic auth, or log in once and send the session token in `X-Auth-Token`:
@@ -236,7 +256,7 @@ ipmitool user enable 3
 | DELETE | `/redfish/v1/SessionService/Sessions/{id}` | Log out (204) |
 | GET | `/redfish/v1/Systems` | System collection |
 | GET | `/redfish/v1/Systems/1` | Computer system (Status, Processors, Storage, SimpleStorage, VirtualMedia; Links: ManagedBy Managers/1, Chassis Chassis/1) |
-| PATCH | `/redfish/v1/Systems/1` | Boot device override |
+| PATCH | `/redfish/v1/Systems/1` | Boot device override (`BootSourceOverrideTarget` incl. `UefiHttp`, `Boot.HttpBootUri`; see [UEFI HTTP boot](#uefi-http-boot)) |
 | POST | `/redfish/v1/Systems/1/Actions/ComputerSystem.Reset` | Power control |
 | GET | `/redfish/v1/Systems/1/EthernetInterfaces` | NIC collection |
 | GET | `/redfish/v1/Systems/1/EthernetInterfaces/{n}` | NIC (MACAddress, LinkStatus) |
@@ -320,9 +340,9 @@ Another power action (Redfish or IPMI) during `PoweringOff` / `PoweringOn` ends 
 | `VNC_ADDR` | `localhost:5900` | QEMU VNC TCP address for noVNC proxy |
 | `POWER_ON_AT_START` | `false` | Power on VM automatically at startup (useful for non-MAAS setups) |
 | `GRACEFUL_TIMEOUT` | `120` | Seconds `GracefulShutdown` / `GracefulRestart` (and IPMI `chassis power soft`) report `PoweringOff` before going back to `On` when the guest does not power off |
-| `VMEDIA_DIR` | `/vm/vmedia` if `/vm` is writable, else `/tmp/vmedia` | Where VirtualMedia HTTP(S) images are downloaded. The previous download is deleted when the medium is replaced or ejected, and leftovers from an earlier run (`cd1-*.iso`) are deleted at startup. In legacy mode the external QEMU must be able to read this directory (same filesystem) |
+| `VMEDIA_DIR` | `/vm/vmedia` if `/vm` is writable, else `/tmp/vmedia` | Where VirtualMedia HTTP(S) images are downloaded. Also used for the UEFI HTTP boot image (`Boot.HttpBootUri`). The previous download is deleted when the medium (or URI) is replaced or ejected, and leftovers from an earlier run (`cd1-*.iso`, `httpboot-*.iso`) are deleted at startup. In legacy mode the external QEMU must be able to read this directory (same filesystem) |
 | `VMEDIA_INSECURE_TLS` | `true` | Skip certificate verification when downloading HTTPS images. With `false`, the system CAs are used; add your own CA with `SSL_CERT_FILE` |
-| `VMEDIA_TIMEOUT` | `600` | Seconds a power on or reset requested during a VirtualMedia download waits for it before booting without the image |
+| `VMEDIA_TIMEOUT` | `600` | Seconds a power on or reset requested during a VirtualMedia (or UEFI HTTP boot image) download waits for it before booting without the image |
 | `SYSTEM_UUID` | (derived) | Fixed system UUID, passed to QEMU as `-uuid` and reported by Redfish `Systems/1` `UUID` and IPMI `mc guid`. If unset, it is read from `SYSTEM_UUID_FILE`, or derived from the hostname and saved there. Set it (or use a fixed `--hostname` / a mounted `/vm`) to keep it across container re-creation |
 | `SYSTEM_UUID_FILE` | `<VM_DISK dir>/system-uuid` | Where a derived UUID is persisted |
 | `VM_MACS` | (derived) | Comma-separated MAC addresses of the VM NICs, in order (an empty entry is derived). Unset MACs are derived from the system UUID, so they stay fixed per node and do not overlap between nodes. Reported by Redfish `Systems/1/EthernetInterfaces` |
@@ -535,6 +555,26 @@ curl -k -u admin:password -X POST \
 - `GET .../VirtualMedia/CD1` は `Image`・`ImageName`・`Inserted`・`ConnectedVia`（`URI` / `NotConnected`）・`WriteProtected`（常に `true`）・`MediaTypes` を返す。
 - レガシーモード（外部の QEMU）は QMP で差し替えるだけ。パスは外部 QEMU 側のファイルシステムのもの。どちらのモードも CD ドライブは `query-block` で探す（最初の取り外し可能なドライブ）。
 
+#### UEFI HTTP ブート
+
+起動先 `UefiHttp`（Ironic/Metal3 の `redfish-https` ブートが使う）は、`Boot.HttpBootUri` があるかで動きが変わる。
+
+```bash
+curl -k -u admin:password -X PATCH https://localhost/redfish/v1/Systems/1 \
+  -H 'Content-Type: application/json' \
+  -d '{"Boot": {"BootSourceOverrideTarget": "UefiHttp", "HttpBootUri": "https://10.0.0.1/boot.iso", "BootSourceOverrideEnabled": "Once", "BootSourceOverrideMode": "UEFI"}}'
+# 使い終わったら URI を消す
+curl -k -u admin:password -X PATCH https://localhost/redfish/v1/Systems/1 \
+  -H 'Content-Type: application/json' -d '{"Boot": {"HttpBootUri": null}}'
+```
+
+- **`HttpBootUri` あり**：qemu-bmc が VirtualMedia と同じ仕組み（`VMEDIA_DIR`・`VMEDIA_INSECURE_TLS`・`VMEDIA_TIMEOUT`。URI を PATCH した時にダウンロードを始める）でイメージを落とし、VirtualMedia の `CD1` とは別の隠れた CD ドライブとして付け、そこから最初に起動する（`bootindex=0`）。VirtualMedia の一覧には出ず、`CD1` の状態も変わらない。ダウンロード中の電源オン・リセットは VirtualMedia と同じく終わるまで待つ。ダウンロードに失敗した（ログに出す）・`VMEDIA_TIMEOUT` までに終わらないときは、その起動は上書きが無いのと同じく、それなしで進む。中身は ISO（CD）として扱う。EFI の実行ファイル単体（`.efi` など）は対象外。BIOS モードでも同じ。
+- **`HttpBootUri` なし**：ネットワークから起動する（`Pxe` と同じく `-boot n`）。UEFI（OVMF）では fw_cfg で PXE を切り（`opt/org.tianocore/IPv4PXESupport` / `IPv6PXESupport` を `n`）、最初の NIC に `bootindex=0` を付けて option ROM を外す（`romfile=`。外さないと iPXE が OVMF の HTTP ブートより先に動く）ので、OVMF は HTTP ブートだけを試す。起動する URL は DHCP サーバ（vendor class `HTTPClient` への応答）が渡す。BIOS モードでは `Pxe` と同じ。
+- `HttpBootUri` は `http://` / `https://` の URL か、消すための `null` / `""` を受ける（それ以外は `400`）。`Boot` にいつも出し（未設定は `null`。sushy はこのキーがあるときだけ送る）、ETag にも含める。`Once` を使ったあと（起動先は `None` に戻る）も消すまで残る。もう一度設定すると落とし直し、変える・消すと落としたファイルは消す。前の起動の残り（`httpboot-*.iso`）は起動時に消す。
+- 隠れた CD と fw_cfg・NIC の変更は、`UefiHttp` の上書きが効く起動にだけ付ける（`Once` を使ったあとは付かない）。
+- IPMI の Get Boot Options では `UefiHttp` を PXE として答える。
+- レガシーモード（外部の QEMU）では QEMU の引数を変えられないので使えない。`UefiHttp` や `HttpBootUri` を PATCH すると `400`（`null` で消すのは受け付ける）。
+
 ### 認証とセッション
 
 `GET /redfish`・`GET /redfish/v1` とログインの要求のほかは、認証情報（`IPMI_USER` / `IPMI_PASS`）が要る。HTTP の Basic 認証か、一度ログインして得たセッションのトークンを `X-Auth-Token` で送る：
@@ -634,7 +674,7 @@ ipmitool user enable 3
 | DELETE | `/redfish/v1/SessionService/Sessions/{id}` | ログアウト（204） |
 | GET | `/redfish/v1/Systems` | システムコレクション |
 | GET | `/redfish/v1/Systems/1` | コンピュータシステム（Status、Processors、Storage、SimpleStorage、VirtualMedia。Links: ManagedBy に Managers/1、Chassis に Chassis/1） |
-| PATCH | `/redfish/v1/Systems/1` | ブートデバイス変更 |
+| PATCH | `/redfish/v1/Systems/1` | ブートデバイス変更（`BootSourceOverrideTarget`（`UefiHttp` も）、`Boot.HttpBootUri`。「UEFI HTTP ブート」を参照） |
 | POST | `/redfish/v1/Systems/1/Actions/ComputerSystem.Reset` | 電源制御 |
 | GET | `/redfish/v1/Systems/1/EthernetInterfaces` | NIC 一覧 |
 | GET | `/redfish/v1/Systems/1/EthernetInterfaces/{n}` | NIC（MACAddress・LinkStatus） |
@@ -718,9 +758,9 @@ ipmitool user enable 3
 | `VNC_ADDR` | `localhost:5900` | noVNC プロキシが接続する QEMU VNC アドレス |
 | `POWER_ON_AT_START` | `false` | 起動時に VM を自動的に電源オンにする（MAAS を使わない構成で有用） |
 | `GRACEFUL_TIMEOUT` | `120` | `GracefulShutdown` / `GracefulRestart`（と IPMI `chassis power soft`）でゲストが電源を切らないとき、`PoweringOff` から `On` に戻すまでの秒数 |
-| `VMEDIA_DIR` | `/vm` が書ければ `/vm/vmedia`、無理なら `/tmp/vmedia` | VirtualMedia の HTTP(S) イメージの保存先。差し替え・Eject で前に落としたファイルは消し、前の起動の残り（`cd1-*.iso`）は起動時に消す。レガシーモードでは外の QEMU がこのディレクトリを読める（同じファイルシステム）必要がある |
+| `VMEDIA_DIR` | `/vm` が書ければ `/vm/vmedia`、無理なら `/tmp/vmedia` | VirtualMedia の HTTP(S) イメージの保存先（UEFI HTTP ブートの `Boot.HttpBootUri` のイメージも）。差し替え・Eject（URI の変更・削除）で前に落としたファイルは消し、前の起動の残り（`cd1-*.iso`・`httpboot-*.iso`）は起動時に消す。レガシーモードでは外の QEMU がこのディレクトリを読める（同じファイルシステム）必要がある |
 | `VMEDIA_INSECURE_TLS` | `true` | HTTPS のイメージを落とすとき証明書を検証しない。`false` ならシステムの CA で検証する。自前の CA は `SSL_CERT_FILE` で足す |
-| `VMEDIA_TIMEOUT` | `600` | ダウンロード中に電源オン・リセットが来たとき、終わるまで待つ秒数（過ぎたら ISO 無しで起動） |
+| `VMEDIA_TIMEOUT` | `600` | ダウンロード中（VirtualMedia・UEFI HTTP ブートのイメージ）に電源オン・リセットが来たとき、終わるまで待つ秒数（過ぎたら ISO 無しで起動） |
 | `SYSTEM_UUID` | （導出） | システム UUID を固定する。QEMU に `-uuid` で渡し、Redfish `Systems/1` の `UUID` と IPMI `mc guid` で返す。未指定なら `SYSTEM_UUID_FILE` から読み、無ければホスト名から導出してそこへ保存する。コンテナを作り直しても保つには、これを指定するか、`--hostname` を固定するか、`/vm` をマウントする |
 | `SYSTEM_UUID_FILE` | `<VM_DISK のディレクトリ>/system-uuid` | 導出した UUID の保存先 |
 | `VM_MACS` | （導出） | VM の NIC の MAC アドレスを順にカンマ区切りで指定する（空の項目は導出）。未指定の MAC はシステム UUID から導出するので、ノードごとに固定され、ノード間で重ならない。Redfish `Systems/1/EthernetInterfaces` で返す |

@@ -12,6 +12,10 @@ const (
 	HTTPBootDriveID = "httpboot0"
 	// HTTPBootDeviceID is the qdev id of that drive's ide-cd device.
 	HTTPBootDeviceID = "httpboot-cd0"
+	// httpBootControllerID is the qdev id of the AHCI controller added for
+	// it, so that it does not compete for the ports of the machine's own
+	// IDE/AHCI buses (q35 has one unit per port).
+	httpBootControllerID = "httpboot-ahci"
 )
 
 // ovmfNoPXE makes OVMF skip PXE on its NICs so that only HTTP boot is tried.
@@ -24,7 +28,8 @@ var ovmfNoPXE = []string{
 // ApplyBootOverride, which sets -boot n as for Pxe).
 //
 // With an image (downloaded from Boot.HttpBootUri) a hidden CD drive holding
-// it is added with bootindex=0, so the VM boots it first.
+// it is added, on its own AHCI controller, with bootindex=0, so the VM boots
+// it first.
 //
 // Without one the VM boots from the network. With UEFI firmware OVMF is told
 // not to try PXE, and the first NIC gets bootindex=0 and no option ROM: its
@@ -35,15 +40,16 @@ var ovmfNoPXE = []string{
 // bootindex=0 is not set if another device already has it.
 func ApplyHTTPBoot(args []string, image string) []string {
 	if image != "" {
-		dev := "ide-cd,drive=" + HTTPBootDriveID + ",id=" + HTTPBootDeviceID
+		dev := "ide-cd,bus=" + httpBootControllerID + ".0,drive=" + HTTPBootDriveID + ",id=" + HTTPBootDeviceID
 		if !hasBootIndex0(args) {
 			dev += ",bootindex=0"
 		} else {
 			log.Printf("WARN: HTTP boot: another device has bootindex=0, the HTTP boot image may not boot first")
 		}
-		result := make([]string, len(args), len(args)+4)
+		result := make([]string, len(args), len(args)+6)
 		copy(result, args)
 		return append(result,
+			"-device", "ich9-ahci,id="+httpBootControllerID,
 			"-drive", "if=none,id="+HTTPBootDriveID+",media=cdrom,readonly=on,format=raw,file="+strings.ReplaceAll(image, ",", ",,"),
 			"-device", dev,
 		)

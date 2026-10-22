@@ -17,8 +17,9 @@ func TestApplyHTTPBoot_Image(t *testing.T) {
 	result := ApplyHTTPBoot(uefiArgs, "/tmp/a,b.iso")
 	assert.Equal(t, uefiArgs, result[:len(uefiArgs)], "existing args unchanged")
 	assert.Equal(t, []string{
+		"-device", "ich9-ahci,id=httpboot-ahci",
 		"-drive", "if=none,id=httpboot0,media=cdrom,readonly=on,format=raw,file=/tmp/a,,b.iso",
-		"-device", "ide-cd,drive=httpboot0,id=httpboot-cd0,bootindex=0",
+		"-device", "ide-cd,bus=httpboot-ahci.0,drive=httpboot0,id=httpboot-cd0,bootindex=0",
 	}, result[len(uefiArgs):])
 	assert.NotContains(t, result, "-fw_cfg")
 }
@@ -26,7 +27,7 @@ func TestApplyHTTPBoot_Image(t *testing.T) {
 func TestApplyHTTPBoot_Image_BootIndex0Taken(t *testing.T) {
 	args := []string{"-device", "virtio-blk-pci,drive=d0,bootindex=0"}
 	result := ApplyHTTPBoot(args, "/tmp/a.iso")
-	assert.Contains(t, result, "ide-cd,drive=httpboot0,id=httpboot-cd0")
+	assert.Contains(t, result, "ide-cd,bus=httpboot-ahci.0,drive=httpboot0,id=httpboot-cd0")
 }
 
 func TestApplyHTTPBoot_NoImage_UEFI(t *testing.T) {

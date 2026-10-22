@@ -195,7 +195,7 @@ func TestProcessManager_Start_UefiHttp_WithImage_HiddenCD(t *testing.T) {
 	defer pm.Kill()
 
 	assert.Contains(t, f.lastArgs, "if=none,id=httpboot0,media=cdrom,readonly=on,format=raw,file=/vm/vmedia/httpboot-1.iso")
-	assert.Contains(t, f.lastArgs, "ide-cd,drive=httpboot0,id=httpboot-cd0,bootindex=0")
+	assert.Contains(t, f.lastArgs, "ide-cd,bus=httpboot-ahci.0,drive=httpboot0,id=httpboot-cd0,bootindex=0")
 	// The VirtualMedia drive keeps its own image and no boot priority
 	assert.Contains(t, f.lastArgs, "ide-cd,drive=vmedia0,id=vmedia-cd0")
 	assert.Contains(t, f.lastArgs, "if=none,id=vmedia0,media=cdrom,readonly=on,format=raw,file=/vm/cd.iso")

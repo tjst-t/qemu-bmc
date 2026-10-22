@@ -109,9 +109,9 @@ make container-test-all
 | `SYSTEM_UUID` | (derived) | Fixed system UUID: passed to QEMU as `-uuid`, returned as Redfish `Systems/1` `UUID` and IPMI Get System GUID. If unset (process mode): `-uuid` in QEMU args, else `SYSTEM_UUID_FILE`, else a v5 UUID derived from the hostname (then written to `SYSTEM_UUID_FILE`). Legacy mode reports a UUID only when `SYSTEM_UUID` is set |
 | `SYSTEM_UUID_FILE` | (empty; entrypoint.sh sets `<VM_DISK dir>/system-uuid`) | File holding the persisted derived UUID |
 | `VM_MACS` | (derived) | Comma-separated per-NIC MACs in QEMU command-line order (empty entry = derive). Process mode: injected as `mac=` (`macaddr=` for `-net nic`) into NICs without one; a conflicting user `mac=` is rejected. Unset entries are `52:54:` + 4 bytes of SHA-256(system UUID, NIC index), so they are stable per node and differ between nodes. Reported as Systems/1 EthernetInterfaces. Legacy mode reports NICs only from `VM_MACS` |
-| `VMEDIA_DIR` | `/vm/vmedia` (if `/vm` is writable, else `/tmp/vmedia`) | Where VirtualMedia http(s) images are downloaded; the previous download is deleted on replace/eject |
+| `VMEDIA_DIR` | `/vm/vmedia` (if `/vm` is writable, else `/tmp/vmedia`) | Where VirtualMedia http(s) images (`cd1-*.iso`) and the UEFI HTTP boot image (`httpboot-*.iso`) are downloaded; the previous download is deleted on replace/eject, leftovers at startup |
 | `VMEDIA_INSECURE_TLS` | `true` | Skip certificate verification for https VirtualMedia downloads |
-| `VMEDIA_TIMEOUT` | `600` | Seconds a power on/reset (Redfish and IPMI) waits for a VirtualMedia download in progress |
+| `VMEDIA_TIMEOUT` | `600` | Seconds a power on/reset (Redfish and IPMI) waits for a VirtualMedia (or, for UefiHttp, HttpBootUri) download in progress |
 
 ### Container Configuration (entrypoint.sh)
 
@@ -153,7 +153,7 @@ make container-test-all
 | GET | `/redfish/v1/Systems/1/SimpleStorage/1` | Devices: [{Name, CapacityBytes, Status}] per disk |
 | GET | `/redfish/v1/Systems/1/VirtualMedia` | VirtualMedia collection (recommended location; same single CD drive as Managers/1/VirtualMedia, shared state) |
 | GET | `/redfish/v1/Systems/1/VirtualMedia/CD1` | VirtualMedia resource, same as Managers/1/VirtualMedia/CD1; `@odata.id` and action targets follow the URI requested. InsertMedia/EjectMedia actions below work under both |
-| PATCH | `/redfish/v1/Systems/1` | Boot device override (with ETag support) |
+| PATCH | `/redfish/v1/Systems/1` | Boot device override (with ETag support; ETag includes HttpBootUri). Targets None/Pxe/Hdd/Cd/BiosSetup/UefiHttp. `Boot.HttpBootUri` (always in GET, null when unset): http(s) URL, or null/"" to clear (else 400); kept after Once is used until cleared. UefiHttp with a URI: image downloaded like VirtualMedia (VMEDIA_*, starts at PATCH, power on/reset waits; failure → that boot goes on without it) and booted from a hidden CD (`httpboot0` on its own ich9-ahci, bootindex=0; not VirtualMedia). Without a URI: network boot (-boot n); with OVMF also fw_cfg IPv4/IPv6PXESupport=n and first NIC `romfile=,bootindex=0` (`qemu.ApplyHTTPBoot`). Only for boots the override applies to. Legacy mode: UefiHttp / a URI → 400 |
 | POST | `/redfish/v1/Systems/1/Actions/ComputerSystem.Reset` | Power control: On, ForceOff, GracefulShutdown, ForceRestart, GracefulRestart, PowerCycle (process mode: QEMU stopped and restarted so boot override/VirtualMedia apply; legacy: system_reset; off: On), ForceOn (= On), Nmi (QMP inject-nmi; 409 when off; does not end a graceful action), PushPowerButton (off: On, on: GracefulShutdown) |
 | GET | `/redfish/v1/Managers` | Manager collection |
 | GET | `/redfish/v1/Managers/1` | BMC manager (ManagerType BMC, FirmwareVersion = qemu-bmc version via SetFirmwareVersion, Status, Links.ManagerForServers → Systems/1, Links.ManagerInChassis → Chassis/1) |
@@ -182,7 +182,7 @@ Middleware: auth (X-Auth-Token session or Basic; Basic and session login accept 
 | Chassis Control | Chassis | 0x02 | Power on/off/cycle/reset, soft off (ACPI power button, never forced); cycle = Redfish PowerCycle; diag = Nmi (0xD5 when off) |
 | Chassis Identify | Chassis | 0x04 | Identify LED (log only) |
 | Set Boot Options | Chassis | 0x08 | Boot device override |
-| Get Boot Options | Chassis | 0x09 | Boot device query |
+| Get Boot Options | Chassis | 0x09 | Boot device query (UefiHttp reported as PXE) |
 | Get FRU Inventory Area Info / Read FRU Data | Storage (0x0A) | 0x10 / 0x11 | FRU 0: Common Header + Product Info Area (QEMU, qemu-bmc VM, serial = system UUID) |
 | Get SDR Repository Info / Reserve / Get SDR | Storage | 0x20 / 0x22 / 0x23 | One record: the BMC's MC Device Locator (an empty repository makes ipmitool try to rebuild it and print errors) |
 | Get SEL Info / Reserve SEL / Get SEL Entry / Clear SEL | Storage | 0x40 / 0x42 / 0x43 / 0x47 | Always-empty SEL (Get SEL Entry → 0xCB) |
