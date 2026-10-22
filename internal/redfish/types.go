@@ -1,5 +1,7 @@
 package redfish
 
+import "encoding/json"
+
 // ODataID represents an OData reference
 type ODataID struct {
 	ODataID string `json:"@odata.id"`
@@ -108,6 +110,9 @@ type BootSource struct {
 	BootSourceOverrideTarget  string   `json:"BootSourceOverrideTarget"`
 	BootSourceOverrideMode    string   `json:"BootSourceOverrideMode"`
 	AllowableValues           []string `json:"BootSourceOverrideTarget@Redfish.AllowableValues"`
+	// HttpBootUri is always present (null when unset): sushy only sends it
+	// when the key exists
+	HttpBootUri *string `json:"HttpBootUri"`
 }
 
 // ComputerSystemActions contains available actions
@@ -136,6 +141,8 @@ type PatchBootSource struct {
 	BootSourceOverrideEnabled string `json:"BootSourceOverrideEnabled,omitempty"`
 	BootSourceOverrideTarget  string `json:"BootSourceOverrideTarget,omitempty"`
 	BootSourceOverrideMode    string `json:"BootSourceOverrideMode,omitempty"`
+	// HttpBootUri is kept raw to tell null (clear) from absent (no change)
+	HttpBootUri json.RawMessage `json:"HttpBootUri,omitempty"`
 }
 
 // RedfishError is a Redfish error response

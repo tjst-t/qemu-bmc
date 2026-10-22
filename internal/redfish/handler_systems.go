@@ -44,8 +44,9 @@ func (s *Server) handleGetSystem(w http.ResponseWriter, r *http.Request) {
 	}
 
 	boot := s.machine.GetBootOverride()
+	httpBootURI := s.machine.GetHTTPBootURI()
 
-	etag := generateETag(powerState, boot)
+	etag := generateETag(powerState, boot, httpBootURI)
 
 	system := ComputerSystem{
 		ODataType:  "#ComputerSystem.v1_13_0.ComputerSystem",
@@ -59,7 +60,7 @@ func (s *Server) handleGetSystem(w http.ResponseWriter, r *http.Request) {
 			BootSourceOverrideEnabled: boot.Enabled,
 			BootSourceOverrideTarget:  boot.Target,
 			BootSourceOverrideMode:    boot.Mode,
-			AllowableValues:           []string{"None", "Pxe", "Hdd", "Cd", "BiosSetup"},
+			AllowableValues:           []string{"None", "Pxe", "Hdd", "Cd", "BiosSetup", "UefiHttp"},
 		},
 		Actions: ComputerSystemActions{
 			Reset: ResetAction{
@@ -77,6 +78,9 @@ func (s *Server) handleGetSystem(w http.ResponseWriter, r *http.Request) {
 			ManagedBy: []ODataID{{ODataID: managerPath}},
 			Chassis:   []ODataID{{ODataID: chassisPath}},
 		},
+	}
+	if httpBootURI != "" {
+		system.Boot.HttpBootUri = &httpBootURI
 	}
 	if s.systemInfo.MemoryMiB > 0 {
 		system.MemorySummary = &MemorySummary{
@@ -103,7 +107,7 @@ func (s *Server) handlePatchSystem(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		boot := s.machine.GetBootOverride()
-		currentETag := generateETag(powerState, boot)
+		currentETag := generateETag(powerState, boot, s.machine.GetHTTPBootURI())
 
 		if ifMatch != currentETag {
 			writeError(w, http.StatusPreconditionFailed, "PreconditionFailed", "ETag mismatch")
@@ -135,9 +139,38 @@ func (s *Server) handlePatchSystem(w http.ResponseWriter, r *http.Request) {
 		current.Mode = req.Boot.BootSourceOverrideMode
 	}
 
+	// HttpBootUri: an http(s) URL, or null / "" to clear it. Checked before
+	// anything is changed.
+	var httpBootURI *string
+	if raw := req.Boot.HttpBootUri; len(raw) > 0 {
+		var uri *string
+		if err := json.Unmarshal(raw, &uri); err != nil {
+			writeError(w, http.StatusBadRequest, "PropertyValueTypeError", "HttpBootUri must be a string or null")
+			return
+		}
+		if uri == nil {
+			uri = new(string)
+		}
+		if err := machine.ValidateHTTPBootURI(*uri); err != nil {
+			writeError(w, http.StatusBadRequest, "PropertyValueFormatError", err.Error())
+			return
+		}
+		if *uri != "" && !s.machine.HTTPBootSupported() {
+			writeError(w, http.StatusBadRequest, "PropertyValueNotInList", machine.ErrHTTPBootUnsupported.Error())
+			return
+		}
+		httpBootURI = uri
+	}
+
 	if err := s.machine.SetBootOverride(current); err != nil {
 		writeError(w, http.StatusBadRequest, "PropertyValueError", err.Error())
 		return
+	}
+	if httpBootURI != nil {
+		if err := s.machine.SetHTTPBootURI(*httpBootURI); err != nil {
+			writeError(w, http.StatusBadRequest, "PropertyValueError", err.Error())
+			return
+		}
 	}
 
 	// Return the updated system
@@ -173,8 +206,8 @@ func mapQMPStatusToRedfish(status qmp.Status) string {
 }
 
 // generateETag creates an ETag based on the system state
-func generateETag(powerState string, boot machine.BootOverride) string {
-	data := fmt.Sprintf("%s-%s-%s-%s", powerState, boot.Enabled, boot.Target, boot.Mode)
+func generateETag(powerState string, boot machine.BootOverride, httpBootURI string) string {
+	data := fmt.Sprintf("%s-%s-%s-%s-%s", powerState, boot.Enabled, boot.Target, boot.Mode, httpBootURI)
 	hash := sha256.Sum256([]byte(data))
 	return fmt.Sprintf(`"%x"`, hash[:8])
 }

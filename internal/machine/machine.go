@@ -11,6 +11,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/tjst-t/qemu-bmc/internal/qemu"
 	"github.com/tjst-t/qemu-bmc/internal/qmp"
 )
 
@@ -30,7 +31,7 @@ const (
 // BootOverride represents boot source override settings
 type BootOverride struct {
 	Enabled string // "Disabled", "Once", "Continuous"
-	Target  string // "None", "Pxe", "Hdd", "Cd", "BiosSetup"
+	Target  string // "None", "Pxe", "Hdd", "Cd", "BiosSetup", "UefiHttp"
 	Mode    string // "UEFI", "Legacy"
 }
 
@@ -51,8 +52,9 @@ var ErrPoweredOff = errors.New("VM is powered off")
 // ProcessManager controls the QEMU process lifecycle.
 type ProcessManager interface {
 	// Start launches QEMU with the given boot target and CD image ("" =
-	// empty drive).
-	Start(bootTarget, cdImage string) error
+	// empty drive). For the UefiHttp target, httpBootImage is the image to
+	// boot from a hidden CD drive ("" = boot from the network).
+	Start(bootTarget, cdImage, httpBootImage string) error
 	Stop(timeout time.Duration) error
 	Kill() error
 	IsRunning() bool
@@ -71,9 +73,12 @@ type Machine struct {
 	qmpClient      qmp.Client
 	processManager ProcessManager // nil = legacy mode
 	bootOverride   BootOverride
-	// runningBootTarget is the boot target the current QEMU process was
-	// started with (process management mode only).
+	// runningBootTarget and runningHTTPBoot are the boot target and HTTP
+	// boot image the current QEMU process was started with (process
+	// management mode only).
 	runningBootTarget string
+	runningHTTPBoot   string
+	httpBoot          httpBootState
 	// media is the virtual CD state, kept while QEMU is not running and
 	// applied when it starts. mediaPath is the local path of media.Image
 	// ("" while an http(s) image is downloading); mediaFile is the file
@@ -311,10 +316,10 @@ func (m *Machine) Reset(resetType string) error {
 }
 
 // resetAfterDownload runs power action resetType (Reset call gen) once the
-// VirtualMedia download in progress ends, unless another power action was
+// VirtualMedia or HTTP boot download in progress ends, unless another power action was
 // requested meanwhile. mediaDeadline bounds the wait.
 func (m *Machine) resetAfterDownload(gen uint64, resetType string, mediaDeadline time.Time) {
-	log.Printf("%s: waiting for the VirtualMedia download", resetType)
+	log.Printf("%s: waiting for the download", resetType)
 	m.waitMediaDownload(mediaDeadline)
 
 	m.resetMu.Lock()
@@ -394,15 +399,18 @@ func (m *Machine) resetProcessMode(resetType string, mediaDeadline time.Time) er
 		}
 		m.waitMediaDownload(mediaDeadline)
 		m.mu.RLock()
-		target := m.nextBootTarget()
+		target, httpBootImage := m.nextBoot()
+		if target != m.nextBootTarget() {
+			log.Printf("HTTP boot: image of %s not available, booting without it", RedactImage(m.httpBoot.uri))
+		}
 		cdImage := m.insertedPath()
 		m.mu.RUnlock()
 
-		if err := m.processManager.Start(target, cdImage); err != nil {
+		if err := m.processManager.Start(target, cdImage, httpBootImage); err != nil {
 			return fmt.Errorf("starting QEMU: %w", err)
 		}
 		m.mu.Lock()
-		m.runningBootTarget = target
+		m.runningBootTarget, m.runningHTTPBoot = target, httpBootImage
 		m.mu.Unlock()
 
 		if err := m.waitForQMP(30 * time.Second); err != nil {
@@ -535,8 +543,9 @@ func (m *Machine) guestPoweredOff() bool {
 	return err == nil && status == qmp.StatusShutdown
 }
 
-// bootTargetChanged reports whether the boot target for the next boot differs
-// from the one the running QEMU process was started with.
+// bootTargetChanged reports whether the boot target (or HTTP boot image) for
+// the next boot differs from the one the running QEMU process was started
+// with.
 func (m *Machine) bootTargetChanged() bool {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
@@ -546,7 +555,8 @@ func (m *Machine) bootTargetChanged() bool {
 		}
 		return t
 	}
-	return normalize(m.nextBootTarget()) != normalize(m.runningBootTarget)
+	target, httpBootImage := m.nextBoot()
+	return normalize(target) != normalize(m.runningBootTarget) || httpBootImage != m.runningHTTPBoot
 }
 
 // nextBootTarget returns the boot target for the next boot: the override
@@ -593,14 +603,19 @@ func (m *Machine) SetBootMode(mode string) error {
 	return nil
 }
 
-// SetBootOverride sets the boot override settings
+// SetBootOverride sets the boot override settings. UefiHttp boots the
+// Boot.HttpBootUri image if set (see SetHTTPBootURI), otherwise from the
+// network with HTTP boot; it is rejected in legacy mode.
 func (m *Machine) SetBootOverride(override BootOverride) error {
 	// Validate target
 	validTargets := map[string]bool{
-		"None": true, "Pxe": true, "Hdd": true, "Cd": true, "BiosSetup": true,
+		"None": true, "Pxe": true, "Hdd": true, "Cd": true, "BiosSetup": true, "UefiHttp": true,
 	}
 	if !validTargets[override.Target] {
 		return fmt.Errorf("invalid boot target: %s", override.Target)
+	}
+	if override.Target == "UefiHttp" && !m.HTTPBootSupported() {
+		return ErrHTTPBootUnsupported
 	}
 
 	// Validate enabled
@@ -757,6 +772,9 @@ func (m *Machine) findCDDrive() (id, file string, err error) {
 		b := &blocks[i]
 		if !b.Removable || b.QDev == "" {
 			continue
+		}
+		if b.Device == qemu.HTTPBootDriveID || strings.HasSuffix(b.QDev, qemu.HTTPBootDeviceID) {
+			continue // the hidden HTTP boot drive is not VirtualMedia
 		}
 		isCD := strings.Contains(strings.ToLower(b.Device+" "+b.QDev), "cd")
 		if found == nil || isCD {

@@ -29,7 +29,7 @@ func (f *trackingFactory) create(binary string, args []string) *exec.Cmd {
 
 func TestProcessManager_Start_IsRunning(t *testing.T) {
 	pm := NewProcessManager("qemu-system-x86_64", []string{"-m", "2048"}, sleepFactory)
-	require.NoError(t, pm.Start("", ""))
+	require.NoError(t, pm.Start("", "", ""))
 	defer pm.Kill()
 
 	assert.True(t, pm.IsRunning())
@@ -37,17 +37,17 @@ func TestProcessManager_Start_IsRunning(t *testing.T) {
 
 func TestProcessManager_Start_AlreadyRunning_Noop(t *testing.T) {
 	pm := NewProcessManager("qemu-system-x86_64", []string{"-m", "2048"}, sleepFactory)
-	require.NoError(t, pm.Start("", ""))
+	require.NoError(t, pm.Start("", "", ""))
 	defer pm.Kill()
 
 	// Second start is a no-op
-	require.NoError(t, pm.Start("", ""))
+	require.NoError(t, pm.Start("", "", ""))
 	assert.True(t, pm.IsRunning())
 }
 
 func TestProcessManager_Stop_TerminatesProcess(t *testing.T) {
 	pm := NewProcessManager("qemu-system-x86_64", []string{"-m", "2048"}, sleepFactory)
-	require.NoError(t, pm.Start("", ""))
+	require.NoError(t, pm.Start("", "", ""))
 
 	err := pm.Stop(5 * time.Second)
 	require.NoError(t, err)
@@ -59,7 +59,7 @@ func TestProcessManager_Stop_TerminatesProcess(t *testing.T) {
 
 func TestProcessManager_Kill_TerminatesImmediately(t *testing.T) {
 	pm := NewProcessManager("qemu-system-x86_64", []string{"-m", "2048"}, sleepFactory)
-	require.NoError(t, pm.Start("", ""))
+	require.NoError(t, pm.Start("", "", ""))
 
 	err := pm.Kill()
 	require.NoError(t, err)
@@ -75,7 +75,7 @@ func TestProcessManager_IsRunning_AfterExit(t *testing.T) {
 		return exec.Command("true")
 	}
 	pm := NewProcessManager("qemu-system-x86_64", []string{}, factory)
-	require.NoError(t, pm.Start("", ""))
+	require.NoError(t, pm.Start("", "", ""))
 
 	// Wait for the process to exit naturally
 	time.Sleep(200 * time.Millisecond)
@@ -84,7 +84,7 @@ func TestProcessManager_IsRunning_AfterExit(t *testing.T) {
 
 func TestProcessManager_WaitForExit_Timeout(t *testing.T) {
 	pm := NewProcessManager("qemu-system-x86_64", []string{"-m", "2048"}, sleepFactory)
-	require.NoError(t, pm.Start("", ""))
+	require.NoError(t, pm.Start("", "", ""))
 	defer pm.Kill()
 
 	err := pm.WaitForExit(100 * time.Millisecond)
@@ -97,7 +97,7 @@ func TestProcessManager_ExitCh_ClosedOnExit(t *testing.T) {
 		return exec.Command("true")
 	}
 	pm := NewProcessManager("qemu-system-x86_64", []string{}, factory)
-	require.NoError(t, pm.Start("", ""))
+	require.NoError(t, pm.Start("", "", ""))
 
 	select {
 	case <-pm.ExitCh():
@@ -110,7 +110,7 @@ func TestProcessManager_ExitCh_ClosedOnExit(t *testing.T) {
 func TestProcessManager_Start_AppliesBootOverride(t *testing.T) {
 	f := &trackingFactory{}
 	pm := NewProcessManager("qemu-system-x86_64", []string{"-m", "2048"}, f.create)
-	require.NoError(t, pm.Start("Pxe", ""))
+	require.NoError(t, pm.Start("Pxe", "", ""))
 	defer pm.Kill()
 
 	assert.Contains(t, f.lastArgs, "-boot")
@@ -120,7 +120,7 @@ func TestProcessManager_Start_AppliesBootOverride(t *testing.T) {
 func TestProcessManager_Start_NoBootOverride(t *testing.T) {
 	f := &trackingFactory{}
 	pm := NewProcessManager("qemu-system-x86_64", []string{"-m", "2048"}, f.create)
-	require.NoError(t, pm.Start("", ""))
+	require.NoError(t, pm.Start("", "", ""))
 	defer pm.Kill()
 
 	assert.NotContains(t, f.lastArgs, "-boot")
@@ -142,7 +142,7 @@ func TestProcessManager_Restart_AfterStop(t *testing.T) {
 	pm := NewProcessManager("qemu-system-x86_64", []string{"-m", "2048"}, sleepFactory)
 
 	// Start
-	require.NoError(t, pm.Start("", ""))
+	require.NoError(t, pm.Start("", "", ""))
 	assert.True(t, pm.IsRunning())
 
 	// Stop
@@ -151,7 +151,7 @@ func TestProcessManager_Restart_AfterStop(t *testing.T) {
 	assert.False(t, pm.IsRunning())
 
 	// Re-start
-	require.NoError(t, pm.Start("", ""))
+	require.NoError(t, pm.Start("", "", ""))
 	defer pm.Kill()
 	assert.True(t, pm.IsRunning())
 }
@@ -168,7 +168,7 @@ func TestProcessManager_Start_LogsQEMUStderr(t *testing.T) {
 		defer mu.Unlock()
 		lines = append(lines, fmt.Sprintf(format, v...))
 	}
-	require.NoError(t, pm.Start("", ""))
+	require.NoError(t, pm.Start("", "", ""))
 	require.NoError(t, pm.WaitForExit(5*time.Second))
 
 	mu.Lock()
@@ -185,4 +185,30 @@ func TestLineLogger_SplitsLines(t *testing.T) {
 	l.Write([]byte("c\r\n\n"))
 	l.Flush()
 	assert.Equal(t, []string{"qemu: a", "qemu: bc"}, lines)
+}
+
+func TestProcessManager_Start_UefiHttp_WithImage_HiddenCD(t *testing.T) {
+	f := &trackingFactory{}
+	base := EnsureCDROM([]string{"-m", "2048"})
+	pm := NewProcessManager("qemu-system-x86_64", base, f.create)
+	require.NoError(t, pm.Start("UefiHttp", "/vm/cd.iso", "/vm/vmedia/httpboot-1.iso"))
+	defer pm.Kill()
+
+	assert.Contains(t, f.lastArgs, "if=none,id=httpboot0,media=cdrom,readonly=on,format=raw,file=/vm/vmedia/httpboot-1.iso")
+	assert.Contains(t, f.lastArgs, "ide-cd,drive=httpboot0,id=httpboot-cd0,bootindex=0")
+	// The VirtualMedia drive keeps its own image and no boot priority
+	assert.Contains(t, f.lastArgs, "ide-cd,drive=vmedia0,id=vmedia-cd0")
+	assert.Contains(t, f.lastArgs, "if=none,id=vmedia0,media=cdrom,readonly=on,format=raw,file=/vm/cd.iso")
+	assert.NotContains(t, f.lastArgs, "-fw_cfg")
+}
+
+func TestProcessManager_Start_HTTPBootImageIgnoredForOtherTargets(t *testing.T) {
+	f := &trackingFactory{}
+	pm := NewProcessManager("qemu-system-x86_64", []string{"-m", "2048"}, f.create)
+	require.NoError(t, pm.Start("Hdd", "", "/vm/vmedia/httpboot-1.iso"))
+	defer pm.Kill()
+
+	for _, a := range f.lastArgs {
+		assert.NotContains(t, a, "httpboot")
+	}
 }

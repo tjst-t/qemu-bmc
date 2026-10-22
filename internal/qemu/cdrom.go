@@ -98,10 +98,8 @@ func cdDriveValue(image string) string {
 // order is ignored by UEFI (OVMF), which only honors bootindex. Nothing is
 // changed if another device already has bootindex=0.
 func setCDBootIndex(args []string) []string {
-	for _, arg := range args {
-		if optionValue(arg, "bootindex") == "0" {
-			return args
-		}
+	if hasBootIndex0(args) {
+		return args
 	}
 	result := make([]string, len(args))
 	copy(result, args)

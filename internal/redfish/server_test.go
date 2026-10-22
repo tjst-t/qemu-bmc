@@ -25,6 +25,8 @@ type mockMachine struct {
 	mediaErr      error
 	resetErr      error
 	statusErr     error
+	httpBootURI   string
+	legacy        bool // HTTP boot unsupported
 }
 
 func newMockMachine(status qmp.Status) *mockMachine {
@@ -59,6 +61,26 @@ func (m *mockMachine) Reset(resetType string) error {
 	return m.resetErr
 }
 
+func (m *mockMachine) GetHTTPBootURI() string {
+	return m.httpBootURI
+}
+
+func (m *mockMachine) SetHTTPBootURI(uri string) error {
+	if err := machine.ValidateHTTPBootURI(uri); err != nil {
+		return err
+	}
+	if uri != "" && m.legacy {
+		return machine.ErrHTTPBootUnsupported
+	}
+	m.calls = append(m.calls, "SetHTTPBootURI:"+uri)
+	m.httpBootURI = uri
+	return nil
+}
+
+func (m *mockMachine) HTTPBootSupported() bool {
+	return !m.legacy
+}
+
 func (m *mockMachine) GetBootOverride() machine.BootOverride {
 	return m.bootOverride
 }
@@ -66,10 +88,13 @@ func (m *mockMachine) GetBootOverride() machine.BootOverride {
 func (m *mockMachine) SetBootOverride(override machine.BootOverride) error {
 	// Validate target
 	validTargets := map[string]bool{
-		"None": true, "Pxe": true, "Hdd": true, "Cd": true, "BiosSetup": true,
+		"None": true, "Pxe": true, "Hdd": true, "Cd": true, "BiosSetup": true, "UefiHttp": true,
 	}
 	if !validTargets[override.Target] {
 		return fmt.Errorf("invalid boot target: %s", override.Target)
+	}
+	if override.Target == "UefiHttp" && m.legacy {
+		return machine.ErrHTTPBootUnsupported
 	}
 
 	// Validate enabled

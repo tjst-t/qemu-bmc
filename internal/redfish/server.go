@@ -16,6 +16,9 @@ type MachineInterface interface {
 	Reset(resetType string) error
 	GetBootOverride() machine.BootOverride
 	SetBootOverride(override machine.BootOverride) error
+	GetHTTPBootURI() string
+	SetHTTPBootURI(uri string) error
+	HTTPBootSupported() bool
 	GetMedia() machine.Media
 	InsertMedia(image, username, password string) error
 	EjectMedia() error

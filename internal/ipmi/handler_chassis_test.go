@@ -132,6 +132,17 @@ func TestGetBootOptions(t *testing.T) {
 	assert.Equal(t, byte(0x04), resp[3]) // PXE (0x01 << 2)
 }
 
+func TestGetBootOptions_UefiHttpReportedAsPXE(t *testing.T) {
+	mock := newIPMIMockMachine(machine.PowerOn)
+	mock.bootOverride = machine.BootOverride{Enabled: "Once", Target: "UefiHttp", Mode: "UEFI"}
+
+	msg := &IPMIMessage{Command: CmdGetBootOptions, Data: []byte{0x05, 0x00, 0x00}}
+	code, resp := handleChassisCommand(msg, mock)
+	assert.Equal(t, CompletionCodeOK, code)
+	require.Len(t, resp, 7)
+	assert.Equal(t, byte(0x04), resp[3]) // PXE (0x01 << 2)
+}
+
 func TestGetBootOptions_SetInProgress(t *testing.T) {
 	mock := newIPMIMockMachine(machine.PowerOn)
 	msg := &IPMIMessage{Command: CmdGetBootOptions, Data: []byte{0x00, 0x00, 0x00}}

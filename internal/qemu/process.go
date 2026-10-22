@@ -12,8 +12,10 @@ import (
 // ProcessManager controls the lifecycle of a QEMU process.
 type ProcessManager interface {
 	// Start launches QEMU with the given boot target and the image in the
-	// managed CD drive ("" = empty).
-	Start(bootTarget, cdImage string) error
+	// managed CD drive ("" = empty). For the UefiHttp target, httpBootImage
+	// is the image to boot from a hidden CD drive ("" = boot from the
+	// network); it is ignored for other targets.
+	Start(bootTarget, cdImage, httpBootImage string) error
 	Stop(timeout time.Duration) error
 	Kill() error
 	IsRunning() bool
@@ -52,7 +54,7 @@ func NewProcessManager(binary string, baseArgs []string, factory CommandFactory)
 	}
 }
 
-func (p *processManager) Start(bootTarget, cdImage string) error {
+func (p *processManager) Start(bootTarget, cdImage, httpBootImage string) error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
@@ -61,6 +63,9 @@ func (p *processManager) Start(bootTarget, cdImage string) error {
 	}
 
 	args := ApplyBootOverride(SetCDImage(p.baseArgs, cdImage), bootTarget)
+	if bootTarget == "UefiHttp" {
+		args = ApplyHTTPBoot(args, httpBootImage)
+	}
 	p.cmd = p.cmdFactory(p.binary, args)
 	p.cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	p.stderr = nil

@@ -293,3 +293,122 @@ func TestGetSystem_LinksAndStatus(t *testing.T) {
 	}, system["Links"])
 	assert.Equal(t, map[string]interface{}{"State": "Enabled", "Health": "OK"}, system["Status"])
 }
+
+func patchSystem(t *testing.T, srv *Server, body string) *httptest.ResponseRecorder {
+	t.Helper()
+	req := httptest.NewRequest("PATCH", "/redfish/v1/Systems/1", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	srv.ServeHTTP(w, req)
+	return w
+}
+
+func getSystemBoot(t *testing.T, srv *Server) (map[string]any, string) {
+	t.Helper()
+	w := httptest.NewRecorder()
+	srv.ServeHTTP(w, httptest.NewRequest("GET", "/redfish/v1/Systems/1", nil))
+	require.Equal(t, http.StatusOK, w.Code)
+	var system map[string]any
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &system))
+	return system["Boot"].(map[string]any), w.Header().Get("ETag")
+}
+
+func TestGetSystem_HttpBootUri(t *testing.T) {
+	mock := newMockMachine(qmp.StatusShutdown)
+	srv := NewServer(mock, "", "", "")
+
+	boot, _ := getSystemBoot(t, srv)
+	v, ok := boot["HttpBootUri"]
+	assert.True(t, ok, "HttpBootUri is present when unset")
+	assert.Nil(t, v)
+	assert.Contains(t, boot["BootSourceOverrideTarget@Redfish.AllowableValues"], "UefiHttp")
+
+	mock.httpBootURI = "https://host/boot.iso"
+	boot, _ = getSystemBoot(t, srv)
+	assert.Equal(t, "https://host/boot.iso", boot["HttpBootUri"])
+}
+
+func TestPatchSystem_UefiHttp(t *testing.T) {
+	mock := newMockMachine(qmp.StatusShutdown)
+	srv := NewServer(mock, "", "", "")
+	_, etagBefore := getSystemBoot(t, srv)
+
+	w := patchSystem(t, srv, `{"Boot":{"BootSourceOverrideTarget":"UefiHttp","HttpBootUri":"https://10.0.0.1/x.iso","BootSourceOverrideEnabled":"Once","BootSourceOverrideMode":"UEFI"}}`)
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	assert.Equal(t, machine.BootOverride{Enabled: "Once", Target: "UefiHttp", Mode: "UEFI"}, mock.bootOverride)
+	assert.Equal(t, "https://10.0.0.1/x.iso", mock.httpBootURI)
+	var system map[string]any
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &system))
+	assert.Equal(t, "https://10.0.0.1/x.iso", system["Boot"].(map[string]any)["HttpBootUri"])
+
+	_, etagAfter := getSystemBoot(t, srv)
+	assert.NotEqual(t, etagBefore, etagAfter)
+
+	// The URI alone changes the ETag
+	mock.bootOverride = machine.BootOverride{Enabled: "Disabled", Target: "None", Mode: "UEFI"}
+	_, withURI := getSystemBoot(t, srv)
+	mock.httpBootURI = ""
+	_, withoutURI := getSystemBoot(t, srv)
+	assert.NotEqual(t, withURI, withoutURI)
+}
+
+func TestPatchSystem_HttpBootUri_NullOrEmptyClears(t *testing.T) {
+	for _, value := range []string{`null`, `""`} {
+		t.Run(value, func(t *testing.T) {
+			mock := newMockMachine(qmp.StatusShutdown)
+			mock.httpBootURI = "http://host/a.iso"
+			srv := NewServer(mock, "", "", "")
+
+			w := patchSystem(t, srv, `{"Boot":{"HttpBootUri":`+value+`}}`)
+			require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+			assert.Equal(t, "", mock.httpBootURI)
+			boot, _ := getSystemBoot(t, srv)
+			assert.Nil(t, boot["HttpBootUri"])
+		})
+	}
+}
+
+func TestPatchSystem_HttpBootUri_AbsentKeepsIt(t *testing.T) {
+	mock := newMockMachine(qmp.StatusShutdown)
+	mock.httpBootURI = "http://host/a.iso"
+	srv := NewServer(mock, "", "", "")
+
+	w := patchSystem(t, srv, `{"Boot":{"BootSourceOverrideTarget":"Pxe","BootSourceOverrideEnabled":"Once"}}`)
+	require.Equal(t, http.StatusOK, w.Code)
+	assert.Equal(t, "http://host/a.iso", mock.httpBootURI)
+	assert.NotContains(t, mock.calls, "SetHTTPBootURI:")
+}
+
+func TestPatchSystem_HttpBootUri_Invalid(t *testing.T) {
+	for _, value := range []string{`"ftp://host/a.iso"`, `"/vm/a.iso"`, `"http://"`, `42`, `{"a":1}`} {
+		t.Run(value, func(t *testing.T) {
+			mock := newMockMachine(qmp.StatusShutdown)
+			srv := NewServer(mock, "", "", "")
+
+			w := patchSystem(t, srv, `{"Boot":{"BootSourceOverrideTarget":"UefiHttp","BootSourceOverrideEnabled":"Once","HttpBootUri":`+value+`}}`)
+			assert.Equal(t, http.StatusBadRequest, w.Code)
+			assert.Equal(t, "None", mock.bootOverride.Target, "nothing changed")
+			assert.Equal(t, "", mock.httpBootURI)
+		})
+	}
+}
+
+func TestPatchSystem_UefiHttp_LegacyMode(t *testing.T) {
+	mock := newMockMachine(qmp.StatusRunning)
+	mock.legacy = true
+	srv := NewServer(mock, "", "", "")
+
+	w := patchSystem(t, srv, `{"Boot":{"BootSourceOverrideTarget":"UefiHttp","BootSourceOverrideEnabled":"Once"}}`)
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+	assert.Contains(t, w.Body.String(), "process management mode")
+	assert.Equal(t, "None", mock.bootOverride.Target)
+
+	w = patchSystem(t, srv, `{"Boot":{"BootSourceOverrideTarget":"Pxe","BootSourceOverrideEnabled":"Once","HttpBootUri":"http://host/a.iso"}}`)
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+	assert.Equal(t, "None", mock.bootOverride.Target, "nothing changed")
+	assert.Equal(t, "", mock.httpBootURI)
+
+	// Clearing (as Ironic does after use) is accepted
+	w = patchSystem(t, srv, `{"Boot":{"HttpBootUri":null}}`)
+	assert.Equal(t, http.StatusOK, w.Code)
+}

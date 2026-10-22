@@ -56,15 +56,26 @@ func (m *Machine) SetMediaOptions(opts MediaOptions) {
 	m.vmedia = opts
 }
 
+// Download file name prefixes: <prefix>-<gen>.iso, partial <prefix>-*.part.
+const (
+	mediaFilePrefix    = "cd1"
+	httpBootFilePrefix = "httpboot"
+)
+
 // CleanStaleDownloads removes images downloaded by an earlier qemu-bmc run
-// (cd1-*.iso and partial cd1-*.part) from the download directory. Only the
+// (VirtualMedia cd1-*.iso, HTTP boot httpboot-*.iso and partial *.part
+// files) from the download directory. Only the
 // current run tracks its download, so leftovers would otherwise pile up in
 // a persistent VMEDIA_DIR. Call it at startup, before any InsertMedia.
 func (m *Machine) CleanStaleDownloads() {
 	m.mu.RLock()
 	dir := m.vmedia.Dir
 	m.mu.RUnlock()
-	for _, pattern := range []string{"cd1-*.iso", "cd1-*.part"} {
+	var patterns []string
+	for _, prefix := range []string{mediaFilePrefix, httpBootFilePrefix} {
+		patterns = append(patterns, prefix+"-*.iso", prefix+"-*.part")
+	}
+	for _, pattern := range patterns {
 		files, _ := filepath.Glob(filepath.Join(dir, pattern))
 		for _, f := range files {
 			removeMediaFile(f)
@@ -153,7 +164,7 @@ func removeMediaFile(path string) {
 func (m *Machine) runDownload(ctx context.Context, dl *mediaDownload, gen uint64, image, shown, username, password string, opts MediaOptions) {
 	log.Printf("VirtualMedia: downloading %s to %s", shown, opts.Dir)
 	start := time.Now()
-	path, err := downloadImage(ctx, opts, gen, image, username, password)
+	path, err := downloadImage(ctx, opts, mediaFilePrefix, gen, image, username, password)
 
 	m.mu.Lock()
 	if m.mediaGen != gen {
@@ -179,8 +190,9 @@ func (m *Machine) runDownload(ctx context.Context, dl *mediaDownload, gen uint64
 	m.applyMediaLocked()
 }
 
-// downloadImage fetches image into opts.Dir and returns the file path.
-func downloadImage(ctx context.Context, opts MediaOptions, gen uint64, image, username, password string) (string, error) {
+// downloadImage fetches image into opts.Dir as <prefix>-<gen>.iso and
+// returns the file path.
+func downloadImage(ctx context.Context, opts MediaOptions, prefix string, gen uint64, image, username, password string) (string, error) {
 	if err := os.MkdirAll(opts.Dir, 0o755); err != nil {
 		return "", err
 	}
@@ -205,7 +217,7 @@ func downloadImage(ctx context.Context, opts MediaOptions, gen uint64, image, us
 		return "", fmt.Errorf("HTTP %s", resp.Status)
 	}
 
-	f, err := os.CreateTemp(opts.Dir, "cd1-*.part")
+	f, err := os.CreateTemp(opts.Dir, prefix+"-*.part")
 	if err != nil {
 		return "", err
 	}
@@ -217,7 +229,7 @@ func downloadImage(ctx context.Context, opts MediaOptions, gen uint64, image, us
 		os.Remove(f.Name())
 		return "", err
 	}
-	path := filepath.Join(opts.Dir, fmt.Sprintf("cd1-%d.iso", gen))
+	path := filepath.Join(opts.Dir, fmt.Sprintf("%s-%d.iso", prefix, gen))
 	if err := os.Rename(f.Name(), path); err != nil {
 		os.Remove(f.Name())
 		return "", err
@@ -225,11 +237,26 @@ func downloadImage(ctx context.Context, opts MediaOptions, gen uint64, image, us
 	return path, nil
 }
 
-// downloadPending reports whether a VirtualMedia download is in progress.
+// downloadPending reports whether a download the next boot needs is in
+// progress.
 func (m *Machine) downloadPending() bool {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-	return m.download != nil
+	dl, _ := m.pendingDownload()
+	return dl != nil
+}
+
+// pendingDownload returns a download in progress that the next boot needs
+// (the VirtualMedia image, or the HTTP boot image for the UefiHttp target)
+// and its image for logs, or nil. Callers must hold m.mu.
+func (m *Machine) pendingDownload() (*mediaDownload, string) {
+	if m.download != nil {
+		return m.download, m.media.Image
+	}
+	if m.httpBoot.download != nil && m.nextBootTarget() == "UefiHttp" {
+		return m.httpBoot.download, RedactImage(m.httpBoot.uri)
+	}
+	return nil, ""
 }
 
 // mediaDeadline returns how long a power action requested now waits for a
@@ -240,8 +267,8 @@ func (m *Machine) mediaDeadline() time.Time {
 	return time.Now().Add(m.vmedia.Timeout)
 }
 
-// waitMediaDownload waits, until deadline, for a VirtualMedia download in
-// progress so that a power on or reset boots with the image. Reset waits
+// waitMediaDownload waits, until deadline, for a VirtualMedia or HTTP boot
+// download in progress so that a power on or reset boots with the image. Reset waits
 // here before taking resetMu; the dispatched power actions check again
 // (holding resetMu) in case another download was started, with the same
 // deadline so that a download that already timed out is not waited for
@@ -250,7 +277,7 @@ func (m *Machine) waitMediaDownload(deadline time.Time) {
 	var timer *time.Timer
 	for {
 		m.mu.RLock()
-		dl, image := m.download, m.media.Image
+		dl, image := m.pendingDownload()
 		m.mu.RUnlock()
 		if dl == nil {
 			return
@@ -265,12 +292,13 @@ func (m *Machine) waitMediaDownload(deadline time.Time) {
 			timer = time.NewTimer(remaining)
 			defer timer.Stop()
 		}
-		log.Printf("VirtualMedia: waiting for the download of %s before powering on", image)
+		log.Printf("Waiting for the download of %s before powering on", image)
 		select {
 		case <-dl.done:
-			// The media may have been replaced by another download
+			// The media may have been replaced by another download, or
+			// the HTTP boot image may still be downloading
 		case <-timer.C:
-			log.Printf("VirtualMedia: download of %s not finished in time, powering on without it", image)
+			log.Printf("Download of %s not finished in time, powering on without it", image)
 			return
 		}
 	}

@@ -467,7 +467,7 @@ func TestInsertMedia_InvalidURL(t *testing.T) {
 
 func TestCleanStaleDownloads(t *testing.T) {
 	dir := t.TempDir()
-	for _, f := range []string{"cd1-3.iso", "cd1-123.part", "keep.iso"} {
+	for _, f := range []string{"cd1-3.iso", "cd1-123.part", "httpboot-2.iso", "httpboot-55.part", "keep.iso"} {
 		require.NoError(t, os.WriteFile(filepath.Join(dir, f), []byte("x"), 0o644))
 	}
 	m := NewWithProcess(newMockQMPClient(qmp.StatusRunning), newMockProcessManager(false))

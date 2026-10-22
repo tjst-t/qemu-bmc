@@ -193,7 +193,7 @@ func handleGetBootOptions(reqData []byte, m MachineInterface) (CompletionCode, [
 		// Byte 3: boot device (bits 5:2)
 		var deviceBits byte
 		switch boot.Target {
-		case "Pxe":
+		case "Pxe", "UefiHttp": // IPMI has no HTTP boot device
 			deviceBits = 0x01
 		case "Hdd":
 			deviceBits = 0x02

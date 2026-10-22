@@ -148,6 +148,7 @@ func BuildCommandLine(userArgs []string, opts BuildOptions) ([]string, error) {
 // bootTargetToQEMU maps Redfish boot targets to QEMU -boot arguments.
 var bootTargetToQEMU = map[string]string{
 	"Pxe":       "n",
+	"UefiHttp":  "n", // see ApplyHTTPBoot
 	"Hdd":       "c",
 	"Cd":        "d",
 	"BiosSetup": "menu=on",
