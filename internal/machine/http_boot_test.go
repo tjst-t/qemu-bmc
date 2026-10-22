@@ -235,11 +235,23 @@ func TestHTTPBoot_ClearWhileDownloading_PowerOnGoesAhead(t *testing.T) {
 
 	require.NoError(t, m.SetBootOverride(uefiHTTPOnce()))
 	require.NoError(t, m.SetHTTPBootURI(srv.URL+"/boot.iso"))
+	m.mu.RLock()
+	dl := m.httpBoot.download
+	m.mu.RUnlock()
+	require.NotNil(t, dl)
 	require.NoError(t, m.SetHTTPBootURI(""))
 	require.NoError(t, m.Reset("On"))
 	targets, images := startedHTTPBoot(t, pm, 1)
 	assert.Equal(t, []string{"UefiHttp"}, targets, "boots from the network")
 	assert.Equal(t, []string{""}, images)
+
+	// Let the abandoned download finish (it may still create the download
+	// directory) before TempDir is removed
+	select {
+	case <-dl.done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("abandoned download did not finish")
+	}
 }
 
 func TestHTTPBoot_CredentialsInURI_Redacted(t *testing.T) {

@@ -53,7 +53,32 @@ func newDownloadMachine(t *testing.T, qmpMock *mockQMPClient, pm *mockProcessMan
 		m = New(qmpMock)
 	}
 	m.SetMediaOptions(MediaOptions{Dir: dir, InsecureTLS: true, Timeout: 5 * time.Second})
+	// Runs before TempDir is removed: stop downloads still running so that
+	// they do not write into the directory while it is being removed
+	t.Cleanup(func() { stopDownloads(t, m) })
 	return m, dir
+}
+
+// stopDownloads cancels the VirtualMedia and HTTP boot downloads in progress
+// and waits for them to end.
+func stopDownloads(t *testing.T, m *Machine) {
+	t.Helper()
+	m.mu.Lock()
+	var dls []*mediaDownload
+	for _, dl := range []*mediaDownload{m.download, m.httpBoot.download} {
+		if dl != nil {
+			dl.cancel()
+			dls = append(dls, dl)
+		}
+	}
+	m.mu.Unlock()
+	for _, dl := range dls {
+		select {
+		case <-dl.done:
+		case <-time.After(5 * time.Second):
+			t.Error("download did not end")
+		}
+	}
 }
 
 // downloadedPath waits for the download to finish and returns the local path
