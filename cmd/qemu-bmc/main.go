@@ -66,6 +66,7 @@ func main() {
 		for i, mac := range hw.MACAddresses {
 			log.Printf("NIC %d MAC: %s", i, mac)
 		}
+		systemInfo.Disks = probeDisks(cmdArgs)
 
 		qmpClient = qmp.NewDisconnectedClient(cfg.QMPSocket)
 		pm := qemu.NewProcessManager(cfg.QEMUBinary, cmdArgs, qemu.DefaultCommandFactory)
@@ -209,6 +210,23 @@ func main() {
 		// Give process time to exit
 		time.Sleep(500 * time.Millisecond)
 	}
+}
+
+// probeDisks finds the guest hard disks in the QEMU args and reads their
+// size with qemu-img. A disk whose size cannot be read is reported without
+// one.
+func probeDisks(cmdArgs []string) []redfish.Disk {
+	var disks []redfish.Disk
+	for i, d := range qemu.DisksFromArgs(cmdArgs) {
+		size, err := qemu.ImageVirtualSize("qemu-img", d.File, d.Format)
+		if err != nil {
+			log.Printf("WARN: disk %d size unknown: %v", i, err)
+		} else {
+			log.Printf("Disk %d: %s (%d bytes)", i, d.File, size)
+		}
+		disks = append(disks, redfish.Disk{CapacityBytes: size, Protocol: d.Protocol})
+	}
+	return disks
 }
 
 // resolveSystemUUID determines the system UUID for process management mode:

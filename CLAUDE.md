@@ -139,9 +139,16 @@ make container-test-all
 | GET/POST | `/redfish/v1/SessionService/Sessions` | Session collection / log in (POST needs no auth; 201 with X-Auth-Token and Location; 401 bad credentials; 503 over 64 sessions) |
 | GET/DELETE | `/redfish/v1/SessionService/Sessions/{id}` | Session / log out (204). Sessions are in memory and expire after SessionTimeout idle |
 | GET | `/redfish/v1/Systems` | System collection |
-| GET | `/redfish/v1/Systems/1` | Computer system (PowerState, Boot, MemorySummary, ProcessorSummary, EthernetInterfaces, VirtualMedia → Systems/1/VirtualMedia, Actions, Status, Links.ManagedBy → Managers/1, Links.Chassis → Chassis/1) |
+| GET | `/redfish/v1/Systems/1` | Computer system (PowerState, Boot, MemorySummary, ProcessorSummary, Processors, Storage, SimpleStorage, EthernetInterfaces, VirtualMedia → Systems/1/VirtualMedia, Actions, Status, Links.ManagedBy → Managers/1, Links.Chassis → Chassis/1) |
 | GET | `/redfish/v1/Systems/1/EthernetInterfaces` | NIC collection (one per guest NIC, command-line order) |
 | GET | `/redfish/v1/Systems/1/EthernetInterfaces/{n}` | NIC (MACAddress, LinkStatus: LinkUp while the VM runs) |
+| GET | `/redfish/v1/Systems/1/Processors` | Processor collection: CPU1, or no members when the CPU count (SystemInfo.CPUs) is 0 |
+| GET | `/redfish/v1/Systems/1/Processors/CPU1` | Processor (ProcessorType CPU, ProcessorArchitecture x86, InstructionSet x86-64, TotalCores = TotalThreads = CPU count, Status) |
+| GET | `/redfish/v1/Systems/1/Storage` | Storage collection: Storage/1, or no members without disks (legacy mode) |
+| GET | `/redfish/v1/Systems/1/Storage/1` | Storage (Drives → Disk{n}, no StorageControllers) |
+| GET | `/redfish/v1/Systems/1/Storage/1/Drives/Disk{n}` | Drive (CapacityBytes, MediaType HDD, Protocol PCIe/SATA/SAS/NVMe/USB, Name, Status). Disks are found in the QEMU args (`qemu.DisksFromArgs`: `-drive file=` except media=cdrom/pflash/floppy/mtd and CD devices, `-hda`..`-hdd`) and sized at start with `qemu-img info --output=json -U`; unknown capacity/protocol is omitted |
+| GET | `/redfish/v1/Systems/1/SimpleStorage` | SimpleStorage collection (deprecated, but Ironic inspection reads it first): SimpleStorage/1 or empty |
+| GET | `/redfish/v1/Systems/1/SimpleStorage/1` | Devices: [{Name, CapacityBytes, Status}] per disk |
 | GET | `/redfish/v1/Systems/1/VirtualMedia` | VirtualMedia collection (recommended location; same single CD drive as Managers/1/VirtualMedia, shared state) |
 | GET | `/redfish/v1/Systems/1/VirtualMedia/CD1` | VirtualMedia resource, same as Managers/1/VirtualMedia/CD1; `@odata.id` and action targets follow the URI requested. InsertMedia/EjectMedia actions below work under both |
 | PATCH | `/redfish/v1/Systems/1` | Boot device override (with ETag support) |

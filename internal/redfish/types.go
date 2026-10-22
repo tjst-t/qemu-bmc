@@ -49,6 +49,9 @@ type ComputerSystem struct {
 
 	MemorySummary      *MemorySummary    `json:"MemorySummary,omitempty"`
 	ProcessorSummary   *ProcessorSummary `json:"ProcessorSummary,omitempty"`
+	Processors         ODataID           `json:"Processors"`
+	Storage            ODataID           `json:"Storage"`
+	SimpleStorage      ODataID           `json:"SimpleStorage"`
 	EthernetInterfaces ODataID           `json:"EthernetInterfaces"`
 	VirtualMedia       ODataID           `json:"VirtualMedia"`
 	Status             ResourceStatus    `json:"Status"`
@@ -246,4 +249,71 @@ type Chassis struct {
 type ChassisLinks struct {
 	ComputerSystems []ODataID `json:"ComputerSystems"`
 	ManagedBy       []ODataID `json:"ManagedBy"`
+}
+
+// Collection is a generic Redfish resource collection
+type Collection struct {
+	ODataType    string    `json:"@odata.type"`
+	ODataID      string    `json:"@odata.id"`
+	Name         string    `json:"Name"`
+	MembersCount int       `json:"Members@odata.count"`
+	Members      []ODataID `json:"Members"`
+}
+
+// Processor represents a system processor
+type Processor struct {
+	ODataType             string         `json:"@odata.type"`
+	ODataID               string         `json:"@odata.id"`
+	ODataContext          string         `json:"@odata.context,omitempty"`
+	ID                    string         `json:"Id"`
+	Name                  string         `json:"Name"`
+	ProcessorType         string         `json:"ProcessorType"`
+	ProcessorArchitecture string         `json:"ProcessorArchitecture"`
+	InstructionSet        string         `json:"InstructionSet"`
+	TotalCores            int            `json:"TotalCores"`
+	TotalThreads          int            `json:"TotalThreads"`
+	Status                ResourceStatus `json:"Status"`
+}
+
+// Storage represents a storage subsystem and its drives
+type Storage struct {
+	ODataType    string         `json:"@odata.type"`
+	ODataID      string         `json:"@odata.id"`
+	ODataContext string         `json:"@odata.context,omitempty"`
+	ID           string         `json:"Id"`
+	Name         string         `json:"Name"`
+	Drives       []ODataID      `json:"Drives"`
+	DrivesCount  int            `json:"Drives@odata.count"`
+	Status       ResourceStatus `json:"Status"`
+}
+
+// Drive represents a disk drive
+type Drive struct {
+	ODataType     string         `json:"@odata.type"`
+	ODataID       string         `json:"@odata.id"`
+	ODataContext  string         `json:"@odata.context,omitempty"`
+	ID            string         `json:"Id"`
+	Name          string         `json:"Name"`
+	CapacityBytes int64          `json:"CapacityBytes,omitempty"`
+	MediaType     string         `json:"MediaType"`
+	Protocol      string         `json:"Protocol,omitempty"`
+	Status        ResourceStatus `json:"Status"`
+}
+
+// SimpleStorage represents a simple storage controller and its devices
+type SimpleStorage struct {
+	ODataType    string                `json:"@odata.type"`
+	ODataID      string                `json:"@odata.id"`
+	ODataContext string                `json:"@odata.context,omitempty"`
+	ID           string                `json:"Id"`
+	Name         string                `json:"Name"`
+	Devices      []SimpleStorageDevice `json:"Devices"`
+	Status       ResourceStatus        `json:"Status"`
+}
+
+// SimpleStorageDevice is a device of a simple storage controller
+type SimpleStorageDevice struct {
+	Name          string         `json:"Name"`
+	CapacityBytes int64          `json:"CapacityBytes,omitempty"`
+	Status        ResourceStatus `json:"Status"`
 }

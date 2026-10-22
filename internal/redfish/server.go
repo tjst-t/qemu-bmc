@@ -40,6 +40,14 @@ type SystemInfo struct {
 	MemoryMiB    int
 	CPUs         int
 	MACAddresses []string // per-NIC MAC, in QEMU command-line order
+	Disks        []Disk   // guest hard disks, in QEMU command-line order
+}
+
+// Disk is a guest hard disk reported under Systems/1 Storage and
+// SimpleStorage.
+type Disk struct {
+	CapacityBytes int64  // 0 if unknown (omitted)
+	Protocol      string // Redfish Protocol, empty if unknown (omitted)
 }
 
 // NewServer creates a new Redfish server
@@ -105,6 +113,18 @@ func (s *Server) setupRoutes() {
 	s.router.HandleFunc("/redfish/v1/Systems/{id}/EthernetInterfaces/", s.handleEthernetInterfaceCollection).Methods("GET")
 	s.router.HandleFunc("/redfish/v1/Systems/{id}/EthernetInterfaces/{nicid}", s.handleGetEthernetInterface).Methods("GET")
 	s.router.HandleFunc("/redfish/v1/Systems/{id}/EthernetInterfaces/{nicid}/", s.handleGetEthernetInterface).Methods("GET")
+
+	// Processors and storage
+	for _, p := range []string{"", "/"} {
+		sys := "/redfish/v1/Systems/{id}"
+		s.router.HandleFunc(sys+"/Processors"+p, s.handleProcessorCollection).Methods("GET")
+		s.router.HandleFunc(sys+"/Processors/{procid}"+p, s.handleGetProcessor).Methods("GET")
+		s.router.HandleFunc(sys+"/Storage"+p, s.handleStorageCollection).Methods("GET")
+		s.router.HandleFunc(sys+"/Storage/{stid}"+p, s.handleGetStorage).Methods("GET")
+		s.router.HandleFunc(sys+"/Storage/{stid}/Drives/{driveid}"+p, s.handleGetDrive).Methods("GET")
+		s.router.HandleFunc(sys+"/SimpleStorage"+p, s.handleSimpleStorageCollection).Methods("GET")
+		s.router.HandleFunc(sys+"/SimpleStorage/{stid}"+p, s.handleGetSimpleStorage).Methods("GET")
+	}
 
 	// Actions
 	s.router.HandleFunc("/redfish/v1/Systems/{id}/Actions/ComputerSystem.Reset", s.handleResetAction).Methods("POST")
