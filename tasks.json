@@ -863,7 +863,7 @@
       "number": 39,
       "kind": "task",
       "title": "UEFI HTTP ブート：BootSourceOverrideTarget=UefiHttp と Boot.HttpBootUri",
-      "status": "ready",
+      "status": "in-progress",
       "parent": "v0-9-0-uefi-http-secureboot",
       "dependsOn": [],
       "milestone": null,
@@ -875,7 +875,7 @@
       "refs": [],
       "threads": [],
       "createdAt": "2026-10-22T03:13:59.466Z",
-      "updatedAt": "2026-10-22T03:13:59.466Z",
+      "updatedAt": "2026-10-22T03:14:05.694Z",
       "closedAt": null,
       "extra": {}
     },
