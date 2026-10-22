@@ -662,7 +662,7 @@
       "number": 30,
       "kind": "task",
       "title": "Redfish: Systems・Managers・Chassis を Links でつなぎ、Status・ManagerType・Chassis の PowerState を足す",
-      "status": "ready",
+      "status": "in-progress",
       "parent": "v0-9-0-ironic-metal3-sushy-bmclib-ipmito",
       "dependsOn": [],
       "milestone": null,
@@ -674,7 +674,7 @@
       "refs": [],
       "threads": [],
       "createdAt": "2026-10-22T00:37:05.903Z",
-      "updatedAt": "2026-10-22T00:37:05.903Z",
+      "updatedAt": "2026-10-22T00:37:28.525Z",
       "closedAt": null,
       "extra": {}
     },
