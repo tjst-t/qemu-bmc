@@ -276,6 +276,31 @@ func TestForceRestart_WaitsForDownloadAndAttaches(t *testing.T) {
 	assert.Contains(t, calls[:indexOf(calls, "SystemReset")], "BlockdevChangeMedium", "the medium is attached before the reset")
 }
 
+func TestPowerCycle_WaitsForDownloadAndStartsWithImage(t *testing.T) {
+	gate := make(chan struct{})
+	srv := isoServer(t, map[string]chan struct{}{"/boot.iso": gate})
+	qmpMock := newMockQMPClient(qmp.StatusRunning)
+	pm := newMockProcessManager(true)
+	m, _ := newDownloadMachine(t, qmpMock, pm)
+
+	require.NoError(t, m.InsertMedia(srv.URL+"/boot.iso", "", ""))
+	require.NoError(t, m.Reset("PowerCycle"))
+	assert.Equal(t, PoweringOn, powerState(t, m))
+	time.Sleep(100 * time.Millisecond)
+	assert.NotContains(t, qmpMock.Calls(), "Quit")
+
+	// QEMU exits once it is told to quit
+	go func() {
+		for indexOf(qmpMock.Calls(), "Quit") < 0 {
+			time.Sleep(2 * time.Millisecond)
+		}
+		pm.exit()
+	}()
+	close(gate)
+	path := downloadedPath(t, m)
+	assert.Equal(t, []string{path}, startedMedia(t, pm, 1), "restarted with the image")
+}
+
 func indexOf(list []string, s string) int {
 	for i, v := range list {
 		if v == s {

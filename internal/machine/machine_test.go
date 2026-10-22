@@ -91,6 +91,13 @@ func (m *mockQMPClient) Quit() error {
 	return nil
 }
 
+func (m *mockQMPClient) InjectNMI() error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.calls = append(m.calls, "InjectNMI")
+	return nil
+}
+
 func (m *mockQMPClient) QueryBlock() ([]qmp.BlockInfo, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -1194,4 +1201,135 @@ func contains(list []string, s string) bool {
 		}
 	}
 	return false
+}
+
+// --- PowerCycle, ForceOn, PushPowerButton, Nmi ---
+
+func TestReset_PowerCycle_Legacy_On_HardReset(t *testing.T) {
+	mock := newMockQMPClient(qmp.StatusRunning)
+	m := New(mock)
+
+	require.NoError(t, m.Reset("PowerCycle"))
+	assert.Contains(t, mock.Calls(), "SystemReset")
+	assert.Equal(t, PowerOn, powerState(t, m))
+}
+
+func TestReset_PowerCycle_Legacy_Off_PowersOn(t *testing.T) {
+	mock := newMockQMPClient(qmp.StatusPaused)
+	m := New(mock)
+
+	require.NoError(t, m.Reset("PowerCycle"))
+	calls := mock.Calls()
+	assert.Equal(t, "Cont", calls[len(calls)-1])
+	assert.Equal(t, PowerOn, powerState(t, m))
+}
+
+func TestProcessMode_Reset_PowerCycle_RestartsProcess(t *testing.T) {
+	qmpMock := newMockQMPClient(qmp.StatusRunning)
+	pm := newMockProcessManager(false)
+	m := NewWithProcess(qmpMock, pm)
+
+	require.NoError(t, m.Reset("On"))
+	require.Equal(t, []string{"None"}, pm.StartCalls())
+
+	// The boot override applies to the new process, as on a real power on
+	require.NoError(t, m.SetBootOverride(BootOverride{Enabled: "Once", Target: "Pxe", Mode: "UEFI"}))
+	go func() {
+		assert.Eventually(t, func() bool {
+			return len(qmpMock.Calls()) > 0 && qmpMock.Calls()[len(qmpMock.Calls())-1] == "Quit"
+		}, 2*time.Second, time.Millisecond)
+		pm.exit()
+	}()
+	require.NoError(t, m.Reset("PowerCycle"))
+
+	assert.Equal(t, []string{"None", "Pxe"}, pm.StartCalls())
+	assert.Contains(t, qmpMock.Calls(), "Quit")
+	assert.NotContains(t, qmpMock.Calls(), "SystemReset")
+	assert.True(t, pm.IsRunning())
+	assert.Equal(t, "Disabled", m.GetBootOverride().Enabled)
+}
+
+func TestProcessMode_Reset_PowerCycle_Off_PowersOn(t *testing.T) {
+	qmpMock := newMockQMPClient(qmp.StatusRunning)
+	pm := newMockProcessManager(false)
+	m := NewWithProcess(qmpMock, pm)
+
+	require.NoError(t, m.Reset("PowerCycle"))
+	assert.Equal(t, []string{"Start"}, pm.Calls())
+	assert.NotContains(t, qmpMock.Calls(), "Quit")
+}
+
+func TestReset_ForceOn(t *testing.T) {
+	qmpMock := newMockQMPClient(qmp.StatusRunning)
+	pm := newMockProcessManager(false)
+	m := NewWithProcess(qmpMock, pm)
+
+	require.NoError(t, m.Reset("ForceOn"))
+	assert.Equal(t, []string{"Start"}, pm.Calls())
+
+	// Already on: no-op like On
+	require.NoError(t, m.Reset("ForceOn"))
+	assert.Equal(t, []string{"Start"}, pm.Calls())
+}
+
+func TestReset_PushPowerButton_Off_PowersOn(t *testing.T) {
+	mock := newMockQMPClient(qmp.StatusShutdown)
+	m := New(mock)
+
+	require.NoError(t, m.Reset("PushPowerButton"))
+	calls := mock.Calls()
+	assert.Equal(t, "Cont", calls[len(calls)-1])
+	assert.NotContains(t, calls, "SystemPowerdown")
+	assert.Equal(t, PowerOn, powerState(t, m))
+}
+
+func TestReset_PushPowerButton_On_GracefulShutdown(t *testing.T) {
+	mock := newMockQMPClient(qmp.StatusRunning)
+	m := newFastMachine(New(mock), 5*time.Second)
+
+	require.NoError(t, m.Reset("PushPowerButton"))
+	assert.Contains(t, mock.Calls(), "SystemPowerdown")
+	assert.NotContains(t, mock.Calls(), "Stop")
+	assert.Equal(t, PoweringOff, powerState(t, m))
+
+	mock.setStatus(qmp.StatusShutdown)
+	assert.Equal(t, PowerOff, powerState(t, m))
+}
+
+func TestReset_PushPowerButton_GuestIgnoresACPI_BackToOn(t *testing.T) {
+	mock := newMockQMPClient(qmp.StatusRunning)
+	m := newFastMachine(New(mock), 50*time.Millisecond)
+
+	require.NoError(t, m.Reset("PushPowerButton"))
+	assert.Equal(t, PoweringOff, powerState(t, m))
+	assert.Eventually(t, func() bool {
+		return powerState(t, m) == PowerOn
+	}, 2*time.Second, 5*time.Millisecond)
+}
+
+func TestReset_Nmi_On_InjectsNMI(t *testing.T) {
+	mock := newMockQMPClient(qmp.StatusRunning)
+	m := New(mock)
+
+	require.NoError(t, m.Reset("Nmi"))
+	assert.Contains(t, mock.Calls(), "InjectNMI")
+}
+
+func TestReset_Nmi_Off_Error(t *testing.T) {
+	qmpMock := newMockQMPClient(qmp.StatusRunning)
+	pm := newMockProcessManager(false)
+	m := NewWithProcess(qmpMock, pm)
+
+	err := m.Reset("Nmi")
+	assert.ErrorIs(t, err, ErrPoweredOff)
+	assert.NotContains(t, qmpMock.Calls(), "InjectNMI")
+}
+
+func TestReset_Nmi_KeepsGracefulShutdown(t *testing.T) {
+	mock := newMockQMPClient(qmp.StatusRunning)
+	m := newFastMachine(New(mock), 5*time.Second)
+
+	require.NoError(t, m.Reset("GracefulShutdown"))
+	require.NoError(t, m.Reset("Nmi"))
+	assert.Equal(t, PoweringOff, powerState(t, m))
 }

@@ -862,8 +862,10 @@ func (m *ipmiMockMachine) Reset(resetType string) error {
 	m.calls = append(m.calls, resetType)
 	if resetType == "ForceOff" || resetType == "GracefulShutdown" {
 		m.powerState = machine.PowerOff
-	} else if resetType == "On" {
+	} else if resetType == "On" || resetType == "PowerCycle" {
 		m.powerState = machine.PowerOn
+	} else if resetType == "Nmi" && m.powerState == machine.PowerOff {
+		return machine.ErrPoweredOff
 	}
 	return nil
 }

@@ -179,6 +179,7 @@ const (
 	CompletionCodeNotPresent          CompletionCode = 0xCB
 	CompletionCodeInvalidField        CompletionCode = 0xCC
 	CompletionCodeParameterOutOfRange CompletionCode = 0xC9
+	CompletionCodeNotInPresentState   CompletionCode = 0xD5
 	CompletionCodeUnspecified         CompletionCode = 0xFF
 )
 

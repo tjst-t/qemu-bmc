@@ -44,6 +44,10 @@ type Media struct {
 // inserted (unsupported scheme, missing file).
 var ErrInvalidMedia = errors.New("invalid media")
 
+// ErrPoweredOff is returned by Reset for an action that needs the VM to be
+// powered on (Nmi).
+var ErrPoweredOff = errors.New("VM is powered off")
+
 // ProcessManager controls the QEMU process lifecycle.
 type ProcessManager interface {
 	// Start launches QEMU with the given boot target and CD image ("" =
@@ -244,19 +248,45 @@ func (m *Machine) getQMPStatusProcess() (qmp.Status, error) {
 // background, reporting PoweringOn until it is on. Any other power action
 // abandons a graceful action in progress.
 //
-// On and ForceRestart while a VirtualMedia image is downloading return at
-// once and run in the background when the download ends (or the media
-// timeout, counted from the request, expires), reporting PoweringOn
+// PowerCycle powers the VM off and on again (in process management mode the
+// QEMU process is restarted, so the boot override and VirtualMedia apply; in
+// legacy mode it is a hard reset), or just on if it is off. ForceOn is On.
+// PushPowerButton is On if the VM is off, else GracefulShutdown. Nmi injects
+// an NMI into the guest and fails with ErrPoweredOff if the VM is off; it
+// does not end a graceful action in progress.
+//
+// On, ForceRestart and PowerCycle while a VirtualMedia image is downloading
+// return at once and run in the background when the download ends (or the
+// media timeout, counted from the request, expires), reporting PoweringOn
 // meanwhile, so that the VM boots from the image without blocking the caller
 // (the IPMI server handles one request at a time).
 func (m *Machine) Reset(resetType string) error {
 	mediaDeadline := m.mediaDeadline()
 	m.resetMu.Lock()
 	defer m.resetMu.Unlock()
+
+	if resetType == "Nmi" {
+		return m.injectNMI()
+	}
+	switch resetType {
+	case "ForceOn":
+		resetType = "On"
+	case "PushPowerButton", "PowerCycle":
+		state, err := m.rawPowerState()
+		if err != nil {
+			return err
+		}
+		if state == PowerOff {
+			resetType = "On"
+		} else if resetType == "PushPowerButton" {
+			resetType = "GracefulShutdown"
+		}
+	}
+
 	gen := m.resetGen.Add(1)
 	m.setTransition(gen, "")
 
-	if (resetType == "On" || resetType == "ForceRestart") && m.downloadPending() {
+	if (resetType == "On" || resetType == "ForceRestart" || resetType == "PowerCycle") && m.downloadPending() {
 		if resetType == "On" {
 			if state, err := m.rawPowerState(); err == nil && state == PowerOn {
 				return nil // already on, no-op
@@ -345,7 +375,7 @@ func (m *Machine) resetLegacy(resetType string, mediaDeadline time.Time) error {
 		return m.qmpClient.Stop()
 	case "GracefulShutdown":
 		return m.qmpClient.SystemPowerdown()
-	case "ForceRestart":
+	case "ForceRestart", "PowerCycle":
 		m.waitMediaDownload(mediaDeadline)
 		m.applyMedia()
 		return m.qmpClient.SystemReset()
@@ -410,6 +440,16 @@ func (m *Machine) resetProcessMode(resetType string, mediaDeadline time.Time) er
 		m.ConsumeBootOnce()
 		return nil
 
+	case "PowerCycle":
+		// Restart the process so that the boot override and VirtualMedia
+		// apply as on a real power on
+		if m.processManager.IsRunning() {
+			if err := m.resetProcessMode("ForceOff", mediaDeadline); err != nil {
+				return err
+			}
+		}
+		return m.resetProcessMode("On", mediaDeadline)
+
 	case "GracefulShutdown":
 		// QEMU exits by itself once the guest powers off
 		return m.qmpClient.SystemPowerdown()
@@ -420,6 +460,18 @@ func (m *Machine) resetProcessMode(resetType string, mediaDeadline time.Time) er
 	default:
 		return fmt.Errorf("unsupported reset type: %s", resetType)
 	}
+}
+
+// injectNMI sends an NMI to the guest. Callers must hold resetMu.
+func (m *Machine) injectNMI() error {
+	state, err := m.rawPowerState()
+	if err != nil {
+		return err
+	}
+	if state == PowerOff {
+		return ErrPoweredOff
+	}
+	return m.qmpClient.InjectNMI()
 }
 
 // watchGraceful follows a GracefulShutdown or GracefulRestart (Reset call

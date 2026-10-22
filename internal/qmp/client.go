@@ -226,6 +226,10 @@ func (c *qmpClient) Quit() error {
 	return c.execute("quit", nil)
 }
 
+func (c *qmpClient) InjectNMI() error {
+	return c.execute("inject-nmi", nil)
+}
+
 func (c *qmpClient) QueryBlock() ([]BlockInfo, error) {
 	raw, err := c.executeWithResponse("query-block", nil)
 	if err != nil {

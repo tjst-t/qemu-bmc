@@ -1,6 +1,7 @@
 package ipmi
 
 import (
+	"errors"
 	"log"
 
 	"github.com/tjst-t/qemu-bmc/internal/machine"
@@ -59,18 +60,20 @@ func handleChassisControl(reqData []byte, m MachineInterface) (CompletionCode, [
 	case ChassisControlPowerUp:
 		err = m.Reset("On")
 	case ChassisControlPowerCycle:
-		err = m.Reset("ForceOff")
-		if err == nil {
-			err = m.Reset("On")
-		}
+		// Off then on (QEMU restarted in process management mode), or just
+		// on if off
+		err = m.Reset("PowerCycle")
 	case ChassisControlHardReset:
 		err = m.Reset("ForceRestart")
 	case ChassisControlSoftOff:
 		// ACPI power button only; the guest is never forced off
 		err = m.Reset("GracefulShutdown")
 	case ChassisControlPulse:
-		// Diagnostic interrupt (NMI) is not supported; accept as no-op
-		log.Printf("IPMI: chassis control 0x%02x (no-op)", control)
+		// Diagnostic interrupt: NMI to the guest
+		err = m.Reset("Nmi")
+		if errors.Is(err, machine.ErrPoweredOff) {
+			return CompletionCodeNotInPresentState, nil
+		}
 	default:
 		return CompletionCodeInvalidField, nil
 	}

@@ -131,7 +131,7 @@ curl -k -u admin:password -X POST \
 - In process management mode (the container), the VM always has a CD drive. It is empty unless `VM_CDROM` is set, in which case that ISO is the initially inserted medium.
 - `Image` is a path inside the container, `/iso/boot.iso` or `file:///iso/boot.iso` (bind-mount the ISO, e.g. `-v ./iso:/iso:ro`), or an `http://` / `https://` URL. A missing `Image`, a nonexistent file or an unsupported scheme returns `400`; InsertMedia and EjectMedia return `204 No Content` on success.
 - An HTTP(S) image is downloaded by qemu-bmc into `VMEDIA_DIR`, then attached (QEMU in the image cannot read URLs itself). InsertMedia returns `204` without waiting for the download; meanwhile `GET` already reports the URL as `Image` with `Inserted: true`. `UserName` / `Password` in the InsertMedia request are sent as HTTP Basic auth. Credentials can also be put in the URL (`https://user:pass@host/boot.iso`); the password is then reported as `xxxxx` in `Image` and in the logs. Certificates are not verified unless `VMEDIA_INSECURE_TLS=false` (self-signed servers are common); to verify against your own CA, also mount it and set `SSL_CERT_FILE` (e.g. `-e SSL_CERT_FILE=/certs/ca.pem`).
-- A power on or reset (Redfish `On` / `ForceRestart`, IPMI `chassis power on` / `cycle` / `reset`) during a download is carried out once the download finishes (at most `VMEDIA_TIMEOUT` later), so the VM boots from the ISO. The request itself returns at once; the power state is `PoweringOn` meanwhile, and another power action (e.g. `ForceOff`) cancels it. If the download fails (e.g. `404`), the medium is ejected (`Inserted: false`) and the reason is logged. A download finishing while the VM runs is attached over QMP. Inserting another image or ejecting abandons the download and deletes the previously downloaded file.
+- A power on or reset (Redfish `On` / `ForceOn` / `ForceRestart` / `PowerCycle`, IPMI `chassis power on` / `cycle` / `reset`) during a download is carried out once the download finishes (at most `VMEDIA_TIMEOUT` later), so the VM boots from the ISO. The request itself returns at once; the power state is `PoweringOn` meanwhile, and another power action (e.g. `ForceOff`) cancels it. If the download fails (e.g. `404`), the medium is ejected (`Inserted: false`) and the reason is logged. A download finishing while the VM runs is attached over QMP. Inserting another image or ejecting abandons the download and deletes the previously downloaded file.
 - The medium is kept by qemu-bmc while the VM is powered off and attached when QEMU starts; while the VM is running it is swapped live over QMP.
 - Boot target `Cd` (Redfish `BootSourceOverrideTarget`, IPMI `chassis bootdev cdrom`) boots the inserted ISO in both BIOS and UEFI mode (the CD drive gets `bootindex=0`, which OVMF requires).
 - `GET .../VirtualMedia/CD1` reports `Image`, `ImageName`, `Inserted`, `ConnectedVia` (`URI` / `NotConnected`), `WriteProtected` (always `true`) and `MediaTypes`.
@@ -271,11 +271,15 @@ ipmitool user enable 3
 |-----------|----------|--------------|
 | `On` | Power on | `On` |
 | `ForceOff` | Power off immediately | `Off` |
+| `ForceOn` | Same as `On` | `On` |
 | `ForceRestart` | Hard reset | `On` |
+| `PowerCycle` | Power off immediately, then on again. In process management mode QEMU is restarted, so a boot override and VirtualMedia apply as on a power on (legacy mode: hard reset). If off, power on | `On` |
+| `Nmi` | Inject an NMI into the guest (QMP `inject-nmi`, e.g. Ironic `inject_nmi` for a crash dump). Does not end a `GracefulShutdown` in progress. 409 if the VM is off | unchanged |
+| `PushPowerButton` | If off, same as `On`; if on, same as `GracefulShutdown` | as `On` / `GracefulShutdown` |
 | `GracefulShutdown` | Press the ACPI power button. The VM is never forced off | `PoweringOff` until the guest powers off, then `Off`. If the guest has not powered off after `GRACEFUL_TIMEOUT` seconds (e.g. it ignores ACPI), back to `On` (logged) |
 | `GracefulRestart` | Press the ACPI power button, then power the VM back on once the guest has powered off | `PoweringOff`, then `PoweringOn` while powering on, then `On`. Back to `On` after `GRACEFUL_TIMEOUT` seconds if the guest does not power off |
 
-Another power action (Redfish or IPMI) during `PoweringOff` / `PoweringOn` ends the graceful action; the state then follows the new action. IPMI `chassis power soft` behaves like `GracefulShutdown`; `chassis power status` reports `PoweringOff` / `PoweringOn` as on.
+Another power action (Redfish or IPMI) during `PoweringOff` / `PoweringOn` ends the graceful action; the state then follows the new action. IPMI `chassis power soft` behaves like `GracefulShutdown`, `chassis power cycle` like `PowerCycle` and `chassis power diag` like `Nmi`; `chassis power status` reports `PoweringOff` / `PoweringOn` as on.
 
 ## IPMI Commands
 
@@ -287,7 +291,7 @@ Another power action (Redfish or IPMI) during `PoweringOff` / `PoweringOn` ends 
 | Get Channel Auth Capabilities | Auth type negotiation |
 | Get Channel Cipher Suites | Cipher suite list (suites 3 and 17) |
 | Get Chassis Status | Power state query |
-| Chassis Control | Power on/off/cycle/reset |
+| Chassis Control | Power on/off/cycle/reset, soft off, diag (NMI; `0xD5` if the VM is off) |
 | Set/Get Boot Options | Boot device override |
 | Get SDR Repository Info / Reserve SDR Repository / Get SDR | One record only: the BMC's own MC Device Locator, so `sdr list` is empty (ipmitool rebuilds an empty repository and prints errors) |
 | Get Device SDR Info / Reserve Device SDR Repository / Get Device SDR | No device SDRs |
@@ -522,7 +526,7 @@ curl -k -u admin:password -X POST \
 - プロセス管理モード（コンテナ）では、VM に CD ドライブが常に付く。`VM_CDROM` が無ければ空、あればその ISO が最初に差さった状態になる。
 - `Image` はコンテナ内のパス（`/iso/boot.iso` または `file:///iso/boot.iso`。ISO はバインドマウントする（例: `-v ./iso:/iso:ro`））か、`http://` / `https://` の URL。`Image` が空・ファイルが無い・未対応の形式なら `400`。InsertMedia・EjectMedia は成功すると `204 No Content`。
 - HTTP(S) の URL は qemu-bmc が `VMEDIA_DIR` へダウンロードしてから差す（イメージの QEMU は URL を直接読めない）。InsertMedia はダウンロードを待たずに `204` を返し、ダウンロード中も `GET` は `Image` に URL、`Inserted: true` を返す。InsertMedia の `UserName` / `Password` は HTTP の Basic 認証に使う。URL に認証情報を書いてもよい（`https://user:pass@host/boot.iso`）。そのときパスワードは `Image` とログでは `xxxxx` に伏せる。自己署名のサーバが多いので、`VMEDIA_INSECURE_TLS=false` にしない限り証明書は検証しない。自前の CA で検証するなら、CA をマウントして `SSL_CERT_FILE` を指す（例 `-e SSL_CERT_FILE=/certs/ca.pem`）。
-- ダウンロード中に電源オン・リセット（Redfish の `On` / `ForceRestart`、IPMI の `chassis power on` / `cycle` / `reset`）が来たら、ダウンロードが終わってから（最大 `VMEDIA_TIMEOUT` 待つ）実行するので、ISO から起動できる。要求そのものはすぐ返り、その間の電源状態は `PoweringOn`。別の電源操作（`ForceOff` など）が来たら取りやめる。ダウンロードに失敗したら（`404` など）中身を外し（`Inserted: false`）、理由をログに出す。VM が動いている間に終わったら QMP で差す。別のイメージを差す・Eject すると、ダウンロードはやめ、前に落としたファイルは消す。
+- ダウンロード中に電源オン・リセット（Redfish の `On` / `ForceOn` / `ForceRestart` / `PowerCycle`、IPMI の `chassis power on` / `cycle` / `reset`）が来たら、ダウンロードが終わってから（最大 `VMEDIA_TIMEOUT` 待つ）実行するので、ISO から起動できる。要求そのものはすぐ返り、その間の電源状態は `PoweringOn`。別の電源操作（`ForceOff` など）が来たら取りやめる。ダウンロードに失敗したら（`404` など）中身を外し（`Inserted: false`）、理由をログに出す。VM が動いている間に終わったら QMP で差す。別のイメージを差す・Eject すると、ダウンロードはやめ、前に落としたファイルは消す。
 - 差した中身は電源オフ中も qemu-bmc が覚えていて、QEMU を起動するときに付ける。VM が動いていれば QMP でその場で差し替える。
 - 起動先 `Cd`（Redfish の `BootSourceOverrideTarget`、IPMI の `chassis bootdev cdrom`）で、差した ISO から起動する。BIOS・UEFI のどちらでも動く（UEFI（OVMF）のため CD ドライブに `bootindex=0` を付ける）。
 - `GET .../VirtualMedia/CD1` は `Image`・`ImageName`・`Inserted`・`ConnectedVia`（`URI` / `NotConnected`）・`WriteProtected`（常に `true`）・`MediaTypes` を返す。
@@ -662,11 +666,15 @@ ipmitool user enable 3
 |-----------|------|--------------|
 | `On` | 電源を入れる | `On` |
 | `ForceOff` | すぐに電源を切る | `Off` |
+| `ForceOn` | `On` と同じ | `On` |
 | `ForceRestart` | ハードリセット | `On` |
+| `PowerCycle` | すぐに電源を切って入れ直す。プロセス管理モードでは QEMU を起こし直すので、起動先の上書きと VirtualMedia が電源オンと同じように効く（レガシーモードはハードリセット）。切れていれば電源を入れる | `On` |
+| `Nmi` | ゲストに NMI を送る（QMP の `inject-nmi`。Ironic の `inject_nmi` でクラッシュダンプを取るときなど）。途中の `GracefulShutdown` は打ち切らない。電源が切れていれば 409 | 変わらない |
+| `PushPowerButton` | 切れていれば `On`、入っていれば `GracefulShutdown` と同じ | `On` / `GracefulShutdown` と同じ |
 | `GracefulShutdown` | ACPI の電源ボタンを押す。強制的には切らない | ゲストが電源を切るまで `PoweringOff`、切れたら `Off`。`GRACEFUL_TIMEOUT` 秒たっても切れなければ（ACPI に応えないゲストなど）`On` に戻す（ログに出す） |
 | `GracefulRestart` | ACPI の電源ボタンを押し、ゲストが電源を切ったら入れ直す | `PoweringOff` → 入れ直す間 `PoweringOn` → `On`。`GRACEFUL_TIMEOUT` 秒たっても切れなければ `On` に戻す |
 
-`PoweringOff` / `PoweringOn` の間に別の電源操作（Redfish でも IPMI でも）が来たら途中の状態は打ち切り、その操作の結果に従う。IPMI の `chassis power soft` は `GracefulShutdown` と同じ。`chassis power status` は `PoweringOff` / `PoweringOn` を on として返す。
+`PoweringOff` / `PoweringOn` の間に別の電源操作（Redfish でも IPMI でも）が来たら途中の状態は打ち切り、その操作の結果に従う。IPMI の `chassis power soft` は `GracefulShutdown`、`chassis power cycle` は `PowerCycle`、`chassis power diag` は `Nmi` と同じ。`chassis power status` は `PoweringOff` / `PoweringOn` を on として返す。
 
 ## IPMI コマンド
 
@@ -678,7 +686,7 @@ ipmitool user enable 3
 | Get Channel Auth Capabilities | 認証方式ネゴシエーション |
 | Get Channel Cipher Suites | 暗号スイート一覧（3 と 17） |
 | Get Chassis Status | 電源状態取得 |
-| Chassis Control | 電源オン/オフ/サイクル/リセット |
+| Chassis Control | 電源オン/オフ/サイクル/リセット、ソフトオフ、diag（NMI。電源が切れていれば `0xD5`） |
 | Set/Get Boot Options | ブートデバイス変更 |
 | Get SDR Repository Info / Reserve SDR Repository / Get SDR | レコードは BMC 自身の MC Device Locator の1件だけ。`sdr list` は空（ipmitool はリポジトリが空だと作り直そうとしてエラーを出すため） |
 | Get Device SDR Info / Reserve Device SDR Repository / Get Device SDR | Device SDR は無い |

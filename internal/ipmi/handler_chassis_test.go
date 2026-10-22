@@ -43,10 +43,11 @@ func TestChassisControl(t *testing.T) {
 	}{
 		{"PowerOff", ChassisControlPowerDown, machine.PowerOn, []string{"ForceOff"}},
 		{"PowerOn", ChassisControlPowerUp, machine.PowerOff, []string{"On"}},
-		{"PowerCycle", ChassisControlPowerCycle, machine.PowerOn, []string{"ForceOff", "On"}},
+		{"PowerCycle", ChassisControlPowerCycle, machine.PowerOn, []string{"PowerCycle"}},
+		{"PowerCycle while off", ChassisControlPowerCycle, machine.PowerOff, []string{"PowerCycle"}},
 		{"HardReset", ChassisControlHardReset, machine.PowerOn, []string{"ForceRestart"}},
 		{"SoftOff", ChassisControlSoftOff, machine.PowerOn, []string{"GracefulShutdown"}},
-		{"Pulse", ChassisControlPulse, machine.PowerOn, nil},
+		{"Pulse (diag) sends NMI", ChassisControlPulse, machine.PowerOn, []string{"Nmi"}},
 	}
 
 	for _, tt := range tests {
@@ -61,6 +62,14 @@ func TestChassisControl(t *testing.T) {
 			assert.Equal(t, tt.wantCalls, mock.calls)
 		})
 	}
+}
+
+func TestChassisControl_PulsePoweredOff(t *testing.T) {
+	mock := newIPMIMockMachine(machine.PowerOff)
+	msg := &IPMIMessage{Command: CmdChassisControl, Data: []byte{ChassisControlPulse}}
+	code, _ := handleChassisCommand(msg, mock)
+	assert.Equal(t, CompletionCodeNotInPresentState, code)
+	assert.Equal(t, []string{"Nmi"}, mock.calls)
 }
 
 func TestSetBootOptions_PXE(t *testing.T) {

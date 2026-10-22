@@ -18,6 +18,8 @@ type Client interface {
 	Stop() error
 	Cont() error
 	Quit() error
+	// InjectNMI injects a non-maskable interrupt into the guest.
+	InjectNMI() error
 	QueryBlock() ([]BlockInfo, error)
 	// The id argument of the medium commands is the guest device's qdev ID
 	// or QOM path (BlockInfo.QDev).

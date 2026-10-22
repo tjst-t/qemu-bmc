@@ -152,7 +152,7 @@ make container-test-all
 | GET | `/redfish/v1/Systems/1/VirtualMedia` | VirtualMedia collection (recommended location; same single CD drive as Managers/1/VirtualMedia, shared state) |
 | GET | `/redfish/v1/Systems/1/VirtualMedia/CD1` | VirtualMedia resource, same as Managers/1/VirtualMedia/CD1; `@odata.id` and action targets follow the URI requested. InsertMedia/EjectMedia actions below work under both |
 | PATCH | `/redfish/v1/Systems/1` | Boot device override (with ETag support) |
-| POST | `/redfish/v1/Systems/1/Actions/ComputerSystem.Reset` | Power control |
+| POST | `/redfish/v1/Systems/1/Actions/ComputerSystem.Reset` | Power control: On, ForceOff, GracefulShutdown, ForceRestart, GracefulRestart, PowerCycle (process mode: QEMU stopped and restarted so boot override/VirtualMedia apply; legacy: system_reset; off: On), ForceOn (= On), Nmi (QMP inject-nmi; 409 when off; does not end a graceful action), PushPowerButton (off: On, on: GracefulShutdown) |
 | GET | `/redfish/v1/Managers` | Manager collection |
 | GET | `/redfish/v1/Managers/1` | BMC manager (ManagerType BMC, FirmwareVersion = qemu-bmc version via SetFirmwareVersion, Status, Links.ManagerForServers → Systems/1, Links.ManagerInChassis → Chassis/1) |
 | GET | `/redfish/v1/Managers/1/VirtualMedia` | VirtualMedia collection (deprecated location, kept for gofish/bmclib) |
@@ -177,7 +177,7 @@ Middleware: auth (X-Auth-Token session or Basic; GET /redfish, GET /redfish/v1 a
 | Close Session | App | 0x3C | Session teardown |
 | Get Channel Cipher Suites | App | 0x54 | Cipher suite list (suites 3 and 17) |
 | Get Chassis Status | Chassis (0x00) | 0x01 | Power state query |
-| Chassis Control | Chassis | 0x02 | Power on/off/cycle/reset, soft off (ACPI power button, never forced); diag pulse is a no-op |
+| Chassis Control | Chassis | 0x02 | Power on/off/cycle/reset, soft off (ACPI power button, never forced); cycle = Redfish PowerCycle; diag = Nmi (0xD5 when off) |
 | Chassis Identify | Chassis | 0x04 | Identify LED (log only) |
 | Set Boot Options | Chassis | 0x08 | Boot device override |
 | Get Boot Options | Chassis | 0x09 | Boot device query |

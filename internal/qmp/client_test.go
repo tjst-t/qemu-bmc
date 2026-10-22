@@ -75,6 +75,22 @@ func TestClient_SystemReset(t *testing.T) {
 	assert.Equal(t, "system_reset", mockQMP.LastCommand())
 }
 
+func TestClient_InjectNMI(t *testing.T) {
+	socketPath := testSocketPath(t)
+	mockQMP := newMockQMPServer(t, socketPath)
+	defer mockQMP.Close()
+
+	time.Sleep(50 * time.Millisecond)
+
+	client, err := NewClient(socketPath)
+	require.NoError(t, err)
+	defer client.Close()
+
+	err = client.InjectNMI()
+	require.NoError(t, err)
+	assert.Equal(t, "inject-nmi", mockQMP.LastCommand())
+}
+
 func TestClient_Quit(t *testing.T) {
 	socketPath := testSocketPath(t)
 	mockQMP := newMockQMPServer(t, socketPath)
