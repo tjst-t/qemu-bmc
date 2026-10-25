@@ -41,12 +41,14 @@ func main() {
 	var m *machine.Machine
 	systemInfo := redfish.SystemInfo{MemoryMiB: cfg.VMMemoryMiB, CPUs: cfg.VMCPUs}
 	var systemUUID string
+	var identity qemu.SMBIOS
 
 	if len(qemuArgs) > 0 {
 		// Process management mode
 		log.Printf("Process management mode: managing QEMU lifecycle")
 
 		systemUUID = resolveSystemUUID(cfg, qemuArgs)
+		identity = systemIdentity(cfg, systemUUID)
 
 		cmdArgs, err := qemu.BuildCommandLine(qemuArgs, qemu.BuildOptions{
 			QMPSocketPath: cfg.QMPSocket,
@@ -56,6 +58,9 @@ func main() {
 			// NICs without a configured MAC get one derived from the UUID,
 			// so it is stable per node and differs between nodes
 			DeriveMAC: sysuuid.MustParse(systemUUID).MAC,
+			// The guest sees the same identity as Redfish reports (a
+			// -smbios type the user passes wins)
+			SMBIOS: identity,
 		})
 		if err != nil {
 			log.Fatalf("Invalid QEMU arguments: %v", err)
@@ -130,6 +135,8 @@ func main() {
 			}
 			systemUUID = u.String()
 		}
+		// The external QEMU's SMBIOS cannot be changed; only report it
+		identity = systemIdentity(cfg, systemUUID)
 
 		// Likewise, NICs are only reported when their MACs are configured
 		// (they must match the external QEMU's NICs).
@@ -145,6 +152,12 @@ func main() {
 		}
 	}
 	defer qmpClient.Close()
+	systemInfo.Manufacturer = identity.Manufacturer
+	systemInfo.Model = identity.Product
+	systemInfo.SerialNumber = identity.Serial
+	systemInfo.SKU = identity.SKU
+	log.Printf("System identity: manufacturer=%q model=%q serial=%q sku=%q",
+		identity.Manufacturer, identity.Product, identity.Serial, identity.SKU)
 	m.SetGracefulTimeout(cfg.GracefulTimeout)
 	m.SetMediaOptions(machine.MediaOptions{
 		Dir:         cfg.VMediaDir,
@@ -271,4 +284,20 @@ func resolveSystemUUID(cfg *config.Config, qemuArgs []string) string {
 	}
 	log.Printf("System UUID: %s (source: %s)", u, src)
 	return u.String()
+}
+
+// systemIdentity returns the system identity from VM_MANUFACTURER, VM_MODEL,
+// VM_SERIAL_NUMBER and VM_SKU. Without VM_SERIAL_NUMBER the serial number is
+// derived from the system UUID (none if the UUID is unknown).
+func systemIdentity(cfg *config.Config, systemUUID string) qemu.SMBIOS {
+	id := qemu.SMBIOS{
+		Manufacturer: cfg.VMManufacturer,
+		Product:      cfg.VMModel,
+		Serial:       cfg.VMSerialNumber,
+		SKU:          cfg.VMSKU,
+	}
+	if id.Serial == "" && systemUUID != "" {
+		id.Serial = sysuuid.MustParse(systemUUID).SerialNumber()
+	}
+	return id
 }

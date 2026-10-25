@@ -182,6 +182,15 @@ curl -k -u admin:password -X POST https://localhost/redfish/v1/Systems/1/SecureB
 - `VM_SECURE_BOOT` sets the initial `SecureBootEnable`. A PATCHed value is kept in memory only: after qemu-bmc restarts it is `VM_SECURE_BOOT` again (the VARS files stay).
 - In BIOS mode and legacy mode `Systems/1` has no `SecureBoot` link and `/SecureBoot` returns `404`.
 
+#### System identity (SMBIOS)
+
+The guest's SMBIOS and Redfish show the same manufacturer, model and serial number, so a management tool can match the machine it sees over Redfish with what the OS sees (`dmidecode`, Ironic inspection).
+
+- `VM_MANUFACTURER`, `VM_MODEL`, `VM_SERIAL_NUMBER` and `VM_SKU` are reported as `Manufacturer`, `Model`, `SerialNumber` and `SKU` on `Systems/1` (`Chassis/1` has the first three).
+- In process management mode qemu-bmc starts QEMU with `-smbios type=1` (system), `type=2` (baseboard) and `type=3` (chassis) holding the same values. Commas in values are escaped (`,,`) as QEMU requires.
+- An `-smbios type=N` you pass yourself (e.g. in `QEMU_EXTRA_ARGS`) wins: qemu-bmc then does not add that type. Redfish still reports the environment variables, so set them to the same values or the two will differ.
+- In legacy mode the external QEMU's SMBIOS cannot be changed; the values are only reported via Redfish.
+
 ### Authentication and sessions
 
 Every request needs credentials (`IPMI_USER` / `IPMI_PASS`), except `GET /redfish`, `GET /redfish/v1` and the login request. Use HTTP Basic auth, or log in once and send the session token in `X-Auth-Token`:
@@ -280,7 +289,7 @@ ipmitool user enable 3
 | GET | `/redfish/v1/SessionService/Sessions/{id}` | Session |
 | DELETE | `/redfish/v1/SessionService/Sessions/{id}` | Log out (204) |
 | GET | `/redfish/v1/Systems` | System collection |
-| GET | `/redfish/v1/Systems/1` | Computer system (Status, Processors, Storage, SimpleStorage, VirtualMedia; Links: ManagedBy Managers/1, Chassis Chassis/1) |
+| GET | `/redfish/v1/Systems/1` | Computer system (Manufacturer, Model, SerialNumber, SKU (if `VM_SKU` is set), Status, Processors, Storage, SimpleStorage, VirtualMedia; Links: ManagedBy Managers/1, Chassis Chassis/1) |
 | PATCH | `/redfish/v1/Systems/1` | Boot device override (`BootSourceOverrideTarget` incl. `UefiHttp`, `Boot.HttpBootUri`; see [UEFI HTTP boot](#uefi-http-boot)) |
 | POST | `/redfish/v1/Systems/1/Actions/ComputerSystem.Reset` | Power control |
 | GET/PATCH | `/redfish/v1/Systems/1/SecureBoot` | Secure Boot (`SecureBootEnable`, `SecureBootCurrentBoot`, `SecureBootMode`; UEFI in process management mode only, else `404`; see [Secure Boot](#secure-boot)) |
@@ -302,13 +311,13 @@ ipmitool user enable 3
 | POST | `/redfish/v1/Systems/1/VirtualMedia/CD1/Actions/VirtualMedia.InsertMedia` | Insert an ISO (204) |
 | POST | `/redfish/v1/Systems/1/VirtualMedia/CD1/Actions/VirtualMedia.EjectMedia` | Eject media (204) |
 | GET | `/redfish/v1/Managers` | Manager collection |
-| GET | `/redfish/v1/Managers/1` | BMC manager (ManagerType BMC, FirmwareVersion = qemu-bmc version, Status; Links: ManagerForServers Systems/1, ManagerInChassis Chassis/1) |
+| GET | `/redfish/v1/Managers/1` | BMC manager (ManagerType BMC, Manufacturer and Model `qemu-bmc`, FirmwareVersion = qemu-bmc version, Status; Links: ManagerForServers Systems/1, ManagerInChassis Chassis/1) |
 | GET | `/redfish/v1/Managers/1/VirtualMedia` | VirtualMedia collection (deprecated location; same drive as Systems/1/VirtualMedia) |
 | GET | `/redfish/v1/Managers/1/VirtualMedia/CD1` | VirtualMedia resource (ImageName only while inserted) |
 | POST | `.../VirtualMedia.InsertMedia` | Insert an ISO (container path or HTTP(S) URL; 204) |
 | POST | `.../VirtualMedia.EjectMedia` | Eject media (204) |
 | GET | `/redfish/v1/Chassis` | Chassis collection |
-| GET | `/redfish/v1/Chassis/1` | Chassis resource (PowerState same as Systems/1, Status; Links: ComputerSystems Systems/1, ManagedBy Managers/1) |
+| GET | `/redfish/v1/Chassis/1` | Chassis resource (PowerState same as Systems/1, Manufacturer, Model and SerialNumber same as Systems/1, Status; Links: ComputerSystems Systems/1, ManagedBy Managers/1) |
 | GET | `/novnc/` | Redirect to noVNC UI |
 | GET | `/novnc/vnc.html` | Browser-based VNC console |
 | GET | `/websockify` | WebSocket-to-VNC proxy |
@@ -373,6 +382,10 @@ Another power action (Redfish or IPMI) during `PoweringOff` / `PoweringOn` ends 
 | `SYSTEM_UUID` | (derived) | Fixed system UUID, passed to QEMU as `-uuid` and reported by Redfish `Systems/1` `UUID` and IPMI `mc guid`. If unset, it is read from `SYSTEM_UUID_FILE`, or derived from the hostname and saved there. Set it (or use a fixed `--hostname` / a mounted `/vm`) to keep it across container re-creation |
 | `SYSTEM_UUID_FILE` | `<VM_DISK dir>/system-uuid` | Where a derived UUID is persisted |
 | `VM_MACS` | (derived) | Comma-separated MAC addresses of the VM NICs, in order (an empty entry is derived). Unset MACs are derived from the system UUID, so they stay fixed per node and do not overlap between nodes. Reported by Redfish `Systems/1/EthernetInterfaces` |
+| `VM_MANUFACTURER` | `QEMU` | System manufacturer. In process management mode put into the guest SMBIOS (`-smbios type=1/2/3`); reported as Redfish `Systems/1` / `Chassis/1` `Manufacturer` |
+| `VM_MODEL` | `qemu-bmc` | System model: SMBIOS product (type 1 and 2), Redfish `Model` |
+| `VM_SERIAL_NUMBER` | (derived) | System serial number: SMBIOS serial (type 1, 2 and 3), Redfish `SerialNumber`. Unset: `QBMC-` + the first 10 hex digits of the system UUID in upper case (stable as long as the UUID is; legacy mode without `SYSTEM_UUID` reports none) |
+| `VM_SKU` | (empty) | System SKU: SMBIOS sku (type 1 and 3), Redfish `Systems/1` `SKU`. Empty = not set |
 | `VM_SECURE_BOOT` | `false` | Initial Redfish `SecureBootEnable` (`true` boots the Secure Boot OVMF; needs `VM_BOOT_MODE=uefi`, else qemu-bmc exits with an error; ignored in legacy mode). A value PATCHed over Redfish is kept in memory only and reverts to this one when qemu-bmc restarts. See [Secure Boot](#secure-boot) |
 
 ### Container Configuration
@@ -629,6 +642,15 @@ curl -k -u admin:password -X POST https://localhost/redfish/v1/Systems/1/SecureB
 - `VM_SECURE_BOOT` が起動時の `SecureBootEnable`。PATCH した値はメモリにだけ持つので、qemu-bmc を起動し直すと `VM_SECURE_BOOT` の値に戻る（VARS のファイルは残る）。
 - BIOS モードとレガシーモードでは `Systems/1` に `SecureBoot` のリンクを出さず、`/SecureBoot` は `404`。
 
+#### システムの識別情報（SMBIOS）
+
+ゲストの SMBIOS と Redfish に同じメーカー・型番・シリアル番号を出す。管理ツールが Redfish で見た機械と、OS の中から見た機械（`dmidecode`、Ironic の inspect）を突き合わせられる。
+
+- `VM_MANUFACTURER`・`VM_MODEL`・`VM_SERIAL_NUMBER`・`VM_SKU` を `Systems/1` の `Manufacturer`・`Model`・`SerialNumber`・`SKU` で返す（`Chassis/1` は前の3つ）。
+- プロセス管理モードでは、QEMU を `-smbios type=1`（システム）・`type=2`（ベースボード）・`type=3`（シャーシ）に同じ値を入れて起動する。値の中の `,` は QEMU の流儀で `,,` にエスケープする。
+- 自分で `-smbios type=N` を渡すと（`QEMU_EXTRA_ARGS` など）そちらが勝ち、qemu-bmc はその type を足さない。Redfish は環境変数の値を返すので、食い違わないよう同じ値を環境変数にも入れること。
+- レガシーモードでは外の QEMU の SMBIOS は変えられないので、Redfish に出すだけ。
+
 ### 認証とセッション
 
 `GET /redfish`・`GET /redfish/v1` とログインの要求のほかは、認証情報（`IPMI_USER` / `IPMI_PASS`）が要る。HTTP の Basic 認証か、一度ログインして得たセッションのトークンを `X-Auth-Token` で送る：
@@ -727,7 +749,7 @@ ipmitool user enable 3
 | GET | `/redfish/v1/SessionService/Sessions/{id}` | セッション |
 | DELETE | `/redfish/v1/SessionService/Sessions/{id}` | ログアウト（204） |
 | GET | `/redfish/v1/Systems` | システムコレクション |
-| GET | `/redfish/v1/Systems/1` | コンピュータシステム（Status、Processors、Storage、SimpleStorage、VirtualMedia。Links: ManagedBy に Managers/1、Chassis に Chassis/1） |
+| GET | `/redfish/v1/Systems/1` | コンピュータシステム（Manufacturer、Model、SerialNumber、SKU（`VM_SKU` があれば）、Status、Processors、Storage、SimpleStorage、VirtualMedia。Links: ManagedBy に Managers/1、Chassis に Chassis/1） |
 | PATCH | `/redfish/v1/Systems/1` | ブートデバイス変更（`BootSourceOverrideTarget`（`UefiHttp` も）、`Boot.HttpBootUri`。「UEFI HTTP ブート」を参照） |
 | POST | `/redfish/v1/Systems/1/Actions/ComputerSystem.Reset` | 電源制御 |
 | GET/PATCH | `/redfish/v1/Systems/1/SecureBoot` | Secure Boot（`SecureBootEnable`・`SecureBootCurrentBoot`・`SecureBootMode`。プロセス管理モードの UEFI だけ、それ以外は `404`。「Secure Boot」を参照） |
@@ -749,13 +771,13 @@ ipmitool user enable 3
 | POST | `/redfish/v1/Systems/1/VirtualMedia/CD1/Actions/VirtualMedia.InsertMedia` | ISO を差す（204） |
 | POST | `/redfish/v1/Systems/1/VirtualMedia/CD1/Actions/VirtualMedia.EjectMedia` | メディア取り出し（204） |
 | GET | `/redfish/v1/Managers` | マネージャコレクション |
-| GET | `/redfish/v1/Managers/1` | BMC マネージャ（ManagerType は BMC、FirmwareVersion は qemu-bmc のバージョン、Status。Links: ManagerForServers に Systems/1、ManagerInChassis に Chassis/1） |
+| GET | `/redfish/v1/Managers/1` | BMC マネージャ（ManagerType は BMC、Manufacturer と Model は `qemu-bmc`、FirmwareVersion は qemu-bmc のバージョン、Status。Links: ManagerForServers に Systems/1、ManagerInChassis に Chassis/1） |
 | GET | `/redfish/v1/Managers/1/VirtualMedia` | VirtualMedia コレクション（非推奨の場所。Systems/1/VirtualMedia と同じドライブ） |
 | GET | `/redfish/v1/Managers/1/VirtualMedia/CD1` | VirtualMedia リソース（ImageName は差しているときだけ） |
 | POST | `.../VirtualMedia.InsertMedia` | ISO を差す（コンテナ内のパスか HTTP(S) の URL、204） |
 | POST | `.../VirtualMedia.EjectMedia` | メディア取り出し（204） |
 | GET | `/redfish/v1/Chassis` | シャーシコレクション |
-| GET | `/redfish/v1/Chassis/1` | シャーシリソース（PowerState は Systems/1 と同じ値、Status。Links: ComputerSystems に Systems/1、ManagedBy に Managers/1） |
+| GET | `/redfish/v1/Chassis/1` | シャーシリソース（PowerState、Manufacturer、Model、SerialNumber は Systems/1 と同じ値、Status。Links: ComputerSystems に Systems/1、ManagedBy に Managers/1） |
 | GET | `/novnc/` | noVNC UI へリダイレクト |
 | GET | `/novnc/vnc.html` | ブラウザ VNC コンソール |
 | GET | `/websockify` | WebSocket-to-VNC プロキシ |
@@ -820,6 +842,10 @@ ipmitool user enable 3
 | `SYSTEM_UUID` | （導出） | システム UUID を固定する。QEMU に `-uuid` で渡し、Redfish `Systems/1` の `UUID` と IPMI `mc guid` で返す。未指定なら `SYSTEM_UUID_FILE` から読み、無ければホスト名から導出してそこへ保存する。コンテナを作り直しても保つには、これを指定するか、`--hostname` を固定するか、`/vm` をマウントする |
 | `SYSTEM_UUID_FILE` | `<VM_DISK のディレクトリ>/system-uuid` | 導出した UUID の保存先 |
 | `VM_MACS` | （導出） | VM の NIC の MAC アドレスを順にカンマ区切りで指定する（空の項目は導出）。未指定の MAC はシステム UUID から導出するので、ノードごとに固定され、ノード間で重ならない。Redfish `Systems/1/EthernetInterfaces` で返す |
+| `VM_MANUFACTURER` | `QEMU` | システムのメーカー。プロセス管理モードではゲストの SMBIOS（`-smbios type=1/2/3`）に入れる。Redfish `Systems/1`・`Chassis/1` の `Manufacturer` で返す |
+| `VM_MODEL` | `qemu-bmc` | システムの型番。SMBIOS の product（type 1 と 2）、Redfish の `Model` |
+| `VM_SERIAL_NUMBER` | （導出） | システムのシリアル番号。SMBIOS の serial（type 1・2・3）、Redfish の `SerialNumber`。未指定なら `QBMC-` + システム UUID の16進の頭 10 文字を大文字にしたもの（UUID が同じなら同じ値。レガシーモードで `SYSTEM_UUID` が無ければ出さない） |
+| `VM_SKU` | （空） | システムの SKU。SMBIOS の sku（type 1 と 3）、Redfish `Systems/1` の `SKU`。空なら入れない・出さない |
 | `VM_SECURE_BOOT` | `false` | 起動時の Redfish `SecureBootEnable`（`true` で Secure Boot 用の OVMF で起動する。`VM_BOOT_MODE=uefi` が要り、そうでなければ qemu-bmc はエラーで終わる。レガシーモードでは無視）。Redfish で PATCH した値はメモリだけで、qemu-bmc を起動し直すとこの値に戻る。「Secure Boot」を参照 |
 
 ### コンテナ設定

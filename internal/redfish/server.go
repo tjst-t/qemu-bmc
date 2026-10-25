@@ -55,6 +55,13 @@ type SystemInfo struct {
 	CPUs         int
 	MACAddresses []string // per-NIC MAC, in QEMU command-line order
 	Disks        []Disk   // guest hard disks, in QEMU command-line order
+
+	// System identity, the same as in the guest's SMBIOS; reported on
+	// Systems/1 and Chassis/1 (SKU on Systems/1 only)
+	Manufacturer string
+	Model        string
+	SerialNumber string
+	SKU          string
 }
 
 // Disk is a guest hard disk reported under Systems/1 Storage and

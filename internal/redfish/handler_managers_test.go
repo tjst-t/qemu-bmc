@@ -53,6 +53,8 @@ func TestGetManager_LinksStatusFirmware(t *testing.T) {
 
 	mgr := getResource(t, srv, "/redfish/v1/Managers/1")
 	assert.Equal(t, "BMC", mgr["ManagerType"])
+	assert.Equal(t, "qemu-bmc", mgr["Manufacturer"])
+	assert.Equal(t, "qemu-bmc", mgr["Model"])
 	assert.Equal(t, "0.9.0", mgr["FirmwareVersion"])
 	assert.Equal(t, map[string]interface{}{"State": "Enabled", "Health": "OK"}, mgr["Status"])
 	assert.Equal(t, map[string]interface{}{

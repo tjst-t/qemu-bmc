@@ -119,3 +119,9 @@ func Resolve(opts Options) (UUID, Source, error) {
 	}
 	return u, SourceHostname, nil
 }
+
+// SerialNumber returns the default system serial number for the UUID:
+// "QBMC-" followed by the first 10 hex digits of the UUID in upper case.
+func (u UUID) SerialNumber() string {
+	return "QBMC-" + strings.ToUpper(hex.EncodeToString(u[:5]))
+}

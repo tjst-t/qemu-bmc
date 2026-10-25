@@ -79,6 +79,7 @@ type BuildOptions struct {
 	SystemUUID    string                 // injected as -uuid unless the user already set it
 	MACAddresses  []string               // per-NIC MACs in command-line order; empty entries use DeriveMAC
 	DeriveMAC     func(index int) string // MAC for a NIC without one; nil leaves it to QEMU
+	SMBIOS        SMBIOS                 // injected as -smbios type=1/2/3 unless the user already set that type
 }
 
 // ArgValue returns the value following the last occurrence of flag in args.
@@ -93,7 +94,7 @@ func ArgValue(args []string, flag string) (string, bool) {
 }
 
 // BuildCommandLine validates user args, applies defaults, and injects
-// qemu-bmc-managed arguments (QMP, serial, display, UUID, NIC MACs, the
+// qemu-bmc-managed arguments (QMP, serial, display, UUID, SMBIOS, NIC MACs, the
 // VirtualMedia CD drive).
 func BuildCommandLine(userArgs []string, opts BuildOptions) ([]string, error) {
 	if err := ValidateArgs(userArgs); err != nil {
@@ -126,6 +127,9 @@ func BuildCommandLine(userArgs []string, opts BuildOptions) ([]string, error) {
 			args = append(args, "-uuid", opts.SystemUUID)
 		}
 	}
+
+	// Inject the SMBIOS system identity
+	args = append(args, SMBIOSArgs(userArgs, opts.SMBIOS)...)
 
 	// Inject display none
 	args = append(args, "-display", "none")

@@ -94,3 +94,14 @@ func TestGetChassis_PowerStateError(t *testing.T) {
 	srv.ServeHTTP(w, req)
 	assert.Equal(t, http.StatusInternalServerError, w.Code)
 }
+
+func TestGetChassis_Identity(t *testing.T) {
+	srv := NewServer(newMockMachine(qmp.StatusRunning), "", "", "")
+	srv.SetSystemInfo(SystemInfo{Manufacturer: "QEMU", Model: "qemu-bmc", SerialNumber: "QBMC-0123456789", SKU: "SKU-1"})
+
+	chassis := getResource(t, srv, "/redfish/v1/Chassis/1")
+	assert.Equal(t, "QEMU", chassis["Manufacturer"])
+	assert.Equal(t, "qemu-bmc", chassis["Model"])
+	assert.Equal(t, "QBMC-0123456789", chassis["SerialNumber"])
+	assert.NotContains(t, chassis, "SKU")
+}

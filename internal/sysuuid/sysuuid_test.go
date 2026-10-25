@@ -145,3 +145,9 @@ func TestMAC_UniqueAcrossDerivedNodes(t *testing.T) {
 		}
 	}
 }
+
+func TestSerialNumber(t *testing.T) {
+	u := MustParse("0f1e2d3c-4b5a-4978-8695-a4b3c2d1e0f0")
+	assert.Equal(t, "QBMC-0F1E2D3C4B", u.SerialNumber())
+	assert.Equal(t, u.SerialNumber(), MustParse(u.String()).SerialNumber())
+}

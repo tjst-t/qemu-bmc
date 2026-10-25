@@ -45,6 +45,10 @@ type ComputerSystem struct {
 	ID           string                `json:"Id"`
 	Name         string                `json:"Name"`
 	UUID         string                `json:"UUID,omitempty"`
+	Manufacturer string                `json:"Manufacturer,omitempty"`
+	Model        string                `json:"Model,omitempty"`
+	SerialNumber string                `json:"SerialNumber,omitempty"`
+	SKU          string                `json:"SKU,omitempty"`
 	PowerState   string                `json:"PowerState"`
 	Boot         BootSource            `json:"Boot"`
 	Actions      ComputerSystemActions `json:"Actions"`
@@ -204,6 +208,8 @@ type Manager struct {
 	ID              string         `json:"Id"`
 	Name            string         `json:"Name"`
 	ManagerType     string         `json:"ManagerType"`
+	Manufacturer    string         `json:"Manufacturer"`
+	Model           string         `json:"Model"`
 	FirmwareVersion string         `json:"FirmwareVersion,omitempty"`
 	Status          ResourceStatus `json:"Status"`
 	VirtualMedia    ODataID        `json:"VirtualMedia"`
@@ -278,6 +284,9 @@ type Chassis struct {
 	ID           string         `json:"Id"`
 	Name         string         `json:"Name"`
 	ChassisType  string         `json:"ChassisType"`
+	Manufacturer string         `json:"Manufacturer,omitempty"`
+	Model        string         `json:"Model,omitempty"`
+	SerialNumber string         `json:"SerialNumber,omitempty"`
 	PowerState   string         `json:"PowerState"`
 	Status       ResourceStatus `json:"Status"`
 	Drives       *ODataID       `json:"Drives,omitempty"`

@@ -56,6 +56,11 @@ func (s *Server) handleGetSystem(w http.ResponseWriter, r *http.Request) {
 		Name:       "QEMU Virtual Machine",
 		UUID:       s.systemUUID,
 		PowerState: powerState,
+
+		Manufacturer: s.systemInfo.Manufacturer,
+		Model:        s.systemInfo.Model,
+		SerialNumber: s.systemInfo.SerialNumber,
+		SKU:          s.systemInfo.SKU,
 		Boot: BootSource{
 			BootSourceOverrideEnabled: boot.Enabled,
 			BootSourceOverrideTarget:  boot.Target,

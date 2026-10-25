@@ -109,6 +109,10 @@ make container-test-all
 | `SYSTEM_UUID` | (derived) | Fixed system UUID: passed to QEMU as `-uuid`, returned as Redfish `Systems/1` `UUID` and IPMI Get System GUID. If unset (process mode): `-uuid` in QEMU args, else `SYSTEM_UUID_FILE`, else a v5 UUID derived from the hostname (then written to `SYSTEM_UUID_FILE`). Legacy mode reports a UUID only when `SYSTEM_UUID` is set |
 | `SYSTEM_UUID_FILE` | (empty; entrypoint.sh sets `<VM_DISK dir>/system-uuid`) | File holding the persisted derived UUID |
 | `VM_MACS` | (derived) | Comma-separated per-NIC MACs in QEMU command-line order (empty entry = derive). Process mode: injected as `mac=` (`macaddr=` for `-net nic`) into NICs without one; a conflicting user `mac=` is rejected. Unset entries are `52:54:` + 4 bytes of SHA-256(system UUID, NIC index), so they are stable per node and differ between nodes. Reported as Systems/1 EthernetInterfaces. Legacy mode reports NICs only from `VM_MACS` |
+| `VM_MANUFACTURER` | `QEMU` | System manufacturer: Systems/1 + Chassis/1 `Manufacturer`; process mode also SMBIOS type 1/2/3 manufacturer (`qemu.SMBIOSArgs`, `,` escaped as `,,`; a user `-smbios type=N` wins and that type is not added, Redfish still reports the env values) |
+| `VM_MODEL` | `qemu-bmc` | Systems/1 + Chassis/1 `Model`; SMBIOS type 1/2 product |
+| `VM_SERIAL_NUMBER` | (derived) | Systems/1 + Chassis/1 `SerialNumber`; SMBIOS type 1/2/3 serial. Unset: `QBMC-` + first 10 hex digits of the system UUID, upper case (`sysuuid.UUID.SerialNumber`); none in legacy mode without `SYSTEM_UUID` |
+| `VM_SKU` | (empty) | Systems/1 `SKU` (omitted when empty); SMBIOS type 1/3 sku |
 | `VM_SECURE_BOOT` | `false` | Initial Redfish `SecureBootEnable` (process mode with OVMF pflash only; otherwise qemu-bmc exits with an error, legacy mode ignores it). PATCHed values are kept in memory only and revert to this on restart |
 | `VMEDIA_DIR` | `/vm/vmedia` (if `/vm` is writable, else `/tmp/vmedia`) | Where VirtualMedia http(s) images (`cd1-*.iso`) and the UEFI HTTP boot image (`httpboot-*.iso`) are downloaded; the previous download is deleted on replace/eject, leftovers at startup |
 | `VMEDIA_INSECURE_TLS` | `true` | Skip certificate verification for https VirtualMedia downloads |
@@ -141,7 +145,7 @@ make container-test-all
 | GET/POST | `/redfish/v1/SessionService/Sessions` | Session collection / log in (POST needs no auth; 201 with X-Auth-Token and Location; 401 bad credentials; 503 over 64 sessions) |
 | GET/DELETE | `/redfish/v1/SessionService/Sessions/{id}` | Session / log out (204). Sessions are in memory and expire after SessionTimeout idle |
 | GET | `/redfish/v1/Systems` | System collection |
-| GET | `/redfish/v1/Systems/1` | Computer system (PowerState, Boot, MemorySummary, ProcessorSummary, Processors, Storage, SimpleStorage, EthernetInterfaces, VirtualMedia → Systems/1/VirtualMedia, SecureBoot (UEFI process mode only), Actions, Status, Links.ManagedBy → Managers/1, Links.Chassis → Chassis/1) |
+| GET | `/redfish/v1/Systems/1` | Computer system (Manufacturer, Model, SerialNumber, SKU (VM_* identity), PowerState, Boot, MemorySummary, ProcessorSummary, Processors, Storage, SimpleStorage, EthernetInterfaces, VirtualMedia → Systems/1/VirtualMedia, SecureBoot (UEFI process mode only), Actions, Status, Links.ManagedBy → Managers/1, Links.Chassis → Chassis/1) |
 | GET | `/redfish/v1/Systems/1/EthernetInterfaces` | NIC collection (one per guest NIC, command-line order) |
 | GET | `/redfish/v1/Systems/1/EthernetInterfaces/{n}` | NIC (MACAddress, LinkStatus: LinkUp while the VM runs) |
 | GET | `/redfish/v1/Systems/1/Processors` | Processor collection: CPU1, or no members when the CPU count (SystemInfo.CPUs) is 0 |
@@ -160,13 +164,13 @@ make container-test-all
 | POST | `/redfish/v1/Systems/1/SecureBoot/Actions/SecureBoot.ResetKeys` | `ResetKeysType` `ResetAllKeysToDefault` only (else 400): deletes the secboot VARS, recopied from the template at the next QEMU start (204) |
 | POST | `/redfish/v1/Systems/1/Actions/ComputerSystem.Reset` | Power control: On, ForceOff, GracefulShutdown, ForceRestart, GracefulRestart, PowerCycle (process mode: QEMU stopped and restarted so boot override/VirtualMedia apply; legacy: system_reset; off: On), ForceOn (= On), Nmi (QMP inject-nmi; 409 when off; does not end a graceful action), PushPowerButton (off: On, on: GracefulShutdown) |
 | GET | `/redfish/v1/Managers` | Manager collection |
-| GET | `/redfish/v1/Managers/1` | BMC manager (ManagerType BMC, FirmwareVersion = qemu-bmc version via SetFirmwareVersion, Status, Links.ManagerForServers → Systems/1, Links.ManagerInChassis → Chassis/1) |
+| GET | `/redfish/v1/Managers/1` | BMC manager (ManagerType BMC, Manufacturer/Model `qemu-bmc`, FirmwareVersion = qemu-bmc version via SetFirmwareVersion, Status, Links.ManagerForServers → Systems/1, Links.ManagerInChassis → Chassis/1) |
 | GET | `/redfish/v1/Managers/1/VirtualMedia` | VirtualMedia collection (deprecated location, kept for gofish/bmclib) |
 | GET | `/redfish/v1/Managers/1/VirtualMedia/CD1` | VirtualMedia resource (ImageName omitted when nothing is inserted; Image stays as "") |
 | POST | `.../VirtualMedia/CD1/Actions/VirtualMedia.InsertMedia` | Insert ISO (container path `/...` or `file://`, or http(s) URL downloaded in the background with optional UserName/Password Basic auth; 204, 400 if missing). Kept while off, attached at QEMU start; power on/reset during a download runs once it ends (reports PoweringOn meanwhile), a failed download ejects |
 | POST | `.../VirtualMedia/CD1/Actions/VirtualMedia.EjectMedia` | Eject ISO (204) |
 | GET | `/redfish/v1/Chassis` | Chassis collection |
-| GET | `/redfish/v1/Chassis/1` | Chassis resource (PowerState same as Systems/1 incl. PoweringOff/PoweringOn, Status, Links.ComputerSystems → Systems/1, Links.ManagedBy → Managers/1) |
+| GET | `/redfish/v1/Chassis/1` | Chassis resource (PowerState same as Systems/1 incl. PoweringOff/PoweringOn, Manufacturer/Model/SerialNumber same as Systems/1, Status, Links.ComputerSystems → Systems/1, Links.ManagedBy → Managers/1) |
 
 Middleware: auth (X-Auth-Token session or Basic; Basic and session login accept IPMI_USER/IPMI_PASS and any enabled bmc.State user with a name and password, e.g. created in-band; GET /redfish, GET /redfish/v1 and POST Sessions are exempt), ETag (If-Match), trailing slash normalization
 

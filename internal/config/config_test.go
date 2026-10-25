@@ -12,7 +12,7 @@ import (
 
 func TestLoad_Defaults(t *testing.T) {
 	// Clear any env vars that might be set
-	for _, key := range []string{"QMP_SOCK", "IPMI_USER", "IPMI_PASS", "REDFISH_PORT", "IPMI_PORT", "SERIAL_ADDR", "TLS_CERT", "TLS_KEY", "VM_BOOT_MODE", "VM_IPMI_ADDR", "QEMU_BINARY", "POWER_ON_AT_START", "SYSTEM_UUID", "SYSTEM_UUID_FILE", "VM_MACS", "GRACEFUL_TIMEOUT", "VMEDIA_DIR", "VMEDIA_INSECURE_TLS", "VMEDIA_TIMEOUT", "VM_SECURE_BOOT"} {
+	for _, key := range []string{"QMP_SOCK", "IPMI_USER", "IPMI_PASS", "REDFISH_PORT", "IPMI_PORT", "SERIAL_ADDR", "TLS_CERT", "TLS_KEY", "VM_BOOT_MODE", "VM_IPMI_ADDR", "QEMU_BINARY", "POWER_ON_AT_START", "SYSTEM_UUID", "SYSTEM_UUID_FILE", "VM_MACS", "GRACEFUL_TIMEOUT", "VMEDIA_DIR", "VMEDIA_INSECURE_TLS", "VMEDIA_TIMEOUT", "VM_SECURE_BOOT", "VM_MANUFACTURER", "VM_MODEL", "VM_SERIAL_NUMBER", "VM_SKU"} {
 		os.Unsetenv(key)
 	}
 
@@ -33,10 +33,26 @@ func TestLoad_Defaults(t *testing.T) {
 	assert.Equal(t, "", cfg.SystemUUIDFile)
 	assert.Nil(t, cfg.VMMACs)
 	assert.False(t, cfg.VMSecureBoot)
+	assert.Equal(t, "QEMU", cfg.VMManufacturer)
+	assert.Equal(t, "qemu-bmc", cfg.VMModel)
+	assert.Equal(t, "", cfg.VMSerialNumber)
+	assert.Equal(t, "", cfg.VMSKU)
 	assert.Equal(t, 120*time.Second, cfg.GracefulTimeout)
 	assert.Equal(t, defaultVMediaDir("/vm"), cfg.VMediaDir)
 	assert.True(t, cfg.VMediaInsecureTLS)
 	assert.Equal(t, 10*time.Minute, cfg.VMediaTimeout)
+}
+
+func TestLoad_SystemIdentity(t *testing.T) {
+	t.Setenv("VM_MANUFACTURER", "Acme, Inc.")
+	t.Setenv("VM_MODEL", "R100")
+	t.Setenv("VM_SERIAL_NUMBER", "SN-1")
+	t.Setenv("VM_SKU", "SKU-1")
+	cfg := Load()
+	assert.Equal(t, "Acme, Inc.", cfg.VMManufacturer)
+	assert.Equal(t, "R100", cfg.VMModel)
+	assert.Equal(t, "SN-1", cfg.VMSerialNumber)
+	assert.Equal(t, "SKU-1", cfg.VMSKU)
 }
 
 func TestLoad_VMedia(t *testing.T) {

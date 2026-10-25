@@ -31,6 +31,8 @@ func (s *Server) handleGetManager(w http.ResponseWriter, r *http.Request) {
 		ID:              "1",
 		Name:            "QEMU BMC",
 		ManagerType:     "BMC",
+		Manufacturer:    "qemu-bmc",
+		Model:           "qemu-bmc",
 		FirmwareVersion: s.firmware,
 		Status:          statusOK,
 		VirtualMedia:    ODataID{ODataID: "/redfish/v1/Managers/1/VirtualMedia"},

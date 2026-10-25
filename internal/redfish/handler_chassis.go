@@ -31,6 +31,9 @@ func (s *Server) handleGetChassis(w http.ResponseWriter, r *http.Request) {
 		ID:           "1",
 		Name:         "QEMU Virtual Machine Chassis",
 		ChassisType:  "RackMount",
+		Manufacturer: s.systemInfo.Manufacturer,
+		Model:        s.systemInfo.Model,
+		SerialNumber: s.systemInfo.SerialNumber,
 		PowerState:   powerState,
 		Status:       statusOK,
 		Links: ChassisLinks{

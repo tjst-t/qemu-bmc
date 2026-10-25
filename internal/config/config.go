@@ -34,6 +34,15 @@ type Config struct {
 	VMMACs         []string // Per-NIC MAC addresses (VM_MACS); empty entries are derived from the system UUID
 	VMSecureBoot   bool     // Initial SecureBootEnable (VM_SECURE_BOOT)
 
+	// System identity put into the guest's SMBIOS (process management mode)
+	// and reported on Redfish Systems/1 and Chassis/1. An empty
+	// VMSerialNumber is derived from the system UUID; an empty VMSKU is
+	// not reported.
+	VMManufacturer string // VM_MANUFACTURER
+	VMModel        string // VM_MODEL
+	VMSerialNumber string // VM_SERIAL_NUMBER
+	VMSKU          string // VM_SKU
+
 	// GracefulTimeout bounds how long GracefulShutdown/GracefulRestart
 	// report PoweringOff before going back to On (GRACEFUL_TIMEOUT, seconds)
 	GracefulTimeout time.Duration
@@ -67,6 +76,10 @@ func Load() *Config {
 		SystemUUIDFile: getEnv("SYSTEM_UUID_FILE", ""),
 		VMMACs:         getListEnv("VM_MACS"),
 		VMSecureBoot:   getBoolEnv("VM_SECURE_BOOT", false),
+		VMManufacturer: getEnv("VM_MANUFACTURER", "QEMU"),
+		VMModel:        getEnv("VM_MODEL", "qemu-bmc"),
+		VMSerialNumber: getEnv("VM_SERIAL_NUMBER", ""),
+		VMSKU:          getEnv("VM_SKU", ""),
 
 		GracefulTimeout: getSecondsEnv("GRACEFUL_TIMEOUT", 120*time.Second),
 

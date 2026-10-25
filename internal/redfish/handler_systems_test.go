@@ -412,3 +412,24 @@ func TestPatchSystem_UefiHttp_LegacyMode(t *testing.T) {
 	w = patchSystem(t, srv, `{"Boot":{"HttpBootUri":null}}`)
 	assert.Equal(t, http.StatusOK, w.Code)
 }
+
+func TestGetSystem_Identity(t *testing.T) {
+	srv := NewServer(newMockMachine(qmp.StatusRunning), "", "", "")
+	srv.SetSystemInfo(SystemInfo{Manufacturer: "Acme, Inc.", Model: "R100", SerialNumber: "QBMC-0123456789", SKU: "SKU-1"})
+
+	sys := getResource(t, srv, "/redfish/v1/Systems/1")
+	assert.Equal(t, "Acme, Inc.", sys["Manufacturer"])
+	assert.Equal(t, "R100", sys["Model"])
+	assert.Equal(t, "QBMC-0123456789", sys["SerialNumber"])
+	assert.Equal(t, "SKU-1", sys["SKU"])
+}
+
+func TestGetSystem_IdentityOmittedWhenEmpty(t *testing.T) {
+	srv := NewServer(newMockMachine(qmp.StatusRunning), "", "", "")
+	srv.SetSystemInfo(SystemInfo{Manufacturer: "QEMU", Model: "qemu-bmc"})
+
+	sys := getResource(t, srv, "/redfish/v1/Systems/1")
+	assert.Equal(t, "QEMU", sys["Manufacturer"])
+	assert.NotContains(t, sys, "SerialNumber")
+	assert.NotContains(t, sys, "SKU")
+}

@@ -301,6 +301,58 @@ test_system_uuid_persisted_in_volume() {
     rm -rf "$tmpdir"
 }
 
+# Prints the string field $2 of the Redfish resource $1
+redfish_field() {
+    redfish_get "$1" | sed -n "s/.*\"$2\":\"\([^\"]*\)\".*/\1/p"
+}
+
+# Prints the -smbios values on the QEMU command line, one per line
+qemu_cmdline_smbios() {
+    qemu_cmdline '\n' | sed -n '/^-smbios$/{n;p;}'
+}
+
+test_smbios_default() {
+    local uuid="0a1b2c3d-4e5f-4061-8273-8495a6b7c8d9"
+    local serial="QBMC-0A1B2C3D4E"
+    stop_test_container
+    start_test_container -e "SYSTEM_UUID=$uuid"
+    wait_for_qemu_running 30
+    wait_for_redfish_ready 60
+    local smbios
+    smbios=$(qemu_cmdline_smbios)
+    assert_contains "$smbios" "type=1,manufacturer=QEMU,product=qemu-bmc,serial=$serial" "QEMU should get SMBIOS type=1" || return 1
+    assert_contains "$smbios" "type=2,manufacturer=QEMU,product=qemu-bmc,serial=$serial" "QEMU should get SMBIOS type=2" || return 1
+    assert_contains "$smbios" "type=3,manufacturer=QEMU,serial=$serial" "QEMU should get SMBIOS type=3" || return 1
+    local path
+    for path in /redfish/v1/Systems/1 /redfish/v1/Chassis/1; do
+        assert_equals "QEMU" "$(redfish_field $path Manufacturer)" "$path Manufacturer" || return 1
+        assert_equals "qemu-bmc" "$(redfish_field $path Model)" "$path Model" || return 1
+        assert_equals "$serial" "$(redfish_field $path SerialNumber)" "$path SerialNumber" || return 1
+    done
+    assert_equals "qemu-bmc" "$(redfish_field /redfish/v1/Managers/1 Manufacturer)" "Managers/1 Manufacturer"
+}
+
+test_smbios_custom_and_user_type1() {
+    stop_test_container
+    start_test_container -e "VM_MANUFACTURER=Acme, Inc." -e "VM_MODEL=R100" \
+        -e "VM_SERIAL_NUMBER=SN-42" -e "VM_SKU=SKU-7" \
+        -e "QEMU_EXTRA_ARGS=-smbios type=1,manufacturer=Mine"
+    wait_for_qemu_running 30
+    wait_for_redfish_ready 60
+    local smbios
+    smbios=$(qemu_cmdline_smbios)
+    # The user's type=1 wins; qemu-bmc adds type=2/3 only
+    assert_contains "$smbios" "type=1,manufacturer=Mine" "User -smbios type=1 should be kept" || return 1
+    assert_not_contains "$smbios" "type=1,manufacturer=Acme" "qemu-bmc should not add type=1" || return 1
+    assert_contains "$smbios" "type=2,manufacturer=Acme,, Inc.,product=R100,serial=SN-42" "Commas should be escaped in type=2" || return 1
+    assert_contains "$smbios" "type=3,manufacturer=Acme,, Inc.,serial=SN-42,sku=SKU-7" "type=3 should have the SKU" || return 1
+    # Redfish still reports the environment values
+    assert_equals "Acme, Inc." "$(redfish_field /redfish/v1/Systems/1 Manufacturer)" "Systems/1 Manufacturer" || return 1
+    assert_equals "R100" "$(redfish_field /redfish/v1/Chassis/1 Model)" "Chassis/1 Model" || return 1
+    assert_equals "SN-42" "$(redfish_field /redfish/v1/Chassis/1 SerialNumber)" "Chassis/1 SerialNumber" || return 1
+    assert_equals "SKU-7" "$(redfish_field /redfish/v1/Systems/1 SKU)" "Systems/1 SKU"
+}
+
 # --- Run tests ---
 start_test_container
 wait_for_ipmi_ready 60
@@ -324,3 +376,5 @@ run_test test_debug_output
 run_test test_system_uuid_explicit
 run_test test_system_uuid_stable_hostname
 run_test test_system_uuid_persisted_in_volume
+run_test test_smbios_default
+run_test test_smbios_custom_and_user_type1
