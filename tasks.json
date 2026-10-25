@@ -979,7 +979,7 @@
       "number": 44,
       "kind": "task",
       "title": "Ironic で展開する通し試験をスクリプトにする（Redfish と IPMI の両ドライバ）",
-      "status": "ready",
+      "status": "in-progress",
       "parent": "v0-10-0",
       "dependsOn": [
         "smbios"
@@ -993,7 +993,7 @@
       "refs": [],
       "threads": [],
       "createdAt": "2026-10-25T10:54:29.647Z",
-      "updatedAt": "2026-10-25T10:54:29.647Z",
+      "updatedAt": "2026-10-25T11:01:53.894Z",
       "closedAt": null,
       "extra": {}
     },
