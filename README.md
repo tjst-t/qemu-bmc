@@ -32,6 +32,7 @@ A Go single binary that controls QEMU VMs via both Redfish API (HTTPS) and IPMI 
 - **UEFI HTTP boot and Secure Boot** - `UefiHttp` boot target with `Boot.HttpBootUri`; `Systems/1/SecureBoot` switches OVMF to its Secure Boot variant (Microsoft keys)
 - **Fault injection** - Unresponsive, slow or failing Redfish/IPMI and power actions that fail or do nothing, through a separate API, for testing management tools
 - **Redfish events** - EventService subscriptions (events POSTed to your URL) and an SSE stream: power state changes (from Redfish, IPMI or the guest itself) and settings changes, no polling needed
+- **Shared serial console** - Several clients on `SERIAL_ADDR` at once (output to all, input from any), recent output kept and readable over Redfish; survives QEMU restarts
 - **Compatibility** - MAAS, Tinkerbell/Rufio
 
 ## Quick Start
@@ -276,6 +277,27 @@ ipmitool -I lanplus -H localhost -U admin -P password chassis power off
 ipmitool -I lanplus -H localhost -U admin -P password chassis bootdev pxe
 ```
 
+### Serial console
+
+In process management mode the guest serial console (`ttyS0`) is served as raw TCP on `SERIAL_ADDR` (default `localhost:9002`, inside the container). Up to 8 clients can be connected at the same time: what the VM writes goes to all of them and what any of them types goes to the VM. A client that does not keep up is disconnected so that it does not hold up the others. Connections stay open when QEMU is powered off, restarted or reset; they get the output of the next boot.
+
+```bash
+# Two terminals at once (e.g. a person and a logger)
+docker exec -it qemu-bmc bash -c 'exec 3<>/dev/tcp/127.0.0.1/9002; cat <&3 & cat >&3'
+telnet localhost 9002          # where telnet is installed / the port is published
+
+# The last SERIAL_BUFFER_BYTES (256 KiB) of output, as text
+curl -k -u admin:password https://localhost/redfish/v1/Systems/1/LogServices/SerialConsole/Entries/1/attachment
+```
+
+How it works: QEMU's serial chardev connects to an internal UNIX socket (`serial.sock` next to `QMP_SOCK`, only qemu-bmc listens on it) when it starts, and qemu-bmc multiplexes it. The last `SERIAL_BUFFER_BYTES` of output are kept; with `SERIAL_REPLAY=true` a new TCP connection gets them first.
+
+The Redfish log is a standard `LogService` (`Systems/1/LogServices/SerialConsole`, `LogEntryType` `OEM`) with a single `LogEntry` (`EntryType` `Oem`) whose `AdditionalDataURI` returns the buffered output as `text/plain` (terminal escapes included). The `.../Entries/1/attachment` URI and its content are specific to qemu-bmc.
+
+In legacy mode QEMU is external and qemu-bmc does not touch its serial console: `SERIAL_ADDR` is not served and `LogServices` is empty.
+
+IPMI SOL is not implemented yet.
+
 ### noVNC
 
 A browser-based VNC console is available on the same HTTP port as the Redfish API. No extra port or VNC viewer software is required.
@@ -412,6 +434,11 @@ A fault is `{"kind": ..., conditions..., "count": N, "durationSeconds": S}`: `co
 | GET | `/redfish/v1/Systems/1/Storage/1/Volumes/{n}` | Volume (CapacityBytes, Name, Status, Links.Drives → Disk{n}; no RAIDType). Read by Ironic inspection (sushy `volumes_sizes_bytes`) |
 | GET | `/redfish/v1/Systems/1/SimpleStorage` | SimpleStorage collection (deprecated, read by Ironic inspection) |
 | GET | `/redfish/v1/Systems/1/SimpleStorage/1` | Devices: Name and CapacityBytes of each guest disk |
+| GET | `/redfish/v1/Systems/1/LogServices` | LogService collection: SerialConsole (process management mode), else empty |
+| GET | `/redfish/v1/Systems/1/LogServices/SerialConsole` | Serial console log (`LogEntryType` `OEM`, one entry) |
+| GET | `/redfish/v1/Systems/1/LogServices/SerialConsole/Entries` | Entry collection: `Entries/1`, expanded in Members |
+| GET | `/redfish/v1/Systems/1/LogServices/SerialConsole/Entries/1` | `EntryType` `Oem`, `AdditionalDataURI` → `.../attachment`, `AdditionalDataSizeBytes` |
+| GET | `/redfish/v1/Systems/1/LogServices/SerialConsole/Entries/1/attachment` | Recent serial console output as `text/plain` (qemu-bmc specific) |
 | GET | `/redfish/v1/Systems/1/VirtualMedia` | VirtualMedia collection (same CD drive as Managers/1/VirtualMedia) |
 | GET | `/redfish/v1/Systems/1/VirtualMedia/CD1` | VirtualMedia resource (same as Managers/1/VirtualMedia/CD1) |
 | POST | `/redfish/v1/Systems/1/VirtualMedia/CD1/Actions/VirtualMedia.InsertMedia` | Insert an ISO (204) |
@@ -480,7 +507,9 @@ Another power action (Redfish or IPMI) during `PoweringOff` / `PoweringOn` ends 
 | `IPMI_PASS` | `password` | Authentication password |
 | `REDFISH_PORT` | `443` | Redfish HTTPS port |
 | `IPMI_PORT` | `623` | IPMI UDP port |
-| `SERIAL_ADDR` | `localhost:9002` | Process management mode only: QEMU guest serial console is exposed as a TCP server at this address. SOL is **not implemented** (qemu-bmc itself does not connect to it). The default port 9002 collides with the `VM_IPMI_ADDR` example — use another port (e.g. `localhost:9003`) when enabling both |
+| `SERIAL_ADDR` | `localhost:9002` | Process management mode only: qemu-bmc serves the guest serial console as raw TCP on this address, up to 8 connections at once (see [Serial console](#serial-console)). Legacy mode: not used. The default port 9002 collides with the `VM_IPMI_ADDR` example — use another port (e.g. `localhost:9003`) when enabling both |
+| `SERIAL_BUFFER_BYTES` | `262144` (256 KiB) | Recent serial output kept (Redfish SerialConsole log, `SERIAL_REPLAY`); `0` = none |
+| `SERIAL_REPLAY` | `false` | Send the kept output to a new `SERIAL_ADDR` connection first |
 | `TLS_CERT` | (auto-generated) | TLS certificate path; if unset, a self-signed ECDSA cert is generated automatically |
 | `TLS_KEY` | (auto-generated) | TLS key path; if unset, generated together with `TLS_CERT` |
 | `VM_BOOT_MODE` | `bios` | Firmware the container starts QEMU with (`bios` or `uefi`, chosen by `entrypoint.sh`). In process management mode it is also the initial Redfish `BootSourceOverrideMode` (`Legacy` / `UEFI`) and IPMI boot flags EFI bit |
@@ -543,7 +572,7 @@ go vet ./...
 
 # Container integration tests
 make container-test         # Quick smoke tests
-make container-test-all     # All 125 tests (11 categories)
+make container-test-all     # All 130 tests (12 categories)
 
 # Ironic end-to-end test: deploy Debian with a real Ironic (Redfish + IPMI drivers, ~20 min)
 make ironic-test            # see tests/ironic/README.md
@@ -563,6 +592,7 @@ internal/
   bmc/                         # BMC configuration state (users, LAN, channels)
   config/                      # Environment variable config
   fault/                       # Fault injection (fault API, Redfish/IPMI/power faults)
+  serial/                      # Serial console multiplexer (QEMU socket, TCP clients, recent output)
 docker/
   Dockerfile                   # Multi-stage build (Go builder + Debian runtime)
   entrypoint.sh                # Environment variables → QEMU args
@@ -619,6 +649,7 @@ QEMU VM を Redfish API (HTTPS) と IPMI over LAN (UDP) の両方で制御する
 - **UEFI HTTP ブートと Secure Boot** - 起動先 `UefiHttp` と `Boot.HttpBootUri`。`Systems/1/SecureBoot` で OVMF を Secure Boot 用（Microsoft の鍵入り）に切り替える
 - **故障の注入** - 応答しない・遅い・エラーを返す Redfish・IPMI や、失敗する・何もしない電源操作を別の API で起こせる（管理ツールの異常系の試験に）
 - **Redfish のイベント** - EventService の購読（指定した URL へ POST）と SSE。電源状態の変化（Redfish・IPMI・ゲスト自身のどれによるものでも）や設定の変化を、ポーリングせずに受け取れる
+- **シリアルコンソールの共有** - `SERIAL_ADDR` に同時に複数つなげる（出力は全員へ、入力はどれからでも）。最近の出力を覚えていて Redfish で読める。QEMU が起動し直してもつながったまま
 - **互換性** - MAAS, Tinkerbell/Rufio
 
 ## クイックスタート
@@ -857,6 +888,27 @@ ipmitool -I lanplus -H localhost -U admin -P password chassis power off
 ipmitool -I lanplus -H localhost -U admin -P password chassis bootdev pxe
 ```
 
+### シリアルコンソール
+
+プロセス管理モードでは、ゲストのシリアルコンソール（`ttyS0`）を `SERIAL_ADDR`（既定 `localhost:9002`、コンテナの中）の素の TCP で出す。同時に 8 つまでつなげる。VM の出力は全部の接続へ送り、どの接続から打った入力も VM へ送る。追いつかない接続は、ほかを止めないように切る。QEMU を電源オフ・起動し直し・リセットしても接続は切れず、次の起動の出力がそのまま届く。
+
+```bash
+# 2つの端末から同時に（人とログ取りなど）
+docker exec -it qemu-bmc bash -c 'exec 3<>/dev/tcp/127.0.0.1/9002; cat <&3 & cat >&3'
+telnet localhost 9002          # telnet がある所・ポートを公開した場合
+
+# 最近の出力（SERIAL_BUFFER_BYTES、256 KiB）をテキストで
+curl -k -u admin:password https://localhost/redfish/v1/Systems/1/LogServices/SerialConsole/Entries/1/attachment
+```
+
+仕組み：QEMU のシリアルの chardev は、起動のたびに内部の UNIX ソケット（`QMP_SOCK` と同じディレクトリの `serial.sock`、待つのは qemu-bmc だけ）へつなぎ、qemu-bmc がそれを多重化する。最近の出力 `SERIAL_BUFFER_BYTES` 分を覚えていて、`SERIAL_REPLAY=true` なら新しい TCP の接続にまずそれを送る。
+
+Redfish では標準の `LogService`（`Systems/1/LogServices/SerialConsole`、`LogEntryType` は `OEM`）に `LogEntry` が1つ（`EntryType` は `Oem`）あり、その `AdditionalDataURI` が覚えている出力を `text/plain` で返す（端末のエスケープもそのまま）。`.../Entries/1/attachment` の URI とその中身は qemu-bmc 独自。
+
+レガシーモードでは QEMU は外にいるので、qemu-bmc はシリアルコンソールに何もしない（`SERIAL_ADDR` で待たず、`LogServices` は空）。
+
+IPMI SOL はまだ無い。
+
 ### noVNC
 
 Redfish API と同じ HTTP ポートでブラウザベースの VNC コンソールを利用できます。追加ポートや VNC ビューアソフトウェアは不要です。
@@ -993,6 +1045,11 @@ curl -H "$T" -X DELETE http://localhost:8623/faults      # 全部消す
 | GET | `/redfish/v1/Systems/1/Storage/1/Volumes/{n}` | ボリューム（CapacityBytes、Name、Status、Links.Drives に Disk{n}。RAIDType は無し）。Ironic の inspection（sushy の `volumes_sizes_bytes`）が読む |
 | GET | `/redfish/v1/Systems/1/SimpleStorage` | SimpleStorage 一覧（非推奨だが Ironic の inspection が読む） |
 | GET | `/redfish/v1/Systems/1/SimpleStorage/1` | Devices：各ディスクの Name と CapacityBytes |
+| GET | `/redfish/v1/Systems/1/LogServices` | LogService 一覧：SerialConsole（プロセス管理モード）、ほかは空 |
+| GET | `/redfish/v1/Systems/1/LogServices/SerialConsole` | シリアルコンソールのログ（`LogEntryType` は `OEM`、エントリは1つ） |
+| GET | `/redfish/v1/Systems/1/LogServices/SerialConsole/Entries` | エントリ一覧：`Entries/1`（Members に中身ごと入る） |
+| GET | `/redfish/v1/Systems/1/LogServices/SerialConsole/Entries/1` | `EntryType` は `Oem`、`AdditionalDataURI` は `.../attachment`、`AdditionalDataSizeBytes` |
+| GET | `/redfish/v1/Systems/1/LogServices/SerialConsole/Entries/1/attachment` | 最近のシリアルの出力を `text/plain` で（qemu-bmc 独自） |
 | GET | `/redfish/v1/Systems/1/VirtualMedia` | VirtualMedia コレクション（Managers/1/VirtualMedia と同じ CD ドライブ） |
 | GET | `/redfish/v1/Systems/1/VirtualMedia/CD1` | VirtualMedia リソース（Managers/1/VirtualMedia/CD1 と同じ） |
 | POST | `/redfish/v1/Systems/1/VirtualMedia/CD1/Actions/VirtualMedia.InsertMedia` | ISO を差す（204） |
@@ -1061,7 +1118,9 @@ curl -H "$T" -X DELETE http://localhost:8623/faults      # 全部消す
 | `IPMI_PASS` | `password` | 認証パスワード |
 | `REDFISH_PORT` | `443` | Redfish HTTPS ポート |
 | `IPMI_PORT` | `623` | IPMI UDP ポート |
-| `SERIAL_ADDR` | `localhost:9002` | プロセス管理モードのみ: QEMU のゲストシリアルコンソールをこのアドレスの TCP サーバーとして公開。SOL は**未実装**（qemu-bmc 自身は接続しない）。既定ポート 9002 は `VM_IPMI_ADDR` の例と重なるため、両方使う場合は別ポート（例: `localhost:9003`）を指定 |
+| `SERIAL_ADDR` | `localhost:9002` | プロセス管理モードのみ: qemu-bmc がゲストのシリアルコンソールをこのアドレスの素の TCP で出す。同時に 8 接続まで（[シリアルコンソール](#シリアルコンソール)）。レガシーモードでは使わない。既定ポート 9002 は `VM_IPMI_ADDR` の例と重なるため、両方使う場合は別ポート（例: `localhost:9003`）を指定 |
+| `SERIAL_BUFFER_BYTES` | `262144`（256 KiB） | 覚えておく最近のシリアルの出力（Redfish の SerialConsole のログ、`SERIAL_REPLAY`）。`0` で覚えない |
+| `SERIAL_REPLAY` | `false` | `SERIAL_ADDR` の新しい接続に、覚えている出力をまず送る |
 | `TLS_CERT` | (自動生成) | TLS 証明書パス。未設定時は ECDSA 自己署名証明書を動的生成 |
 | `TLS_KEY` | (自動生成) | TLS 鍵パス。未設定時は `TLS_CERT` と同時に生成 |
 | `VM_BOOT_MODE` | `bios` | コンテナが QEMU を起動するファームウェア (`bios` または `uefi`、`entrypoint.sh` が選ぶ)。プロセス管理モードでは Redfish `BootSourceOverrideMode` (`Legacy` / `UEFI`) と IPMI ブートフラグの EFI ビットの初期値にもなる |
@@ -1124,7 +1183,7 @@ go vet ./...
 
 # コンテナ統合テスト
 make container-test         # クイックスモークテスト
-make container-test-all     # 全 125 テスト (11 カテゴリ)
+make container-test-all     # 全 130 テスト (12 カテゴリ)
 
 # Ironic 通し試験: 本物の Ironic で Debian を展開 (Redfish・IPMI ドライバ、約 20 分)
 make ironic-test            # tests/ironic/README.md 参照
@@ -1144,6 +1203,7 @@ internal/
   bmc/                         # BMC 設定状態 (ユーザー、LAN、チャネル)
   config/                      # 環境変数設定
   fault/                       # 故障の注入（故障の API、Redfish・IPMI・電源の故障）
+  serial/                      # シリアルコンソールの多重化（QEMU のソケット、TCP の接続、最近の出力）
 docker/
   Dockerfile                   # マルチステージビルド (Go ビルダー + Debian ランタイム)
   entrypoint.sh                # 環境変数 → QEMU 引数変換

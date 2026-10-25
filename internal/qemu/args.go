@@ -75,7 +75,7 @@ func ApplyDefaults(args []string) []string {
 // BuildOptions configures auto-injected QEMU arguments.
 type BuildOptions struct {
 	QMPSocketPath string
-	SerialAddr    string
+	SerialSocket  string                 // UNIX socket qemu-bmc listens on for the serial console; empty = no serial
 	SystemUUID    string                 // injected as -uuid unless the user already set it
 	MACAddresses  []string               // per-NIC MACs in command-line order; empty entries use DeriveMAC
 	DeriveMAC     func(index int) string // MAC for a NIC without one; nil leaves it to QEMU
@@ -134,14 +134,11 @@ func BuildCommandLine(userArgs []string, opts BuildOptions) ([]string, error) {
 	// Inject display none
 	args = append(args, "-display", "none")
 
-	// Inject serial console
-	if opts.SerialAddr != "" {
-		host, port, found := strings.Cut(opts.SerialAddr, ":")
-		if !found {
-			return nil, fmt.Errorf("invalid serial address %q: expected host:port", opts.SerialAddr)
-		}
+	// Inject the serial console: QEMU connects to qemu-bmc's socket when
+	// it starts, before the guest runs, so no output is lost
+	if opts.SerialSocket != "" {
 		args = append(args,
-			"-chardev", fmt.Sprintf("socket,id=serial0,host=%s,port=%s,server=on,wait=off", host, port),
+			"-chardev", fmt.Sprintf("socket,id=serial0,path=%s,server=off", escapeOptValue(opts.SerialSocket)),
 			"-serial", "chardev:serial0",
 		)
 	}

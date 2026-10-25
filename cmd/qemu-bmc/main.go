@@ -5,9 +5,11 @@ import (
 	"flag"
 	"fmt"
 	"log"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"syscall"
 	"time"
 
@@ -19,6 +21,7 @@ import (
 	"github.com/tjst-t/qemu-bmc/internal/qemu"
 	"github.com/tjst-t/qemu-bmc/internal/qmp"
 	"github.com/tjst-t/qemu-bmc/internal/redfish"
+	"github.com/tjst-t/qemu-bmc/internal/serial"
 	"github.com/tjst-t/qemu-bmc/internal/sysuuid"
 )
 
@@ -43,6 +46,7 @@ func main() {
 	systemInfo := redfish.SystemInfo{MemoryMiB: cfg.VMMemoryMiB, CPUs: cfg.VMCPUs}
 	var systemUUID string
 	var identity qemu.SMBIOS
+	var serialConsole *serial.Mux // nil in legacy mode
 
 	if len(qemuArgs) > 0 {
 		// Process management mode
@@ -51,9 +55,13 @@ func main() {
 		systemUUID = resolveSystemUUID(cfg, qemuArgs)
 		identity = systemIdentity(cfg, systemUUID)
 
+		// Listening before QEMU can start: its serial chardev connects to
+		// the socket at every start
+		serialConsole = startSerial(cfg)
+
 		cmdArgs, err := qemu.BuildCommandLine(qemuArgs, qemu.BuildOptions{
 			QMPSocketPath: cfg.QMPSocket,
-			SerialAddr:    cfg.SerialAddr,
+			SerialSocket:  cfg.SerialSocket,
 			SystemUUID:    systemUUID,
 			MACAddresses:  cfg.VMMACs,
 			// NICs without a configured MAC get one derived from the UUID,
@@ -216,6 +224,9 @@ func main() {
 	redfishServer.SetUserStore(bmcState)
 	redfishServer.SetSystemUUID(systemUUID)
 	redfishServer.SetFirmwareVersion(version)
+	if serialConsole != nil {
+		redfishServer.SetSerialLog(serialConsole)
+	}
 	// Power state and setting changes, from Redfish, IPMI or the guest, are
 	// Redfish events
 	redfishServer.SetEventInsecureTLS(cfg.EventInsecureTLS)
@@ -318,6 +329,41 @@ func startFaults(cfg *config.Config) *fault.Store {
 		}()
 	}
 	return faults
+}
+
+// startSerial sets up the serial console multiplexer (process management
+// mode): QEMU's serial chardev connects to the internal UNIX socket
+// SerialSocket, and the console is served to any number of TCP clients (up
+// to serial.DefaultMaxConns) on SERIAL_ADDR.
+func startSerial(cfg *config.Config) *serial.Mux {
+	console := serial.NewMux(cfg.SerialBufferBytes)
+	if err := os.MkdirAll(filepath.Dir(cfg.SerialSocket), 0o755); err != nil {
+		log.Fatalf("Serial console: %v", err)
+	}
+	l, err := serial.ListenUnix(cfg.SerialSocket)
+	if err != nil {
+		log.Fatalf("Serial console: %v", err)
+	}
+	go func() {
+		if err := console.ServeQEMU(l); err != nil {
+			log.Fatalf("Serial console socket error: %v", err)
+		}
+	}()
+
+	if cfg.SerialAddr != "" {
+		tcp, err := net.Listen("tcp", cfg.SerialAddr)
+		if err != nil {
+			log.Fatalf("Serial console: %v", err)
+		}
+		srv := serial.NewServer(console, serial.DefaultMaxConns, cfg.SerialReplay)
+		go func() {
+			log.Printf("Starting serial console on %s (buffer %d bytes, replay %t)", cfg.SerialAddr, cfg.SerialBufferBytes, cfg.SerialReplay)
+			if err := srv.Serve(tcp); err != nil {
+				log.Fatalf("Serial console server error: %v", err)
+			}
+		}()
+	}
+	return console
 }
 
 // probeDisks finds the guest hard disks in the QEMU args and reads their

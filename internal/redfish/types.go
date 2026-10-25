@@ -61,6 +61,7 @@ type ComputerSystem struct {
 	SimpleStorage      ODataID           `json:"SimpleStorage"`
 	EthernetInterfaces ODataID           `json:"EthernetInterfaces"`
 	VirtualMedia       ODataID           `json:"VirtualMedia"`
+	LogServices        ODataID           `json:"LogServices"`
 	SecureBoot         *ODataID          `json:"SecureBoot,omitempty"`
 	Status             ResourceStatus    `json:"Status"`
 	Links              SystemLinks       `json:"Links"`

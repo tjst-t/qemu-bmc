@@ -165,13 +165,22 @@ func TestBuildCommandLine_InjectsDisplayNone(t *testing.T) {
 func TestBuildCommandLine_InjectsSerial(t *testing.T) {
 	result, err := BuildCommandLine([]string{"-m", "4096"}, BuildOptions{
 		QMPSocketPath: "/tmp/qmp.sock",
-		SerialAddr:    "localhost:9002",
+		SerialSocket:  "/var/run/qemu/serial.sock",
 	})
 	require.NoError(t, err)
 	assert.Contains(t, result, "-chardev")
-	assert.Contains(t, result, "socket,id=serial0,host=localhost,port=9002,server=on,wait=off")
+	assert.Contains(t, result, "socket,id=serial0,path=/var/run/qemu/serial.sock,server=off")
 	assert.Contains(t, result, "-serial")
 	assert.Contains(t, result, "chardev:serial0")
+}
+
+func TestBuildCommandLine_SerialSocketCommaEscaped(t *testing.T) {
+	result, err := BuildCommandLine(nil, BuildOptions{
+		QMPSocketPath: "/tmp/qmp.sock",
+		SerialSocket:  "/run/a,b/serial.sock",
+	})
+	require.NoError(t, err)
+	assert.Contains(t, result, "socket,id=serial0,path=/run/a,,b/serial.sock,server=off")
 }
 
 func TestBuildCommandLine_UserArgsPreserved(t *testing.T) {
@@ -206,7 +215,7 @@ func TestBuildCommandLine_AppliesDefaults(t *testing.T) {
 func TestBuildCommandLine_NoSerialWhenEmpty(t *testing.T) {
 	result, err := BuildCommandLine([]string{"-m", "4096"}, BuildOptions{
 		QMPSocketPath: "/tmp/qmp.sock",
-		SerialAddr:    "",
+		SerialSocket:  "",
 	})
 	require.NoError(t, err)
 	// serial0 should not be injected

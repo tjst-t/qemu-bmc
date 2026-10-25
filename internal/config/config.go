@@ -20,6 +20,7 @@ type Config struct {
 	RedfishPort    string
 	IPMIPort       string
 	SerialAddr     string
+	SerialSocket   string // internal UNIX socket QEMU's serial chardev connects to (process mode)
 	TLSCert        string
 	TLSKey         string
 	VMBootMode     string
@@ -42,6 +43,12 @@ type Config struct {
 	VMModel        string // VM_MODEL
 	VMSerialNumber string // VM_SERIAL_NUMBER
 	VMSKU          string // VM_SKU
+
+	// The serial console keeps the last SerialBufferBytes of output
+	// (SERIAL_BUFFER_BYTES, 0 = none); with SerialReplay (SERIAL_REPLAY) a
+	// new SERIAL_ADDR connection gets it first
+	SerialBufferBytes int
+	SerialReplay      bool
 
 	// GracefulTimeout bounds how long GracefulShutdown/GracefulRestart
 	// report PoweringOff before going back to On (GRACEFUL_TIMEOUT, seconds)
@@ -77,6 +84,7 @@ func Load() *Config {
 		RedfishPort:    getEnv("REDFISH_PORT", "443"),
 		IPMIPort:       getEnv("IPMI_PORT", "623"),
 		SerialAddr:     getEnv("SERIAL_ADDR", "localhost:9002"),
+		SerialSocket:   filepath.Join(filepath.Dir(getEnv("QMP_SOCK", "/var/run/qemu/qmp.sock")), "serial.sock"),
 		TLSCert:        getEnv("TLS_CERT", ""),
 		TLSKey:         getEnv("TLS_KEY", ""),
 		VMBootMode:     getEnv("VM_BOOT_MODE", "bios"),
@@ -92,6 +100,9 @@ func Load() *Config {
 		VMModel:        getEnv("VM_MODEL", "qemu-bmc"),
 		VMSerialNumber: getEnv("VM_SERIAL_NUMBER", ""),
 		VMSKU:          getEnv("VM_SKU", ""),
+
+		SerialBufferBytes: getSizeEnv("SERIAL_BUFFER_BYTES", 256*1024),
+		SerialReplay:      getBoolEnv("SERIAL_REPLAY", false),
 
 		GracefulTimeout: getSecondsEnv("GRACEFUL_TIMEOUT", 120*time.Second),
 
@@ -154,6 +165,21 @@ func getSecondsEnv(key string, defaultValue time.Duration) time.Duration {
 		return defaultValue
 	}
 	return time.Duration(n) * time.Second
+}
+
+// getSizeEnv returns key as a non-negative number of bytes, or
+// defaultValue if it is unset or invalid.
+func getSizeEnv(key string, defaultValue int) int {
+	value := strings.TrimSpace(os.Getenv(key))
+	if value == "" {
+		return defaultValue
+	}
+	n, err := strconv.Atoi(value)
+	if err != nil || n < 0 {
+		log.Printf("Invalid %s=%q, using %d", key, value, defaultValue)
+		return defaultValue
+	}
+	return n
 }
 
 func getBoolEnv(key string, defaultValue bool) bool {

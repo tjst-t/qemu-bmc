@@ -12,7 +12,7 @@ import (
 
 func TestLoad_Defaults(t *testing.T) {
 	// Clear any env vars that might be set
-	for _, key := range []string{"QMP_SOCK", "IPMI_USER", "IPMI_PASS", "REDFISH_PORT", "IPMI_PORT", "SERIAL_ADDR", "TLS_CERT", "TLS_KEY", "VM_BOOT_MODE", "VM_IPMI_ADDR", "QEMU_BINARY", "POWER_ON_AT_START", "SYSTEM_UUID", "SYSTEM_UUID_FILE", "VM_MACS", "GRACEFUL_TIMEOUT", "VMEDIA_DIR", "VMEDIA_INSECURE_TLS", "VMEDIA_TIMEOUT", "VM_SECURE_BOOT", "VM_MANUFACTURER", "VM_MODEL", "VM_SERIAL_NUMBER", "VM_SKU"} {
+	for _, key := range []string{"QMP_SOCK", "IPMI_USER", "IPMI_PASS", "REDFISH_PORT", "IPMI_PORT", "SERIAL_ADDR", "TLS_CERT", "TLS_KEY", "VM_BOOT_MODE", "VM_IPMI_ADDR", "QEMU_BINARY", "POWER_ON_AT_START", "SYSTEM_UUID", "SYSTEM_UUID_FILE", "VM_MACS", "GRACEFUL_TIMEOUT", "VMEDIA_DIR", "VMEDIA_INSECURE_TLS", "VMEDIA_TIMEOUT", "VM_SECURE_BOOT", "VM_MANUFACTURER", "VM_MODEL", "VM_SERIAL_NUMBER", "VM_SKU", "SERIAL_BUFFER_BYTES", "SERIAL_REPLAY"} {
 		os.Unsetenv(key)
 	}
 
@@ -23,6 +23,9 @@ func TestLoad_Defaults(t *testing.T) {
 	assert.Equal(t, "443", cfg.RedfishPort)
 	assert.Equal(t, "623", cfg.IPMIPort)
 	assert.Equal(t, "localhost:9002", cfg.SerialAddr)
+	assert.Equal(t, "/var/run/qemu/serial.sock", cfg.SerialSocket)
+	assert.Equal(t, 256*1024, cfg.SerialBufferBytes)
+	assert.False(t, cfg.SerialReplay)
 	assert.Equal(t, "", cfg.TLSCert)
 	assert.Equal(t, "", cfg.TLSKey)
 	assert.Equal(t, "bios", cfg.VMBootMode)
@@ -54,6 +57,23 @@ func TestLoad_SystemIdentity(t *testing.T) {
 	assert.Equal(t, "R100", cfg.VMModel)
 	assert.Equal(t, "SN-1", cfg.VMSerialNumber)
 	assert.Equal(t, "SKU-1", cfg.VMSKU)
+}
+
+func TestLoad_Serial(t *testing.T) {
+	t.Setenv("QMP_SOCK", "/run/bmc/qmp.sock")
+	t.Setenv("SERIAL_BUFFER_BYTES", "4096")
+	t.Setenv("SERIAL_REPLAY", "true")
+	cfg := Load()
+	assert.Equal(t, "/run/bmc/serial.sock", cfg.SerialSocket)
+	assert.Equal(t, 4096, cfg.SerialBufferBytes)
+	assert.True(t, cfg.SerialReplay)
+
+	t.Setenv("SERIAL_BUFFER_BYTES", "0")
+	assert.Equal(t, 0, Load().SerialBufferBytes)
+	t.Setenv("SERIAL_BUFFER_BYTES", "-1")
+	assert.Equal(t, 256*1024, Load().SerialBufferBytes)
+	t.Setenv("SERIAL_BUFFER_BYTES", "big")
+	assert.Equal(t, 256*1024, Load().SerialBufferBytes)
 }
 
 func TestLoad_VMedia(t *testing.T) {

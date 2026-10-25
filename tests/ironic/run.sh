@@ -137,10 +137,10 @@ wait_state() {
 }
 
 # --- Serial console ---
-# QEMU's serial TCP server (127.0.0.1:9002 in the node container) accepts a
-# single connection, so one logger in the container keeps it open: it appends
-# everything to /tmp/serial.log, sends what is written to the /tmp/serial.in
-# FIFO and reconnects when QEMU restarts.
+# qemu-bmc serves the serial console on 127.0.0.1:9002 in the node container
+# (SERIAL_ADDR; the connection survives QEMU restarts). One logger in the
+# container keeps it open: it appends everything to /tmp/serial.log, sends
+# what is written to the /tmp/serial.in FIFO and reconnects if dropped.
 start_serial_logger() {
     docker exec -d "$C_NODE" bash -c '
         rm -f /tmp/serial.in; mkfifo /tmp/serial.in; exec 4<>/tmp/serial.in

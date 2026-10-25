@@ -41,6 +41,7 @@ type Server struct {
 	sessions     *sessionStore
 	users        UserStore
 	events       *eventService
+	serialLog    SerialLog
 }
 
 // UserStore authenticates BMC users in addition to the configured
@@ -173,6 +174,11 @@ func (s *Server) setupRoutes() {
 		s.router.HandleFunc(sys+"/Storage/{stid}/Volumes/{volid}"+p, s.handleGetVolume).Methods("GET")
 		s.router.HandleFunc(sys+"/SimpleStorage"+p, s.handleSimpleStorageCollection).Methods("GET")
 		s.router.HandleFunc(sys+"/SimpleStorage/{stid}"+p, s.handleGetSimpleStorage).Methods("GET")
+		s.router.HandleFunc(sys+"/LogServices"+p, s.handleLogServiceCollection).Methods("GET")
+		s.router.HandleFunc(sys+"/LogServices/{logid}"+p, s.handleGetSerialLogService).Methods("GET")
+		s.router.HandleFunc(sys+"/LogServices/{logid}/Entries"+p, s.handleSerialLogEntryCollection).Methods("GET")
+		s.router.HandleFunc(sys+"/LogServices/{logid}/Entries/{entryid}"+p, s.handleGetSerialLogEntry).Methods("GET")
+		s.router.HandleFunc(sys+"/LogServices/{logid}/Entries/{entryid}/attachment"+p, s.handleGetSerialLogAttachment).Methods("GET")
 		s.router.HandleFunc(sys+"/SecureBoot"+p, s.handleGetSecureBoot).Methods("GET")
 		s.router.HandleFunc(sys+"/SecureBoot"+p, s.handlePatchSecureBoot).Methods("PATCH")
 		s.router.HandleFunc(sys+"/SecureBoot/Actions/SecureBoot.ResetKeys"+p, s.handleResetKeys).Methods("POST")

@@ -14,7 +14,7 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 source "$SCRIPT_DIR/test_helper.sh"
 
 # Available test categories
-CATEGORIES="container entrypoint ipmi redfish power boot network cross fault events quick"
+CATEGORIES="container entrypoint ipmi redfish power boot network cross fault events serial quick"
 
 usage() {
     echo "Usage: $0 <category...>"
@@ -31,6 +31,7 @@ usage() {
     echo "  cross      - Cross-protocol consistency tests"
     echo "  fault      - Fault injection tests (FAULT_API_ADDR)"
     echo "  events     - Redfish EventService tests (subscriptions, SSE)"
+    echo "  serial     - Serial console multiplexing (boots a Debian guest)"
     echo "  quick      - Smoke tests (30s max)"
     echo ""
     echo "Options:"

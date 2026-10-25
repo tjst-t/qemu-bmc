@@ -20,14 +20,15 @@ internal/
   bmc/                         # BMC configuration state (users, LAN, channels)
   config/                      # Environment variable config
   fault/                       # Fault injection: store, fault API, Redfish middleware, IPMI/power hooks
+  serial/                      # Serial console mux (Console interface, QEMU UNIX socket, TCP server, ring buffer)
 docker/
   Dockerfile                   # Multi-stage build (Go builder + Debian runtime)
   entrypoint.sh                # Environment variables → QEMU args conversion
   setup-network.sh             # TAP/bridge network setup for VM passthrough
-tests/                         # Bash-based container integration tests (125 tests)
+tests/                         # Bash-based container integration tests (130 tests)
   run_tests.sh                 # Test runner (category-based)
   test_helper.sh               # Assertions, container mgmt, IPMI/Redfish helpers
-  test_*.sh                    # Test categories (container, ipmi, redfish, power, boot, fault, events, etc.)
+  test_*.sh                    # Test categories (container, ipmi, redfish, power, boot, fault, events, serial, etc.)
   ironic/run.sh                # Ironic end-to-end deploy test (make ironic-test; manual, not in CI)
 containerlab/
   example.yml                  # 2 nodes booting their own disk, BMC published on the host
@@ -81,7 +82,7 @@ make docker-build
 # Container integration tests (quick smoke tests)
 make container-test
 
-# Container integration tests (all 125 tests across 11 categories)
+# Container integration tests (all 130 tests across 12 categories)
 make container-test-all
 
 # Run specific test categories
@@ -102,7 +103,9 @@ make ironic-test                       # or IRONIC_FLOWS=redfish-vmedia, IRONIC_
 | `IPMI_PASS` | `password` | IPMI/Redfish auth password |
 | `REDFISH_PORT` | `443` | Redfish HTTPS port |
 | `IPMI_PORT` | `623` | IPMI UDP port |
-| `SERIAL_ADDR` | `localhost:9002` | Process management mode only: QEMU guest serial console is exposed as a TCP server at this address. SOL is not implemented (nothing in qemu-bmc connects to it). Port 9002 collides with the `VM_IPMI_ADDR` example — use another port when enabling both |
+| `SERIAL_ADDR` | `localhost:9002` | Process management mode only: qemu-bmc serves the guest serial console as raw TCP here (`serial.Server`, max 8 connections), see Serial Console below. Legacy mode: not used. Port 9002 collides with the `VM_IPMI_ADDR` example — use another port when enabling both |
+| `SERIAL_BUFFER_BYTES` | `262144` | Recent serial output kept (ring buffer; Redfish SerialConsole log, replay); `0` = none |
+| `SERIAL_REPLAY` | `false` | New `SERIAL_ADDR` connections get the buffered output first |
 | `TLS_CERT` | (auto-generated) | TLS certificate path; if unset, a self-signed ECDSA cert is generated automatically |
 | `TLS_KEY` | (auto-generated) | TLS key path; if unset, generated together with `TLS_CERT` |
 | `VM_BOOT_MODE` | `bios` | Default boot mode |
@@ -166,6 +169,9 @@ make ironic-test                       # or IRONIC_FLOWS=redfish-vmedia, IRONIC_
 | GET | `/redfish/v1/Systems/1/Storage/1/Volumes/{n}` | Volume (CapacityBytes, Name "Volume {n}", Status, Links.Drives → Disk{n}; no RAIDType). Volume ids are plain 1-based numbers |
 | GET | `/redfish/v1/Systems/1/SimpleStorage` | SimpleStorage collection (deprecated, but Ironic inspection reads it first): SimpleStorage/1 or empty |
 | GET | `/redfish/v1/Systems/1/SimpleStorage/1` | Devices: [{Name, CapacityBytes, Status}] per disk |
+| GET | `/redfish/v1/Systems/1/LogServices` | LogService collection: SerialConsole when `Server.SetSerialLog` was called (process mode), else no members. Linked from Systems/1 |
+| GET | `/redfish/v1/Systems/1/LogServices/SerialConsole[/Entries[/1]]` | `#LogService.v1_1_0` (LogEntryType OEM, MaxNumberOfRecords 1, WrapsWhenFull), `#LogEntryCollection` (members expanded: entries are contained resources), `#LogEntry.v1_7_0` (EntryType Oem, OemRecordFormat SerialConsoleText, AdditionalDataURI, AdditionalDataSizeBytes). A LogEntry per line would be far too large |
+| GET | `/redfish/v1/Systems/1/LogServices/SerialConsole/Entries/1/attachment` | The ring buffer as `text/plain` (qemu-bmc specific; escapes included) |
 | GET | `/redfish/v1/Systems/1/VirtualMedia` | VirtualMedia collection (recommended location; same single CD drive as Managers/1/VirtualMedia, shared state) |
 | GET | `/redfish/v1/Systems/1/VirtualMedia/CD1` | VirtualMedia resource, same as Managers/1/VirtualMedia/CD1; `@odata.id` and action targets follow the URI requested. InsertMedia/EjectMedia actions below work under both |
 | PATCH | `/redfish/v1/Systems/1` | Boot device override (with ETag support; ETag includes HttpBootUri). Targets None/Pxe/Hdd/Cd/BiosSetup/UefiHttp. Cd gets the managed CD `bootindex=0`; Pxe with OVMF gets the first NIC `bootindex=0` (OVMF ignores `-boot n` and would boot the disk), unless a device already has bootindex=0. `Boot.HttpBootUri` (always in GET, null when unset): http(s) URL, or null/"" to clear (else 400); kept after Once is used until cleared. UefiHttp with a URI: image downloaded like VirtualMedia (VMEDIA_*, starts at PATCH, power on/reset waits; failure → that boot goes on without it) and booted from a hidden CD (`httpboot0` on its own ich9-ahci, bootindex=0; not VirtualMedia). Without a URI: network boot (-boot n); with OVMF also fw_cfg IPv4/IPv6PXESupport=n and first NIC `romfile=,bootindex=0` (`qemu.ApplyHTTPBoot`). Only for boots the override applies to. Legacy mode: UefiHttp / a URI → 400 |
@@ -264,6 +270,14 @@ Fault JSON: `{"kind", "target" (optional, derived from kind), conditions..., "co
 | `bmc-unavailable` | Redfish held open until the fault ends then closed, IPMI dropped (session messages too) | — |
 
 Wiring (`cmd/qemu-bmc/main.go`): `faults.Middleware` wraps the Redfish handler (Redfish then HTTP/1.1 only so connections can be hijacked); `ipmi.Server.SetFaults`; `faultMachine` wraps `*machine.Machine` so Redfish/IPMI (and VM IPMI) `Reset` go through `Store.Reset`. Container tests: `tests/test_fault.sh` (category `fault`).
+
+## Serial Console
+
+- `internal/serial`: `serial.Console` interface (`Subscribe(replay)`, `Write` input, `Recent`) implemented by `*serial.Mux`; IPMI SOL / WebSocket consoles should use it. `Subscription.Output()` chunks are shared (read-only), closed when the subscription ends; `Done()` closes immediately. A subscriber more than 256 chunks behind is dropped (`publish` never blocks). Replay = buffer snapshot + register under one lock (no gap/overlap). `Write` without QEMU → `ErrNotConnected`.
+- Process mode only (`startSerial` in main, before QEMU can start): QEMU gets `-chardev socket,id=serial0,path=<dir of QMP_SOCK>/serial.sock,server=off -serial chardev:serial0`, i.e. QEMU is the client and connects at every start before the guest runs (no boot output lost); `Mux.ServeQEMU` attaches each connection, a newer one replaces the old. Socket mode 0600, stale socket removed.
+- `serial.Server` on `SERIAL_ADDR`: raw TCP, 8 connections (the 9th gets a message and is closed), output to all, input from any; a dropped (slow) client is reset (SetLinger 0) so it is not left waiting on queued data. Connections stay across QEMU power off/on.
+- Legacy mode: nothing (external QEMU owns its serial). `tests/ironic/run.sh` serial logger still works (one more client).
+- Container tests: `tests/test_serial.sh` (category `serial`): Debian nocloud image (cached in `~/.cache/qemu-bmc-ironic-e2e`, downloaded if missing) as a qcow2 overlay in a docker volume; two clients in the container both get the login prompt and command output, Redfish attachment, power off/on keeps them connected.
 
 ## Events
 

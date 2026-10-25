@@ -78,6 +78,7 @@ func (s *Server) handleGetSystem(w http.ResponseWriter, r *http.Request) {
 		SimpleStorage:      ODataID{ODataID: simpleStoragePath},
 		EthernetInterfaces: ODataID{ODataID: ethernetInterfacesPath},
 		VirtualMedia:       ODataID{ODataID: systemVirtualMediaPath},
+		LogServices:        ODataID{ODataID: logServicesPath},
 		Status:             statusOK,
 		Links: SystemLinks{
 			ManagedBy: []ODataID{{ODataID: managerPath}},
