@@ -16,7 +16,7 @@ internal/
   qemu/                        # QEMU process management (args, process lifecycle)
   machine/                     # VM state management (wraps QMP + ProcessManager), event bus (events.go)
   redfish/                     # HTTP server with gorilla/mux, 15+ endpoints, EventService (events.go)
-  ipmi/                        # UDP server + VM chardev server, RMCP/RMCP+, RAKP auth, chassis commands
+  ipmi/                        # UDP server + VM chardev server, RMCP/RMCP+, RAKP auth, chassis commands, SOL (sol.go, handler_sol.go)
   bmc/                         # BMC configuration state (users, LAN, channels)
   config/                      # Environment variable config
   fault/                       # Fault injection: store, fault API, Redfish middleware, IPMI/power hooks
@@ -25,10 +25,11 @@ docker/
   Dockerfile                   # Multi-stage build (Go builder + Debian runtime)
   entrypoint.sh                # Environment variables → QEMU args conversion
   setup-network.sh             # TAP/bridge network setup for VM passthrough
-tests/                         # Bash-based container integration tests (130 tests)
+tests/                         # Bash-based container integration tests (134 tests)
   run_tests.sh                 # Test runner (category-based)
   test_helper.sh               # Assertions, container mgmt, IPMI/Redfish helpers
-  test_*.sh                    # Test categories (container, ipmi, redfish, power, boot, fault, events, serial, etc.)
+  test_*.sh                    # Test categories (container, ipmi, redfish, power, boot, fault, events, serial, sol, etc.)
+  sol_console.py               # expect-like pty driver for ipmitool sol activate (test_sol.sh)
   ironic/run.sh                # Ironic end-to-end deploy test (make ironic-test; manual, not in CI)
 containerlab/
   example.yml                  # 2 nodes booting their own disk, BMC published on the host
@@ -82,7 +83,7 @@ make docker-build
 # Container integration tests (quick smoke tests)
 make container-test
 
-# Container integration tests (all 130 tests across 12 categories)
+# Container integration tests (all 134 tests across 13 categories)
 make container-test-all
 
 # Run specific test categories
@@ -157,7 +158,7 @@ make ironic-test                       # or IRONIC_FLOWS=redfish-vmedia, IRONIC_
 | GET/POST | `/redfish/v1/SessionService/Sessions` | Session collection / log in (POST needs no auth; 201 with X-Auth-Token and Location; 401 bad credentials; 503 over 64 sessions) |
 | GET/DELETE | `/redfish/v1/SessionService/Sessions/{id}` | Session / log out (204). Sessions are in memory and expire after SessionTimeout idle |
 | GET | `/redfish/v1/Systems` | System collection |
-| GET | `/redfish/v1/Systems/1` | Computer system (Manufacturer, Model, SerialNumber, SKU (VM_* identity), PowerState, Boot, MemorySummary, ProcessorSummary, Processors, Storage, SimpleStorage, EthernetInterfaces, VirtualMedia → Systems/1/VirtualMedia, SecureBoot (UEFI process mode only), Actions, Status, Links.ManagedBy → Managers/1, Links.Chassis → Chassis/1) |
+| GET | `/redfish/v1/Systems/1` | Computer system (`#ComputerSystem.v1_13_0`: Manufacturer, Model, SerialNumber, SKU (VM_* identity), PowerState, Boot, MemorySummary, ProcessorSummary, Processors, Storage, SimpleStorage, EthernetInterfaces, VirtualMedia → Systems/1/VirtualMedia, SecureBoot (UEFI process mode only), SerialConsole (process mode: MaxConcurrentSessions 1, IPMI {ServiceEnabled, Port = IPMI_PORT, HotKeySequenceDisplay}), Actions, Status, Links.ManagedBy → Managers/1, Links.Chassis → Chassis/1) |
 | GET | `/redfish/v1/Systems/1/EthernetInterfaces` | NIC collection (one per guest NIC, command-line order) |
 | GET | `/redfish/v1/Systems/1/EthernetInterfaces/{n}` | NIC (MACAddress, LinkStatus: LinkUp while the VM runs) |
 | GET | `/redfish/v1/Systems/1/Processors` | Processor collection: CPU1, or no members when the CPU count (SystemInfo.CPUs) is 0 |
@@ -179,7 +180,7 @@ make ironic-test                       # or IRONIC_FLOWS=redfish-vmedia, IRONIC_
 | POST | `/redfish/v1/Systems/1/SecureBoot/Actions/SecureBoot.ResetKeys` | `ResetKeysType` `ResetAllKeysToDefault` only (else 400): deletes the secboot VARS, recopied from the template at the next QEMU start (204) |
 | POST | `/redfish/v1/Systems/1/Actions/ComputerSystem.Reset` | Power control: On, ForceOff, GracefulShutdown, ForceRestart, GracefulRestart, PowerCycle (process mode: QEMU stopped and restarted so boot override/VirtualMedia apply; legacy: system_reset; off: On), ForceOn (= On), Nmi (QMP inject-nmi; 409 when off; does not end a graceful action), PushPowerButton (off: On, on: GracefulShutdown) |
 | GET | `/redfish/v1/Managers` | Manager collection |
-| GET | `/redfish/v1/Managers/1` | BMC manager (`#Manager.v1_7_0`, the first with Manufacturer; ManagerType BMC, Manufacturer/Model `qemu-bmc`, FirmwareVersion = qemu-bmc version via SetFirmwareVersion, Status, Links.ManagerForServers → Systems/1, Links.ManagerInChassis → Chassis/1) |
+| GET | `/redfish/v1/Managers/1` | BMC manager (`#Manager.v1_7_0`, the first with Manufacturer; ManagerType BMC, Manufacturer/Model `qemu-bmc`, FirmwareVersion = qemu-bmc version via SetFirmwareVersion, Status, SerialConsole (process mode, `Server.SetIPMISerialConsole`: ServiceEnabled, MaxConcurrentSessions 1, ConnectTypesSupported ["IPMI"]; Manager.SerialConsole is deprecated from v1_10, so the version stays), Links.ManagerForServers → Systems/1, Links.ManagerInChassis → Chassis/1) |
 | GET | `/redfish/v1/Managers/1/VirtualMedia` | VirtualMedia collection (deprecated location, kept for gofish/bmclib) |
 | GET | `/redfish/v1/Managers/1/VirtualMedia/CD1` | VirtualMedia resource (ImageName omitted when nothing is inserted; Image stays as "") |
 | POST | `.../VirtualMedia/CD1/Actions/VirtualMedia.InsertMedia` | Insert ISO (container path `/...` or `file://`, or http(s) URL downloaded in the background with optional UserName/Password Basic auth; 204, 400 if missing). Kept while off, attached at QEMU start; power on/reset during a download runs once it ends (reports PoweringOn meanwhile), a failed download ejects |
@@ -204,7 +205,12 @@ Middleware: auth (X-Auth-Token session or Basic; Basic and session login accept 
 | Get System GUID | App | 0x37 | System UUID (IPMI encoding, LSB first) |
 | Get Channel Auth Capabilities | App | 0x38 | Auth type negotiation |
 | Set Session Privilege | App | 0x3B | Privilege level |
-| Close Session | App | 0x3C | Session teardown |
+| Close Session | App | 0x3C | Session teardown: RMCP+ removes the session (data = session ID, 0 = own; 0x87 unknown) and SOL active in it |
+| Activate / Deactivate Payload | App | 0x48 / 0x49 | SOL only (payload 1, instance 1), see IPMI SOL below |
+| Get Payload Activation Status / Instance Info | App | 0x4A / 0x4B | SOL active?; session ID holding it, port 1 |
+| Set / Get User Payload Access | App | 0x4C / 0x4D | SOL bit per user (memory only); Activate → 0xD4 if disabled |
+| Get Channel Payload Support / Version | App | 0x4E / 0x4F | IPMI (+SOL with a console) + session setup 0x3F; version 0x10 (0x80 for others) |
+| Get / Set SOL Configuration Parameters | Transport (0x0C) | 0x22 / 0x21 | Params 0-8 (revision 0x11, bit 7 of channel = revision only, 0x80 unsupported, 7/8 read-only 0x82); channel 1 or 0x0E |
 | Get Channel Cipher Suites | App | 0x54 | Cipher suite list (suites 3 and 17) |
 | Get Chassis Status | Chassis (0x00) | 0x01 | Power state query |
 | Chassis Control | Chassis | 0x02 | Power on/off/cycle/reset, soft off (ACPI power button, never forced); cycle = Redfish PowerCycle; diag = Nmi (0xD5 when off) |
@@ -217,6 +223,18 @@ Middleware: auth (X-Auth-Token session or Basic; Basic and session login accept 
 | Get Device SDR Info / Get Device SDR / Reserve | Sensor/Event (0x04) | 0x20 / 0x21 / 0x22 | No device SDRs (Get Device SDR → 0xCB) |
 
 Supports: RMCP v1.0, IPMI 1.5, RMCP+ cipher suite 3 (RAKP-HMAC-SHA1, HMAC-SHA1-96) and 17 (RAKP-HMAC-SHA256, HMAC-SHA256-128), AES-CBC-128 encryption
+
+RMCP+ session packets (IPMI and SOL) go through `openSessionPayload` (session must be authenticated; with an integrity algorithm the packet must be authenticated and its AuthCode is verified) and `sealSessionPayload` (outbound sequence number atomic: SOL output comes from another goroutine). Sessions without a packet for `SessionIdleTimeout` (60 s) are removed every 5 s (`Server.closeIdleSessions`, `SessionManager.RemoveIdle`).
+
+## IPMI SOL
+
+- `internal/ipmi/sol.go` (`solManager`, `solInstance`), commands in `handler_sol.go` (`Server.handleServerCommand`: the commands needing the session or server state). Enabled by `Server.SetSerialConsole(serial.Console)` (main, process mode); without it Activate → 0x81 and Channel Payload Support has no SOL.
+- One instance: Activate (6 bytes; aux bit 7/6 = encryption/authentication, forced by param 2 bits 7/6; privilege from RAKP 1 vs param 2) → 0x80 if active (any session). Response exactly 12 bytes: payload sizes 255/255, UDP port = the server's local port (ipmitool requires it to equal the port it uses), VLAN 0xFFFF. Subscribes to the console (`Subscribe(false)`), so TCP clients keep working.
+- Output (`solInstance.run`): sent after the accumulate interval (param 3, 5 ms units) or at the send threshold, up to 251 bytes, one packet in flight, seq 1-15 (a new seq per new data: ipmitool drops data of a packet repeating the last seq), resent every retry interval (param 4) retry count times then dropped; partial ACK → rest first in a new packet; NACK → resent at the retry interval. Buffer max 64 KiB (oldest dropped). Subscription ended → deactivated with notice.
+- Input (`solInstance.receive`): written to the console, ACK (seq 0) with accepted count; same seq again → ACK repeated, not written; VM off → NACK + transfer unavailable (0x60). Packets of other sessions ignored. Operation bits ignored.
+- Deactivate by the holder: stop. By another session: "SOL deactivating" (0x10) packet to the holder and its session closed (ipmitool exits with "SOL session closed by BMC" at the next key / keepalive). Also on Close Session, idle timeout, SOL Enable set to 0.
+- Faults: SOL packets are `fault.IPMIRequest{SOL: true}` (matched only by faults without netfn/cmd).
+- Container tests: `tests/test_sol.sh` (category `sol`; Debian guest via `prepare_debian_disk` in test_helper.sh; ipmitool runs in the container with `docker exec -it` under `tests/sol_console.py` so the port is 623; -C 3 and -C 17 root login + command output, `~.`, second activate refused, `sol deactivate` from another session). Ironic: `tests/ironic/run.sh` ipmi-pxe uses `--console-interface ipmitool-socat` (Ironic image + socat, `OS_DEFAULT__ENABLED_CONSOLE_INTERFACES`, `OS_CONSOLE__PORT_RANGE`) and logs in through the console URL (`check_console`).
 
 ## VM IPMI (In-Band)
 
@@ -263,7 +281,7 @@ Fault JSON: `{"kind", "target" (optional, derived from kind), conditions..., "co
 | `redfish-error` | `status` (default 500) + Redfish error body, handler not run | same |
 | `redfish-hang` | no response until client gives up / fault deleted / `hangSeconds` (300), then conn closed | same |
 | `redfish-drop` | hijack + close (SetLinger 0 on the TCP conn under TLS) | same |
-| `ipmi-drop` / `ipmi-delay` / `ipmi-error` | no response / response sent `delayMs` later (`time.AfterFunc`, serve loop not blocked) / `completionCode` (0xFF) without running the command | `netfn`, `cmd`, `includeSession` (session open/close messages: ASF ping, Open Session/RAKP, App 0x38/0x39/0x3A/0x3B/0x3C/0x54) |
+| `ipmi-drop` / `ipmi-delay` / `ipmi-error` | no response / response sent `delayMs` later (`time.AfterFunc`, serve loop not blocked) / `completionCode` (0xFF) without running the command | `netfn`, `cmd`, `includeSession` (session open/close messages: ASF ping, Open Session/RAKP, App 0x38/0x39/0x3A/0x3B/0x3C/0x54). Inbound SOL packets only match without `netfn`/`cmd` (no error, not a command) |
 | `power-action-fail` | Redfish 500, IPMI `completionCode` (0xFF) via `*fault.PowerActionError` | `action` (requested ResetType; IPMI chassis control → ForceOff/On/PowerCycle/ForceRestart/GracefulShutdown/Nmi) |
 | `power-action-ignored` | 204 / cc 0, nothing done | `action` |
 | `graceful-ignored` | no ACPI powerdown (`machine.SetGracefulFilter`), GRACEFUL_TIMEOUT behaviour unchanged | `action` |
@@ -273,7 +291,7 @@ Wiring (`cmd/qemu-bmc/main.go`): `faults.Middleware` wraps the Redfish handler (
 
 ## Serial Console
 
-- `internal/serial`: `serial.Console` interface (`Subscribe(replay)`, `Write` input, `Recent`) implemented by `*serial.Mux`; IPMI SOL / WebSocket consoles should use it. `Subscription.Output()` chunks are shared (read-only), closed when the subscription ends; `Done()` closes immediately. A subscriber more than 256 chunks behind is dropped (`publish` never blocks). Replay = buffer snapshot + register under one lock (no gap/overlap). `Write` without QEMU → `ErrNotConnected`.
+- `internal/serial`: `serial.Console` interface (`Subscribe(replay)`, `Write` input, `Recent`) implemented by `*serial.Mux`; IPMI SOL uses it (a WebSocket console should too). `Subscription.Output()` chunks are shared (read-only), closed when the subscription ends; `Done()` closes immediately. A subscriber more than 256 chunks behind is dropped (`publish` never blocks). Replay = buffer snapshot + register under one lock (no gap/overlap). `Write` without QEMU → `ErrNotConnected`.
 - Process mode only (`startSerial` in main, before QEMU can start): QEMU gets `-chardev socket,id=serial0,path=<dir of QMP_SOCK>/serial.sock,server=off -serial chardev:serial0`, i.e. QEMU is the client and connects at every start before the guest runs (no boot output lost); `Mux.ServeQEMU` attaches each connection, a newer one replaces the old. Socket mode 0600, stale socket removed.
 - `serial.Server` on `SERIAL_ADDR`: raw TCP, 8 connections (the 9th gets a message and is closed), output to all, input from any; a dropped (slow) client is reset (SetLinger 0) so it is not left waiting on queued data. Connections stay across QEMU power off/on.
 - Legacy mode: nothing (external QEMU owns its serial). `tests/ironic/run.sh` serial logger still works (one more client).

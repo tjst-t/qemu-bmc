@@ -18,12 +18,22 @@ make ironic-test IRONIC_ARGS="--image ghcr.io/tjst-t/qemu-bmc:0.9"
 |------|-------------|-----------------|
 | `redfish-vmedia` | `--driver redfish --boot-interface redfish-virtual-media` | manage → inspect → provide → deploy → active, Debian boots from the disk, undeploy → available. The inspection inventory must match the node: CPU count, memory, MAC, disk size and the SMBIOS manufacturer / product / serial (also compared with Redfish Systems/1) |
 | `redfish-https` | same node, `--boot-interface redfish-https` (UEFI HTTP boot) | deploy → active, Debian boots from the disk, undeploy → available |
-| `ipmi-pxe` | `--driver ipmi --boot-interface ipxe`, IPA booted by Ironic's dnsmasq (PXE → iPXE) | manage → provide → deploy → active, Debian boots from the disk, undeploy → available; once with `VM_BOOT_MODE=uefi` and once with `VM_BOOT_MODE=bios` (`capabilities=boot_mode:<mode>`) |
+| `ipmi-pxe` | `--driver ipmi --boot-interface ipxe --console-interface ipmitool-socat`, IPA booted by Ironic's dnsmasq (PXE → iPXE) | manage → provide → deploy → active, Debian boots from the disk, the serial console (IPMI SOL), undeploy → available; once with `VM_BOOT_MODE=uefi` and once with `VM_BOOT_MODE=bios` (`capabilities=boot_mode:<mode>`) |
 | `all` | all of the above (default) | |
 
 "Debian boots from the disk" is checked on the serial console: the script
 logs in as root (the Debian nocloud image has no root password) and expects
 `findmnt -n -o SOURCE /` to be `/dev/vda1`.
+
+"The serial console" (ipmi-pxe): the console interface validates,
+`baremetal node console enable` makes `console_enabled` True, and through
+the socat URL of `baremetal node console show` (Ironic runs `ipmitool ...
+sol activate` for the connection) the script logs in as root and reads the
+output of a command; then `console disable`. The metal3 image has no socat,
+so the Ironic container runs `qemu-bmc-ironic-e2e-ironic`: `IRONIC_IMAGE`
+plus socat (`microdnf install socat`, built by the script), with
+`OS_DEFAULT__ENABLED_CONSOLE_INTERFACES=no-console,ipmitool-socat` and
+`OS_CONSOLE__PORT_RANGE=10000:10099` (the ports socat listens on).
 
 ## What it sets up
 
@@ -56,9 +66,10 @@ ironic (+ httpd, dnsmasq        CLI (python-     qemu-bmc node (Redfish, IPMI)
 - Ironic node: `deploy_kernel` / `deploy_ramdisk` and the image are served by
   httpd; the image is passed with `image_os_hash_algo=sha256` and
   `image_os_hash_value` (IPA does not accept `image_checksum=sha256:...`).
-- The serial console (`127.0.0.1:9002` in the node container) takes a single
-  connection, so one logger in the node container keeps it open, writes
-  everything to `/tmp/serial.log` and sends what is written to `/tmp/serial.in`.
+- One logger in the node container keeps the serial console
+  (`127.0.0.1:9002`) open, writes everything to `/tmp/serial.log` and sends
+  what is written to `/tmp/serial.in`; it stays connected while Ironic uses
+  the console over IPMI SOL.
 
 Everything is named `qbmc-ie-*` (override with `IRONIC_E2E_PREFIX`; the
 subnets with `IRONIC_E2E_BMC_NET` / `IRONIC_E2E_PROV_NET`, e.g. `172.31.44`)
@@ -86,8 +97,8 @@ With KVM, downloads cached:
 | Build images, start Ironic | ~0.5 min (first run: a few minutes more for the builds and pulls, plus the ~800 MB downloads) |
 | `redfish-vmedia` | ~6 min |
 | `redfish-https` | ~2.5 min |
-| `ipmi-pxe` (UEFI + BIOS) | ~10.5 min |
-| `all` | ~20 min |
+| `ipmi-pxe` (UEFI + BIOS) | ~11.5 min |
+| `all` | ~21 min |
 
 Without `/dev/kvm` QEMU falls back to TCG; the script multiplies its timeouts
 by 6 and a run takes hours.

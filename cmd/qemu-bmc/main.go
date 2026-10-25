@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strconv"
 	"syscall"
 	"time"
 
@@ -210,6 +211,10 @@ func main() {
 	// Start IPMI server
 	ipmiServer := ipmi.NewServer(bmcMachine, bmcState, cfg.IPMIUser, cfg.IPMIPass)
 	ipmiServer.SetFaults(faults)
+	if serialConsole != nil {
+		// IPMI SOL subscribes to the console like any other client
+		ipmiServer.SetSerialConsole(serialConsole)
+	}
 	go func() {
 		addr := fmt.Sprintf(":%s", cfg.IPMIPort)
 		log.Printf("Starting IPMI server on %s", addr)
@@ -226,6 +231,9 @@ func main() {
 	redfishServer.SetFirmwareVersion(version)
 	if serialConsole != nil {
 		redfishServer.SetSerialLog(serialConsole)
+		if port, err := strconv.Atoi(cfg.IPMIPort); err == nil {
+			redfishServer.SetIPMISerialConsole(port)
+		}
 	}
 	// Power state and setting changes, from Redfish, IPMI or the guest, are
 	// Redfish events

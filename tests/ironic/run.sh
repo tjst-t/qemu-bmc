@@ -5,7 +5,8 @@
 # Usage: tests/ironic/run.sh [options] [flow...]
 #   flows: redfish-vmedia  Redfish + VirtualMedia (also inspection checks)
 #          redfish-https   Redfish + UEFI HTTP boot
-#          ipmi-pxe        IPMI + iPXE, UEFI and BIOS
+#          ipmi-pxe        IPMI + iPXE, UEFI and BIOS; serial console
+#                          (ipmitool-socat, i.e. IPMI SOL) on the deployed node
 #          all             all of the above (default)
 #   options:
 #          --image IMAGE   qemu-bmc image to test (default: build the repository)
@@ -27,6 +28,8 @@ PREFIX="${IRONIC_E2E_PREFIX:-qbmc-ie}"
 CACHE="${IRONIC_E2E_CACHE:-$HOME/.cache/qemu-bmc-ironic-e2e}"
 IRONIC_IMAGE="${IRONIC_IMAGE:-quay.io/metal3-io/ironic:latest}"
 CLI_IMAGE="${IRONIC_E2E_CLI_IMAGE:-qemu-bmc-ironic-e2e-cli}"
+# IRONIC_IMAGE plus socat, for the ipmitool-socat console interface
+IRONIC_SOCAT_IMAGE="${IRONIC_E2E_IRONIC_SOCAT_IMAGE:-qemu-bmc-ironic-e2e-ironic}"
 BUILD_IMAGE="qemu-bmc:ironic-e2e"
 # First three octets of the two /24 networks
 BMC_NET="${IRONIC_E2E_BMC_NET:-172.31.44}"
@@ -203,6 +206,74 @@ check_disk_boot() {
     [ "$out" = "ROOTFS=/dev/vda1 OS=debian-12" ] || fail "expected ROOTFS=/dev/vda1 OS=debian-12, got '$out'"
 }
 
+# --- IPMI SOL console ---
+
+# Wait until console_enabled of the node is $1 (Ironic starts and stops
+# socat asynchronously)
+wait_console_enabled() {
+    local start
+    start=$(date +%s)
+    until [ "$(bm node console show "$IRONIC_NODE" -f value -c console_enabled)" = "$1" ]; do
+        [ $(( $(date +%s) - start )) -ge 60 ] && fail "console_enabled did not become $1"
+        sleep 2
+    done
+}
+
+# Ironic's ipmitool-socat console: socat listens on the conductor and runs
+# `ipmitool ... sol activate` for a client. Connect to it from the Ironic
+# container, log in as root on the deployed Debian and read a command's output
+check_console() {
+    local url out
+    bm node validate "$IRONIC_NODE" -f value -c Interface -c Result | grep -qE '^console +True' ||
+        fail "console interface does not validate: $(bm node validate "$IRONIC_NODE" -f value | grep console)"
+    log "Console: enable (ipmitool-socat)"
+    bm node console enable "$IRONIC_NODE"
+    wait_console_enabled True
+    url=$(bm node console show "$IRONIC_NODE" -f json -c console_info |
+        docker exec -i "$C_CLI" python3 -c 'import json, sys; print(json.load(sys.stdin)["console_info"]["url"])')
+    log "Console: $url"
+    out=$(docker exec "$C_IRONIC" python3.12 -c '
+import re, socket, sys, time
+host, port = sys.argv[1].removeprefix("tcp://").rsplit(":", 1)
+s = socket.create_connection((host, int(port)), timeout=10)
+seen = ""
+def expect(rx, timeout, poke=None):
+    global seen
+    end = time.time() + timeout
+    nextpoke = time.time()
+    while time.time() < end:
+        if poke is not None and time.time() >= nextpoke:
+            s.sendall(poke)
+            nextpoke = time.time() + 10
+        # without terminal escapes (bash: bracketed paste)
+        seen = re.sub(r"\x1b\[[0-9;?]*[a-zA-Z]", "", seen)
+        m = re.search(rx, seen, re.M)
+        if m:
+            seen = seen[m.end():]
+            return
+        s.settimeout(1)
+        try:
+            data = s.recv(4096)
+        except socket.timeout:
+            continue
+        if not data:
+            break
+        seen += data.decode("utf-8", "replace").replace("\r", "")
+    sys.exit("no /%s/ on the console; got: %r" % (rx, seen[-300:]))
+expect(r"login: *$", 90, poke=b"\r")
+s.sendall(b"root\r")
+expect(r"root@[^ ]*:~# *$", 60)
+s.sendall(b"echo CONSOLE_$((6*7))\r")
+expect(r"^CONSOLE_42$", 30)
+s.sendall(b"exit\r")
+expect(r"login: *$", 30)
+print("root login and command output OK")
+' "$url" 2>&1) || fail "console: $out"
+    log "Console: $out"
+    bm node console disable "$IRONIC_NODE"
+    wait_console_enabled False
+}
+
 # --- Setup ---
 
 fetch() {
@@ -243,6 +314,12 @@ prepare_images() {
         log "Pulling $IRONIC_IMAGE"
         docker pull -q "$IRONIC_IMAGE" >/dev/null
     fi
+    log "Building $IRONIC_SOCAT_IMAGE ($IRONIC_IMAGE + socat)"
+    docker build -q -t "$IRONIC_SOCAT_IMAGE" --build-arg "BASE=$IRONIC_IMAGE" - >/dev/null <<'EOF'
+ARG BASE
+FROM $BASE
+RUN microdnf install -y socat && microdnf clean all
+EOF
     log "Building $CLI_IMAGE (python-ironicclient)"
     docker build -q -t "$CLI_IMAGE" - >/dev/null <<'EOF'
 FROM python:3.12-slim
@@ -264,11 +341,15 @@ start_ironic() {
         -e "IRONIC_EXTERNAL_HTTP_URL=http://$IRONIC_BMC_IP:$HTTP_PORT"
         -e "DHCP_RANGE=$PROV_NET.100,$PROV_NET.199"
         -e IRONIC_KERNEL_PARAMS=console=ttyS0
+        # oslo.config options from the environment: the ipmitool-socat
+        # console, with ports for socat to listen on
+        -e OS_DEFAULT__ENABLED_CONSOLE_INTERFACES=no-console,ipmitool-socat
+        -e OS_CONSOLE__PORT_RANGE=10000:10099
     )
     local vols=(-v "$VOLUME:/shared" -v "$CACHE:/shared/html/images:ro")
 
     docker create --name "$C_IRONIC" --network "$NET_BMC" --ip "$IRONIC_BMC_IP" \
-        "${env[@]}" "${vols[@]}" "$IRONIC_IMAGE" /bin/runironic >/dev/null
+        "${env[@]}" "${vols[@]}" "$IRONIC_SOCAT_IMAGE" /bin/runironic >/dev/null
     docker network connect --ip "$IRONIC_PROV_IP" \
         --driver-opt "com.docker.network.endpoint.ifname=$PROV_IF" "$NET_PROV" "$C_IRONIC"
     docker start "$C_IRONIC" >/dev/null
@@ -474,12 +555,14 @@ flow_ipmi_pxe() {
         log "--- ipmi-pxe, $mode"
         ensure_node_container "$mode"
         create_node --driver ipmi --boot-interface ipxe \
+            --console-interface ipmitool-socat \
             --driver-info "ipmi_address=$NODE_BMC_IP" \
             --driver-info "ipmi_username=$BMC_USER" \
             --driver-info "ipmi_password=$BMC_PASS" \
             --property "capabilities=boot_mode:$mode"
         manage_and_provide
         deploy_and_check
+        check_console
         undeploy
     done
 }

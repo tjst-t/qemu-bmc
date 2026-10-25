@@ -15,9 +15,14 @@ type IPMIRequest struct {
 	Cmd        uint8
 	// Session marks the messages opening or closing a session
 	Session bool
+	// SOL marks a SOL (Serial over LAN) packet, no IPMI command either
+	SOL bool
 }
 
 func (r IPMIRequest) String() string {
+	if r.SOL {
+		return "IPMI SOL packet"
+	}
 	if !r.HasCommand {
 		return "IPMI session setup"
 	}

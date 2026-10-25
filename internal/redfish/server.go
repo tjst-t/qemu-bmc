@@ -42,6 +42,7 @@ type Server struct {
 	users        UserStore
 	events       *eventService
 	serialLog    SerialLog
+	solPort      int // IPMI port SOL is served on, 0 if none
 }
 
 // UserStore authenticates BMC users in addition to the configured

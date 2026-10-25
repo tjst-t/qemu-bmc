@@ -54,17 +54,33 @@ type ComputerSystem struct {
 	Boot         BootSource            `json:"Boot"`
 	Actions      ComputerSystemActions `json:"Actions"`
 
-	MemorySummary      *MemorySummary    `json:"MemorySummary,omitempty"`
-	ProcessorSummary   *ProcessorSummary `json:"ProcessorSummary,omitempty"`
-	Processors         ODataID           `json:"Processors"`
-	Storage            ODataID           `json:"Storage"`
-	SimpleStorage      ODataID           `json:"SimpleStorage"`
-	EthernetInterfaces ODataID           `json:"EthernetInterfaces"`
-	VirtualMedia       ODataID           `json:"VirtualMedia"`
-	LogServices        ODataID           `json:"LogServices"`
-	SecureBoot         *ODataID          `json:"SecureBoot,omitempty"`
-	Status             ResourceStatus    `json:"Status"`
-	Links              SystemLinks       `json:"Links"`
+	MemorySummary      *MemorySummary     `json:"MemorySummary,omitempty"`
+	ProcessorSummary   *ProcessorSummary  `json:"ProcessorSummary,omitempty"`
+	Processors         ODataID            `json:"Processors"`
+	Storage            ODataID            `json:"Storage"`
+	SimpleStorage      ODataID            `json:"SimpleStorage"`
+	EthernetInterfaces ODataID            `json:"EthernetInterfaces"`
+	VirtualMedia       ODataID            `json:"VirtualMedia"`
+	LogServices        ODataID            `json:"LogServices"`
+	SecureBoot         *ODataID           `json:"SecureBoot,omitempty"`
+	SerialConsole      *HostSerialConsole `json:"SerialConsole,omitempty"`
+	Status             ResourceStatus     `json:"Status"`
+	Links              SystemLinks        `json:"Links"`
+}
+
+// HostSerialConsole is the serial console of a computer system
+// (ComputerSystem v1_13_0)
+type HostSerialConsole struct {
+	MaxConcurrentSessions int                   `json:"MaxConcurrentSessions"`
+	IPMI                  SerialConsoleProtocol `json:"IPMI"`
+}
+
+// SerialConsoleProtocol is a protocol the host serial console is offered
+// over
+type SerialConsoleProtocol struct {
+	ServiceEnabled        bool   `json:"ServiceEnabled"`
+	Port                  int    `json:"Port"`
+	HotKeySequenceDisplay string `json:"HotKeySequenceDisplay"`
 }
 
 // SystemLinks are the links from a computer system to its manager and chassis
@@ -204,18 +220,26 @@ type ManagerCollection struct {
 
 // Manager represents a BMC manager
 type Manager struct {
-	ODataType       string         `json:"@odata.type"`
-	ODataID         string         `json:"@odata.id"`
-	ODataContext    string         `json:"@odata.context,omitempty"`
-	ID              string         `json:"Id"`
-	Name            string         `json:"Name"`
-	ManagerType     string         `json:"ManagerType"`
-	Manufacturer    string         `json:"Manufacturer"`
-	Model           string         `json:"Model"`
-	FirmwareVersion string         `json:"FirmwareVersion,omitempty"`
-	Status          ResourceStatus `json:"Status"`
-	VirtualMedia    ODataID        `json:"VirtualMedia"`
-	Links           ManagerLinks   `json:"Links"`
+	ODataType       string                `json:"@odata.type"`
+	ODataID         string                `json:"@odata.id"`
+	ODataContext    string                `json:"@odata.context,omitempty"`
+	ID              string                `json:"Id"`
+	Name            string                `json:"Name"`
+	ManagerType     string                `json:"ManagerType"`
+	Manufacturer    string                `json:"Manufacturer"`
+	Model           string                `json:"Model"`
+	FirmwareVersion string                `json:"FirmwareVersion,omitempty"`
+	Status          ResourceStatus        `json:"Status"`
+	VirtualMedia    ODataID               `json:"VirtualMedia"`
+	SerialConsole   *ManagerSerialConsole `json:"SerialConsole,omitempty"`
+	Links           ManagerLinks          `json:"Links"`
+}
+
+// ManagerSerialConsole is the serial console service of a manager
+type ManagerSerialConsole struct {
+	ServiceEnabled        bool     `json:"ServiceEnabled"`
+	MaxConcurrentSessions int      `json:"MaxConcurrentSessions"`
+	ConnectTypesSupported []string `json:"ConnectTypesSupported"`
 }
 
 // ManagerLinks are the links from a manager to the system and chassis it manages

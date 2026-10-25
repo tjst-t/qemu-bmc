@@ -11,14 +11,15 @@ import (
 	"encoding/binary"
 	"fmt"
 	"hash"
+	"sync/atomic"
 
 	"github.com/tjst-t/qemu-bmc/internal/bmc"
 )
 
 // RMCPPlusSessionHeader is the RMCP+ session header
 type RMCPPlusSessionHeader struct {
-	AuthType        uint8  // Always 0x06
-	PayloadType     uint8  // encrypted(1b) + authenticated(1b) + type(6b)
+	AuthType        uint8 // Always 0x06
+	PayloadType     uint8 // encrypted(1b) + authenticated(1b) + type(6b)
 	SessionID       uint32
 	SessionSequence uint32
 	PayloadLength   uint16
@@ -129,17 +130,28 @@ func integrityAuthCode(session *Session, data []byte) []byte {
 
 // HandleRMCPPlusMessage processes an RMCP+ message and returns a response
 func HandleRMCPPlusMessage(data []byte, sessionMgr *SessionManager, user, pass string, machine MachineInterface, state *bmc.State) ([]byte, error) {
-	return handleRMCPPlusMessage(data, sessionMgr, user, pass, state, func(msg *IPMIMessage) (CompletionCode, []byte, error) {
-		code, resp := handleIPMICommand(msg, machine, state)
-		return code, resp, nil
+	return handleRMCPPlusMessage(data, sessionMgr, user, pass, state, sessionHandlers{
+		command: func(msg *IPMIMessage, _ *Session) (CompletionCode, []byte, error) {
+			code, resp := handleIPMICommand(msg, machine, state)
+			return code, resp, nil
+		},
 	})
 }
 
-// commandHandler handles the IPMI command of a request. It returns
-// errNoResponse if no response is to be sent.
-type commandHandler func(msg *IPMIMessage) (CompletionCode, []byte, error)
+// commandHandler handles the IPMI command of a request; session is nil
+// outside an RMCP+ session. It returns errNoResponse if no response is to
+// be sent.
+type commandHandler func(msg *IPMIMessage, session *Session) (CompletionCode, []byte, error)
 
-func handleRMCPPlusMessage(data []byte, sessionMgr *SessionManager, user, pass string, state *bmc.State, handle commandHandler) ([]byte, error) {
+// sessionHandlers handle the payloads of RMCP+ messages.
+type sessionHandlers struct {
+	command commandHandler
+	// sol handles a SOL packet of an established session and returns the
+	// SOL packet to answer with, or nil. Nil if SOL is not supported.
+	sol func(session *Session, packet []byte) []byte
+}
+
+func handleRMCPPlusMessage(data []byte, sessionMgr *SessionManager, user, pass string, state *bmc.State, handlers sessionHandlers) ([]byte, error) {
 	if len(data) < 12 {
 		return nil, fmt.Errorf("RMCP+ message too short")
 	}
@@ -161,9 +173,14 @@ func handleRMCPPlusMessage(data []byte, sessionMgr *SessionManager, user, pass s
 		return handleRAKPMessage3(buf.Bytes(), header, sessionMgr, pass, state)
 	case PayloadTypeIPMI:
 		if header.SessionID == 0 {
-			return handlePreSessionIPMI(data, header, handle)
+			return handlePreSessionIPMI(data, header, handlers.command)
 		}
-		return handleEncryptedIPMI(data, header, sessionMgr, handle)
+		return handleEncryptedIPMI(data, header, sessionMgr, handlers.command)
+	case PayloadTypeSOL:
+		if handlers.sol == nil {
+			return nil, fmt.Errorf("SOL payload not supported")
+		}
+		return handleSOLPayload(data, header, sessionMgr, handlers.sol)
 	default:
 		return nil, fmt.Errorf("unsupported RMCP+ payload type: 0x%02x", payloadType)
 	}
@@ -462,7 +479,7 @@ func handlePreSessionIPMI(data []byte, header *RMCPPlusSessionHeader, handle com
 		return nil, err
 	}
 
-	responseCode, responseData, err := handle(msg)
+	responseCode, responseData, err := handle(msg, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -471,10 +488,15 @@ func handlePreSessionIPMI(data []byte, header *RMCPPlusSessionHeader, handle com
 	return wrapRMCPPlusResponse(PayloadTypeIPMI, 0, 0, respMsg), nil
 }
 
-func handleEncryptedIPMI(data []byte, header *RMCPPlusSessionHeader, sessionMgr *SessionManager, handle commandHandler) ([]byte, error) {
+// openSessionPayload checks the integrity of a packet of an established
+// session and returns the session and the decrypted payload.
+func openSessionPayload(data []byte, header *RMCPPlusSessionHeader, sessionMgr *SessionManager) (*Session, []byte, error) {
 	session, ok := sessionMgr.GetSession(header.SessionID)
 	if !ok {
-		return nil, fmt.Errorf("session not found: 0x%08x", header.SessionID)
+		return nil, nil, fmt.Errorf("session not found: 0x%08x", header.SessionID)
+	}
+	if !session.Authenticated {
+		return nil, nil, fmt.Errorf("session 0x%08x is not authenticated", header.SessionID)
 	}
 
 	isEncrypted := (header.PayloadType & 0x80) != 0
@@ -484,31 +506,71 @@ func handleEncryptedIPMI(data []byte, header *RMCPPlusSessionHeader, sessionMgr 
 	payloadStart := 12
 	payloadEnd := payloadStart + int(header.PayloadLength)
 	if payloadEnd > len(data) {
-		return nil, fmt.Errorf("payload length exceeds data")
+		return nil, nil, fmt.Errorf("payload length exceeds data")
 	}
 	payload := data[payloadStart:payloadEnd]
 
-	// Verify integrity if authenticated
-	if isAuthenticated {
-		// The integrity data starts after the payload
-		integrityStart := payloadEnd
-		// Need at least: pad(variable) + padLen(1) + nextHeader(1) + authCode(12 or 16)
+	if session.IntegrityAlgorithm != IntegrityAlgorithmNone {
+		if !isAuthenticated {
+			return nil, nil, fmt.Errorf("session 0x%08x: unauthenticated packet", header.SessionID)
+		}
+		// pad (0-3) + pad length (1) + next header (1) + AuthCode, which
+		// covers everything from AuthType through Next Header
 		_, authCodeLen := integrityHash(session.IntegrityAlgorithm)
-		if len(data) < integrityStart+2+authCodeLen {
-			return nil, fmt.Errorf("RMCP+ data too short for integrity: %d bytes after payload", len(data)-integrityStart)
+		if len(data) < payloadEnd+2+authCodeLen {
+			return nil, nil, fmt.Errorf("RMCP+ data too short for integrity: %d bytes after payload", len(data)-payloadEnd)
+		}
+		covered := data[:len(data)-authCodeLen]
+		if !hmac.Equal(data[len(data)-authCodeLen:], integrityAuthCode(session, covered)) {
+			return nil, nil, fmt.Errorf("session 0x%08x: invalid integrity AuthCode", header.SessionID)
 		}
 	}
 
-	// Decrypt if needed
-	var ipmiData []byte
 	if isEncrypted {
-		var err error
-		ipmiData, err = decryptAESCBC(session.ConfidentialityKey, payload)
+		plain, err := decryptAESCBC(session.ConfidentialityKey, payload)
 		if err != nil {
-			return nil, fmt.Errorf("decrypting payload: %w", err)
+			return nil, nil, fmt.Errorf("decrypting payload: %w", err)
 		}
-	} else {
-		ipmiData = payload
+		payload = plain
+	}
+	session.touch()
+	return session, payload, nil
+}
+
+// sealSessionPayload builds a packet of an established session (without
+// the RMCP header): payloadType carries the encrypted (0x80) and
+// authenticated (0x40) bits.
+func sealSessionPayload(session *Session, payloadType uint8, payload []byte) ([]byte, error) {
+	if payloadType&0x80 != 0 {
+		var err error
+		payload, err = encryptAESCBC(session.ConfidentialityKey, payload)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	respBuf := buildRMCPPlusEncryptedResponse(session, payloadType, payload)
+
+	if payloadType&0x40 != 0 {
+		// Calculate integrity pad to align (header+payload+pad+padLen+nextHeader) to 4 bytes
+		totalBeforePad := len(respBuf) // header + encrypted payload
+		padNeeded := (4 - ((totalBeforePad + 1 + 1) % 4)) % 4
+		for i := 0; i < padNeeded; i++ {
+			respBuf = append(respBuf, 0xFF)
+		}
+		respBuf = append(respBuf, byte(padNeeded)) // Pad Length
+		respBuf = append(respBuf, 0x07)            // Next Header
+
+		// HMAC-SHA1-96 / HMAC-SHA256-128 over everything from AuthType to end of Next Header
+		respBuf = append(respBuf, integrityAuthCode(session, respBuf)...)
+	}
+	return respBuf, nil
+}
+
+func handleEncryptedIPMI(data []byte, header *RMCPPlusSessionHeader, sessionMgr *SessionManager, handle commandHandler) ([]byte, error) {
+	session, ipmiData, err := openSessionPayload(data, header, sessionMgr)
+	if err != nil {
+		return nil, err
 	}
 
 	// Parse and handle the IPMI message
@@ -521,52 +583,39 @@ func handleEncryptedIPMI(data []byte, header *RMCPPlusSessionHeader, sessionMgr 
 	}
 
 	// Route to handler
-	responseCode, responseData, err := handle(msg)
+	responseCode, responseData, err := handle(msg, session)
 	if err != nil {
 		return nil, err
 	}
 
-	// Build response IPMI message (echo request's sequence number)
+	// Build response IPMI message (echo request's sequence number), with
+	// the request's encryption and authentication
 	respMsg := buildIPMIResponseMessageWithSeq(msg.GetNetFn()|0x01, msg.Command, responseCode, responseData, msg.SourceLun)
+	return sealSessionPayload(session, header.PayloadType, respMsg)
+}
 
-	// Encrypt response
-	var respPayload []byte
-	if isEncrypted {
-		respPayload, err = encryptAESCBC(session.ConfidentialityKey, respMsg)
-		if err != nil {
-			return nil, err
-		}
-	} else {
-		respPayload = respMsg
+// handleSOLPayload passes a SOL packet to handle and returns its answer
+// with the request's encryption and authentication, or nil.
+func handleSOLPayload(data []byte, header *RMCPPlusSessionHeader, sessionMgr *SessionManager, handle func(*Session, []byte) []byte) ([]byte, error) {
+	session, packet, err := openSessionPayload(data, header, sessionMgr)
+	if err != nil {
+		return nil, err
 	}
-
-	// Build RMCP+ response with optional integrity
-	respBuf := buildRMCPPlusEncryptedResponse(session, header.PayloadType, respPayload)
-
-	if isAuthenticated {
-		// Calculate integrity pad to align (header+payload+pad+padLen+nextHeader) to 4 bytes
-		totalBeforePad := len(respBuf) // header + encrypted payload
-		padNeeded := (4 - ((totalBeforePad + 1 + 1) % 4)) % 4
-		for i := 0; i < padNeeded; i++ {
-			respBuf = append(respBuf, 0xFF)
-		}
-		respBuf = append(respBuf, byte(padNeeded)) // Pad Length
-		respBuf = append(respBuf, 0x07)             // Next Header
-
-		// HMAC-SHA1-96 / HMAC-SHA256-128 over everything from AuthType to end of Next Header
-		respBuf = append(respBuf, integrityAuthCode(session, respBuf)...)
+	answer := handle(session, packet)
+	if answer == nil {
+		return nil, nil
 	}
-
-	return respBuf, nil
+	return sealSessionPayload(session, header.PayloadType&0xC0|PayloadTypeSOL, answer)
 }
 
 func buildRMCPPlusEncryptedResponse(session *Session, payloadType uint8, payload []byte) []byte {
-	session.OutboundSequenceNumber++
+	// SOL output is sent from another goroutine than the responses
+	seq := atomic.AddUint32(&session.OutboundSequenceNumber, 1)
 	buf := new(bytes.Buffer)
 	binary.Write(buf, binary.LittleEndian, uint8(AuthTypeRMCPPlus))
 	binary.Write(buf, binary.LittleEndian, payloadType)
 	binary.Write(buf, binary.LittleEndian, session.RemoteConsoleSessionID)
-	binary.Write(buf, binary.LittleEndian, session.OutboundSequenceNumber)
+	binary.Write(buf, binary.LittleEndian, seq)
 	binary.Write(buf, binary.LittleEndian, uint16(len(payload)))
 	buf.Write(payload)
 	return buf.Bytes()

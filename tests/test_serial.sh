@@ -6,29 +6,8 @@
 # output of commands typed on either, and both stay connected across a QEMU
 # power off/on. The Redfish SerialConsole log returns the same output.
 
-SERIAL_CACHE="${SERIAL_CACHE:-${IRONIC_E2E_CACHE:-$HOME/.cache/qemu-bmc-ironic-e2e}}"
-SERIAL_DEBIAN_URL="${SERIAL_DEBIAN_URL:-https://cloud.debian.org/images/cloud/bookworm/latest/debian-12-nocloud-amd64.qcow2}"
-SERIAL_DEBIAN_FILE="debian-12-nocloud-amd64.qcow2"
 SERIAL_VOLUME="${SERIAL_VOLUME:-qemu-bmc-serial-test-vm}"
 SERIAL_LOG_PATH=/redfish/v1/Systems/1/LogServices/SerialConsole/Entries/1/attachment
-
-prepare_serial_disk() {
-    mkdir -p "$SERIAL_CACHE"
-    if [ ! -s "$SERIAL_CACHE/$SERIAL_DEBIAN_FILE" ]; then
-        echo "Downloading $SERIAL_DEBIAN_URL"
-        curl -fL --retry 3 -o "$SERIAL_CACHE/$SERIAL_DEBIAN_FILE.part" "$SERIAL_DEBIAN_URL" &&
-            mv "$SERIAL_CACHE/$SERIAL_DEBIAN_FILE.part" "$SERIAL_CACHE/$SERIAL_DEBIAN_FILE"
-    fi
-    docker volume rm -f "$SERIAL_VOLUME" >/dev/null 2>&1 || true
-    docker volume create "$SERIAL_VOLUME" >/dev/null
-    # The cached image stays untouched: the VM writes to an overlay
-    docker run --rm -v "$SERIAL_VOLUME:/vm" -v "$SERIAL_CACHE:/base:ro" --entrypoint qemu-img "$TEST_IMAGE" \
-        create -q -f qcow2 -b "/base/$SERIAL_DEBIAN_FILE" -F qcow2 /vm/disk.qcow2
-}
-
-cleanup_serial_disk() {
-    docker volume rm -f "$SERIAL_VOLUME" >/dev/null 2>&1 || true
-}
 
 # serial_client NAME - keeps one connection to the serial console open in the
 # container: output goes to /tmp/NAME.log, what is written to the /tmp/NAME.in
@@ -148,8 +127,8 @@ test_serial_survives_power_off_on() {
     serial_wait a "$off_a" 'root@[^ ]*:~# *$' 60
 }
 
-prepare_serial_disk
-start_test_container -v "$SERIAL_VOLUME:/vm" -v "$SERIAL_CACHE:/base:ro" -e "POWER_ON_AT_START=false"
+prepare_debian_disk "$SERIAL_VOLUME"
+start_test_container -v "$SERIAL_VOLUME:/vm" -v "$DEBIAN_CACHE:/base:ro" -e "POWER_ON_AT_START=false"
 wait_for_redfish_ready 60
 # Both clients connect while the VM is off and see it boot
 serial_client a
@@ -165,4 +144,4 @@ run_test test_serial_redfish_log
 run_test test_serial_survives_power_off_on
 
 stop_test_container
-cleanup_serial_disk
+cleanup_debian_disk "$SERIAL_VOLUME"

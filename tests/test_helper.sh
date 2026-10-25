@@ -370,3 +370,31 @@ wait_for_redfish_ready() {
     echo "Redfish did not become ready within ${timeout}s" >&2
     return 1
 }
+
+# --- Debian guest ---
+# Debian nocloud cloud image (root without password, getty on ttyS0), cached
+# like the Ironic e2e test does
+DEBIAN_CACHE="${SERIAL_CACHE:-${IRONIC_E2E_CACHE:-$HOME/.cache/qemu-bmc-ironic-e2e}}"
+DEBIAN_URL="${SERIAL_DEBIAN_URL:-https://cloud.debian.org/images/cloud/bookworm/latest/debian-12-nocloud-amd64.qcow2}"
+DEBIAN_FILE="debian-12-nocloud-amd64.qcow2"
+
+# prepare_debian_disk VOLUME - docker volume VOLUME gets disk.qcow2, an
+# overlay of the cached image (mount the cache on /base too)
+prepare_debian_disk() {
+    local volume="$1"
+    mkdir -p "$DEBIAN_CACHE"
+    if [ ! -s "$DEBIAN_CACHE/$DEBIAN_FILE" ]; then
+        echo "Downloading $DEBIAN_URL"
+        curl -fL --retry 3 -o "$DEBIAN_CACHE/$DEBIAN_FILE.part" "$DEBIAN_URL" &&
+            mv "$DEBIAN_CACHE/$DEBIAN_FILE.part" "$DEBIAN_CACHE/$DEBIAN_FILE"
+    fi
+    docker volume rm -f "$volume" >/dev/null 2>&1 || true
+    docker volume create "$volume" >/dev/null
+    # The cached image stays untouched: the VM writes to an overlay
+    docker run --rm -v "$volume:/vm" -v "$DEBIAN_CACHE:/base:ro" --entrypoint qemu-img "$TEST_IMAGE" \
+        create -q -f qcow2 -b "/base/$DEBIAN_FILE" -F qcow2 /vm/disk.qcow2
+}
+
+cleanup_debian_disk() {
+    docker volume rm -f "$1" >/dev/null 2>&1 || true
+}

@@ -33,6 +33,7 @@ A Go single binary that controls QEMU VMs via both Redfish API (HTTPS) and IPMI 
 - **Fault injection** - Unresponsive, slow or failing Redfish/IPMI and power actions that fail or do nothing, through a separate API, for testing management tools
 - **Redfish events** - EventService subscriptions (events POSTed to your URL) and an SSE stream: power state changes (from Redfish, IPMI or the guest itself) and settings changes, no polling needed
 - **Shared serial console** - Several clients on `SERIAL_ADDR` at once (output to all, input from any), recent output kept and readable over Redfish; survives QEMU restarts
+- **IPMI SOL** - `ipmitool -I lanplus sol activate` (cipher suites 3 and 17) on the same console, e.g. Ironic's `ipmitool-socat` console; Redfish `SerialConsole` on `Managers/1` and `Systems/1`
 - **Compatibility** - MAAS, Tinkerbell/Rufio
 
 ## Quick Start
@@ -296,7 +297,24 @@ The Redfish log is a standard `LogService` (`Systems/1/LogServices/SerialConsole
 
 In legacy mode QEMU is external and qemu-bmc does not touch its serial console: `SERIAL_ADDR` is not served and `LogServices` is empty.
 
-IPMI SOL is not implemented yet.
+#### IPMI SOL (Serial over LAN)
+
+In process management mode the same console is also offered as IPMI v2.0 SOL, so `ipmitool sol activate`, Ironic's `ipmitool-socat` console interface and other SOL clients work. SOL is one more user of the console: the TCP clients keep working meanwhile.
+
+```bash
+ipmitool -I lanplus -H localhost -U admin -P password sol activate        # leave with ~.
+ipmitool -I lanplus -H localhost -U admin -P password -C 3 sol activate   # cipher suite 3 (ipmitool's default is 17)
+ipmitool -I lanplus -H localhost -U admin -P password sol deactivate      # end the SOL session of someone else
+ipmitool -I lanplus -H localhost -U admin -P password sol info
+```
+
+- One SOL session at a time: another `sol activate` gets "SOL payload already active on another session" (completion code `0x80`). `~.` deactivates it and closes ipmitool's session; closing the session, or 60 s without a packet from the console (a killed ipmitool), deactivates it too.
+- `sol deactivate` from another session ends the active one: qemu-bmc sends it a "SOL deactivating" packet and closes its session. ipmitool notices at the next key (or its next keepalive) and exits with "SOL session closed by BMC".
+- Packets are encrypted and authenticated like the session (cipher suites 3 and 17). Output is sent once the Character Accumulate Interval (60 ms) has passed or the Send Threshold (96 characters) is reached, one packet at a time, and resent until ACKed (SOL Retry: 7 times, 100 ms apart; then dropped); a partly accepted packet goes on with the rest. Input sent twice (lost ACK) is written once. Break, CTS/DCD/DSR and flush requests are accepted and ignored. Input while the VM is off is NACKed (character transfer unavailable).
+- The `sol set` parameters (enabled, force-encryption, force-authentication, privilege-level, character-accumulate-level, character-send-threshold, retry-count, retry-interval, bit rates) and `sol payload enable|disable` are kept in memory only. Payload channel (1) and port are read-only.
+- SOL runs on the IPMI port, and ipmitool insists that it is the port it talks to (623 in the container): publish the IPMI port under the same number (`-p 623:623/udp`) or run ipmitool where it reaches port 623 directly. Through another port ipmitool stops with "BMC requests SOL session on different port".
+- Redfish reports it as `SerialConsole` on `Managers/1` (`ServiceEnabled`, `MaxConcurrentSessions` 1, `ConnectTypesSupported` `["IPMI"]`) and on `Systems/1` (`IPMI`: `ServiceEnabled`, `Port`, `HotKeySequenceDisplay`; `MaxConcurrentSessions`).
+- Legacy mode has no SOL (Activate Payload answers `0x81`, SOL disabled) and no `SerialConsole` in Redfish.
 
 ### noVNC
 
@@ -417,7 +435,7 @@ A fault is `{"kind": ..., conditions..., "count": N, "durationSeconds": S}`: `co
 | GET | `/redfish/v1/SessionService/Sessions/{id}` | Session |
 | DELETE | `/redfish/v1/SessionService/Sessions/{id}` | Log out (204) |
 | GET | `/redfish/v1/Systems` | System collection |
-| GET | `/redfish/v1/Systems/1` | Computer system (Manufacturer, Model, SerialNumber, SKU (if `VM_SKU` is set), Status, Processors, Storage, SimpleStorage, VirtualMedia; Links: ManagedBy Managers/1, Chassis Chassis/1) |
+| GET | `/redfish/v1/Systems/1` | Computer system (Manufacturer, Model, SerialNumber, SKU (if `VM_SKU` is set), Status, Processors, Storage, SimpleStorage, VirtualMedia, SerialConsole (IPMI SOL, process mode); Links: ManagedBy Managers/1, Chassis Chassis/1) |
 | PATCH | `/redfish/v1/Systems/1` | Boot device override (`BootSourceOverrideTarget` incl. `UefiHttp`, `Boot.HttpBootUri`; see [UEFI HTTP boot](#uefi-http-boot)) |
 | POST | `/redfish/v1/Systems/1/Actions/ComputerSystem.Reset` | Power control |
 | GET/PATCH | `/redfish/v1/Systems/1/SecureBoot` | Secure Boot (`SecureBootEnable`, `SecureBootCurrentBoot`, `SecureBootMode`; UEFI in process management mode only, else `404`; see [Secure Boot](#secure-boot)) |
@@ -444,7 +462,7 @@ A fault is `{"kind": ..., conditions..., "count": N, "durationSeconds": S}`: `co
 | POST | `/redfish/v1/Systems/1/VirtualMedia/CD1/Actions/VirtualMedia.InsertMedia` | Insert an ISO (204) |
 | POST | `/redfish/v1/Systems/1/VirtualMedia/CD1/Actions/VirtualMedia.EjectMedia` | Eject media (204) |
 | GET | `/redfish/v1/Managers` | Manager collection |
-| GET | `/redfish/v1/Managers/1` | BMC manager (ManagerType BMC, Manufacturer and Model `qemu-bmc`, FirmwareVersion = qemu-bmc version, Status; Links: ManagerForServers Systems/1, ManagerInChassis Chassis/1) |
+| GET | `/redfish/v1/Managers/1` | BMC manager (ManagerType BMC, Manufacturer and Model `qemu-bmc`, FirmwareVersion = qemu-bmc version, Status, SerialConsole (IPMI SOL, process mode); Links: ManagerForServers Systems/1, ManagerInChassis Chassis/1) |
 | GET | `/redfish/v1/Managers/1/VirtualMedia` | VirtualMedia collection (deprecated location; same drive as Systems/1/VirtualMedia) |
 | GET | `/redfish/v1/Managers/1/VirtualMedia/CD1` | VirtualMedia resource (ImageName only while inserted) |
 | POST | `.../VirtualMedia.InsertMedia` | Insert an ISO (container path or HTTP(S) URL; 204) |
@@ -488,6 +506,12 @@ Another power action (Redfish or IPMI) during `PoweringOff` / `PoweringOn` ends 
 | Get BMC Global Enables | Fixed value: event message buffer and system event logging enabled (`mc getenables`) |
 | Get Channel Auth Capabilities | Auth type negotiation |
 | Get Channel Cipher Suites | Cipher suite list (suites 3 and 17) |
+| Close Session | Ends the RMCP+ session (and SOL active in it) |
+| Activate / Deactivate Payload | SOL (payload 1, instance 1), one session at a time (`0x80` if already active); deactivating another session's SOL closes that session |
+| Get Payload Activation Status / Get Payload Instance Info | Whether SOL is active, and in which session |
+| Get Channel Payload Support / Get Channel Payload Version | IPMI, SOL and the session setup payloads, version 1.0 |
+| Set / Get User Payload Access | SOL allowed per user (`sol payload enable/disable/status`, memory only) |
+| Set / Get SOL Configuration Parameters | Set In Progress, SOL Enable, Authentication, Character Accumulate Interval, Retry, bit rates; Payload Channel and Port (read-only) (`sol info`, `sol set`) |
 | Get Chassis Status | Power state query |
 | Chassis Control | Power on/off/cycle/reset, soft off, diag (NMI; `0xD5` if the VM is off) |
 | Set/Get Boot Options | Boot device override |
@@ -572,7 +596,7 @@ go vet ./...
 
 # Container integration tests
 make container-test         # Quick smoke tests
-make container-test-all     # All 130 tests (12 categories)
+make container-test-all     # All 134 tests (13 categories)
 
 # Ironic end-to-end test: deploy Debian with a real Ironic (Redfish + IPMI drivers, ~20 min)
 make ironic-test            # see tests/ironic/README.md
@@ -650,6 +674,7 @@ QEMU VM を Redfish API (HTTPS) と IPMI over LAN (UDP) の両方で制御する
 - **故障の注入** - 応答しない・遅い・エラーを返す Redfish・IPMI や、失敗する・何もしない電源操作を別の API で起こせる（管理ツールの異常系の試験に）
 - **Redfish のイベント** - EventService の購読（指定した URL へ POST）と SSE。電源状態の変化（Redfish・IPMI・ゲスト自身のどれによるものでも）や設定の変化を、ポーリングせずに受け取れる
 - **シリアルコンソールの共有** - `SERIAL_ADDR` に同時に複数つなげる（出力は全員へ、入力はどれからでも）。最近の出力を覚えていて Redfish で読める。QEMU が起動し直してもつながったまま
+- **IPMI SOL** - 同じコンソールを `ipmitool -I lanplus sol activate`（暗号スイート 3 と 17）で使える。Ironic の `ipmitool-socat` のコンソールなど。Redfish の `Managers/1` と `Systems/1` に `SerialConsole`
 - **互換性** - MAAS, Tinkerbell/Rufio
 
 ## クイックスタート
@@ -907,7 +932,24 @@ Redfish では標準の `LogService`（`Systems/1/LogServices/SerialConsole`、`
 
 レガシーモードでは QEMU は外にいるので、qemu-bmc はシリアルコンソールに何もしない（`SERIAL_ADDR` で待たず、`LogServices` は空）。
 
-IPMI SOL はまだ無い。
+#### IPMI SOL（Serial over LAN）
+
+プロセス管理モードでは、同じコンソールを IPMI v2.0 の SOL でも出す。`ipmitool sol activate`、Ironic のコンソール（`ipmitool-socat`）など SOL を使う道具がそのまま使える。SOL もコンソールの利用者の1つなので、その間も TCP の利用者は使い続けられる。
+
+```bash
+ipmitool -I lanplus -H localhost -U admin -P password sol activate        # ~. で抜ける
+ipmitool -I lanplus -H localhost -U admin -P password -C 3 sol activate   # 暗号スイート 3（ipmitool の既定は 17）
+ipmitool -I lanplus -H localhost -U admin -P password sol deactivate      # ほかの人の SOL を切る
+ipmitool -I lanplus -H localhost -U admin -P password sol info
+```
+
+- SOL は同時に1セッションだけ。もう1つ `sol activate` すると "SOL payload already active on another session"（completion code `0x80`）。`~.` で抜けると SOL を止め ipmitool のセッションも閉じる。セッションを閉じたとき、コンソールから 60 秒パケットが来ないとき（ipmitool を kill した等）も止まる。
+- 別のセッションから `sol deactivate` すると、使っている側に "SOL deactivating" のパケットを送り、そのセッションを閉じる。ipmitool は次にキーを打ったとき（か次の keepalive）に気づき、"SOL session closed by BMC" で終わる。
+- パケットはセッションと同じく暗号化・完全性つき（暗号スイート 3 と 17）。出力は Character Accumulate Interval（60 ms）が過ぎるか Send Threshold（96 文字）に達したら送り、1つずつ ACK を待ち、来なければ送り直す（SOL Retry: 100 ms おきに 7 回、それでも来なければ捨てる）。一部だけ受け取られたら残りを次のパケットで送る。ACK が届かず2度来た入力は1度だけ書く。break・CTS/DCD/DSR・flush の要求は受けて無視する。VM が止まっている間の入力は NACK（character transfer unavailable）。
+- `sol set` の設定（enabled、force-encryption、force-authentication、privilege-level、character-accumulate-level、character-send-threshold、retry-count、retry-interval、ビットレート）と `sol payload enable|disable` はメモリにだけ持つ。Payload Channel（1）と Port は読み出しのみ。
+- SOL は IPMI のポートで動き、ipmitool はそれが自分の話しているポート（コンテナの中では 623）と同じかを確かめる。IPMI のポートは同じ番号で公開する（`-p 623:623/udp`）か、623 に直接届く所で ipmitool を動かす。違うポート越しだと "BMC requests SOL session on different port" で止まる。
+- Redfish では `Managers/1` の `SerialConsole`（`ServiceEnabled`、`MaxConcurrentSessions` は 1、`ConnectTypesSupported` は `["IPMI"]`）と `Systems/1` の `SerialConsole`（`IPMI`: `ServiceEnabled`・`Port`・`HotKeySequenceDisplay`、`MaxConcurrentSessions`）。
+- レガシーモードには SOL は無い（Activate Payload は `0x81`、SOL disabled）。Redfish にも `SerialConsole` を出さない。
 
 ### noVNC
 
@@ -1028,7 +1070,7 @@ curl -H "$T" -X DELETE http://localhost:8623/faults      # 全部消す
 | GET | `/redfish/v1/SessionService/Sessions/{id}` | セッション |
 | DELETE | `/redfish/v1/SessionService/Sessions/{id}` | ログアウト（204） |
 | GET | `/redfish/v1/Systems` | システムコレクション |
-| GET | `/redfish/v1/Systems/1` | コンピュータシステム（Manufacturer、Model、SerialNumber、SKU（`VM_SKU` があれば）、Status、Processors、Storage、SimpleStorage、VirtualMedia。Links: ManagedBy に Managers/1、Chassis に Chassis/1） |
+| GET | `/redfish/v1/Systems/1` | コンピュータシステム（Manufacturer、Model、SerialNumber、SKU（`VM_SKU` があれば）、Status、Processors、Storage、SimpleStorage、VirtualMedia、SerialConsole（IPMI SOL、プロセス管理モード）。Links: ManagedBy に Managers/1、Chassis に Chassis/1） |
 | PATCH | `/redfish/v1/Systems/1` | ブートデバイス変更（`BootSourceOverrideTarget`（`UefiHttp` も）、`Boot.HttpBootUri`。「UEFI HTTP ブート」を参照） |
 | POST | `/redfish/v1/Systems/1/Actions/ComputerSystem.Reset` | 電源制御 |
 | GET/PATCH | `/redfish/v1/Systems/1/SecureBoot` | Secure Boot（`SecureBootEnable`・`SecureBootCurrentBoot`・`SecureBootMode`。プロセス管理モードの UEFI だけ、それ以外は `404`。「Secure Boot」を参照） |
@@ -1055,7 +1097,7 @@ curl -H "$T" -X DELETE http://localhost:8623/faults      # 全部消す
 | POST | `/redfish/v1/Systems/1/VirtualMedia/CD1/Actions/VirtualMedia.InsertMedia` | ISO を差す（204） |
 | POST | `/redfish/v1/Systems/1/VirtualMedia/CD1/Actions/VirtualMedia.EjectMedia` | メディア取り出し（204） |
 | GET | `/redfish/v1/Managers` | マネージャコレクション |
-| GET | `/redfish/v1/Managers/1` | BMC マネージャ（ManagerType は BMC、Manufacturer と Model は `qemu-bmc`、FirmwareVersion は qemu-bmc のバージョン、Status。Links: ManagerForServers に Systems/1、ManagerInChassis に Chassis/1） |
+| GET | `/redfish/v1/Managers/1` | BMC マネージャ（ManagerType は BMC、Manufacturer と Model は `qemu-bmc`、FirmwareVersion は qemu-bmc のバージョン、Status、SerialConsole（IPMI SOL、プロセス管理モード）。Links: ManagerForServers に Systems/1、ManagerInChassis に Chassis/1） |
 | GET | `/redfish/v1/Managers/1/VirtualMedia` | VirtualMedia コレクション（非推奨の場所。Systems/1/VirtualMedia と同じドライブ） |
 | GET | `/redfish/v1/Managers/1/VirtualMedia/CD1` | VirtualMedia リソース（ImageName は差しているときだけ） |
 | POST | `.../VirtualMedia.InsertMedia` | ISO を差す（コンテナ内のパスか HTTP(S) の URL、204） |
@@ -1099,6 +1141,12 @@ curl -H "$T" -X DELETE http://localhost:8623/faults      # 全部消す
 | Get BMC Global Enables | 固定値：Event Message Buffer と System Event Logging が有効（`mc getenables`） |
 | Get Channel Auth Capabilities | 認証方式ネゴシエーション |
 | Get Channel Cipher Suites | 暗号スイート一覧（3 と 17） |
+| Close Session | RMCP+ のセッションを閉じる（その中の SOL も止める） |
+| Activate / Deactivate Payload | SOL（payload 1、instance 1）。同時に1セッションだけ（使用中なら `0x80`）。ほかのセッションの SOL を止めるとそのセッションを閉じる |
+| Get Payload Activation Status / Get Payload Instance Info | SOL が使われているか、どのセッションか |
+| Get Channel Payload Support / Get Channel Payload Version | IPMI・SOL・セッションを開くための payload、版は 1.0 |
+| Set / Get User Payload Access | ユーザーごとの SOL の可否（`sol payload enable/disable/status`、メモリにだけ持つ） |
+| Set / Get SOL Configuration Parameters | Set In Progress、SOL Enable、Authentication、Character Accumulate Interval、Retry、ビットレート。Payload Channel と Port は読み出しのみ（`sol info`、`sol set`） |
 | Get Chassis Status | 電源状態取得 |
 | Chassis Control | 電源オン/オフ/サイクル/リセット、ソフトオフ、diag（NMI。電源が切れていれば `0xD5`） |
 | Set/Get Boot Options | ブートデバイス変更 |
@@ -1183,7 +1231,7 @@ go vet ./...
 
 # コンテナ統合テスト
 make container-test         # クイックスモークテスト
-make container-test-all     # 全 130 テスト (12 カテゴリ)
+make container-test-all     # 全 134 テスト (13 カテゴリ)
 
 # Ironic 通し試験: 本物の Ironic で Debian を展開 (Redfish・IPMI ドライバ、約 20 分)
 make ironic-test            # tests/ironic/README.md 参照

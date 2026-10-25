@@ -14,8 +14,8 @@ type MachineInterface interface {
 
 // RMCP constants
 const (
-	RMCPVersion1 = 0x06
-	RMCPClassASF = 0x06
+	RMCPVersion1  = 0x06
+	RMCPClassASF  = 0x06
 	RMCPClassIPMI = 0x07
 )
 
@@ -47,6 +47,8 @@ const (
 const (
 	CmdSetLANConfigParams = 0x01
 	CmdGetLANConfigParams = 0x02
+	CmdSetSOLConfigParams = 0x21
+	CmdGetSOLConfigParams = 0x22
 )
 
 // IPMI App Commands
@@ -61,6 +63,18 @@ const (
 	CmdSetSessionPrivilege        = 0x3B
 	CmdCloseSession               = 0x3C
 	CmdGetChannelCipherSuites     = 0x54
+)
+
+// IPMI App Commands - RMCP+ payloads (IPMI v2.0 chapter 24)
+const (
+	CmdActivatePayload            = 0x48
+	CmdDeactivatePayload          = 0x49
+	CmdGetPayloadActivationStatus = 0x4A
+	CmdGetPayloadInstanceInfo     = 0x4B
+	CmdSetUserPayloadAccess       = 0x4C
+	CmdGetUserPayloadAccess       = 0x4D
+	CmdGetChannelPayloadSupport   = 0x4E
+	CmdGetChannelPayloadVersion   = 0x4F
 )
 
 // IPMI App Commands - User Management
@@ -136,10 +150,10 @@ const (
 
 // RMCP+ Integrity Algorithm values (IPMI 2.0 Table 13-18)
 const (
-	IntegrityAlgorithmNone          = 0x00
-	IntegrityAlgorithmHMACSHA1_96   = 0x01
-	IntegrityAlgorithmHMACMD5_128   = 0x02
-	IntegrityAlgorithmMD5_128       = 0x03
+	IntegrityAlgorithmNone           = 0x00
+	IntegrityAlgorithmHMACSHA1_96    = 0x01
+	IntegrityAlgorithmHMACMD5_128    = 0x02
+	IntegrityAlgorithmMD5_128        = 0x03
 	IntegrityAlgorithmHMACSHA256_128 = 0x04
 )
 
@@ -170,17 +184,36 @@ const (
 type CompletionCode uint8
 
 const (
-	CompletionCodeOK                  CompletionCode = 0x00
-	CompletionCodeNodeBusy            CompletionCode = 0xC0
-	CompletionCodeInvalidCommand      CompletionCode = 0xC1
-	CompletionCodeInvalidForLUN       CompletionCode = 0xC2
-	CompletionCodeTimeout             CompletionCode = 0xC3
-	CompletionCodeOutOfSpace          CompletionCode = 0xC4
-	CompletionCodeNotPresent          CompletionCode = 0xCB
-	CompletionCodeInvalidField        CompletionCode = 0xCC
-	CompletionCodeParameterOutOfRange CompletionCode = 0xC9
-	CompletionCodeNotInPresentState   CompletionCode = 0xD5
-	CompletionCodeUnspecified         CompletionCode = 0xFF
+	CompletionCodeOK                    CompletionCode = 0x00
+	CompletionCodeNodeBusy              CompletionCode = 0xC0
+	CompletionCodeInvalidCommand        CompletionCode = 0xC1
+	CompletionCodeInvalidForLUN         CompletionCode = 0xC2
+	CompletionCodeTimeout               CompletionCode = 0xC3
+	CompletionCodeOutOfSpace            CompletionCode = 0xC4
+	CompletionCodeReqDataLenInvalid     CompletionCode = 0xC7
+	CompletionCodeNotPresent            CompletionCode = 0xCB
+	CompletionCodeInvalidField          CompletionCode = 0xCC
+	CompletionCodeParameterOutOfRange   CompletionCode = 0xC9
+	CompletionCodeInsufficientPrivilege CompletionCode = 0xD4
+	CompletionCodeNotInPresentState     CompletionCode = 0xD5
+	CompletionCodeUnspecified           CompletionCode = 0xFF
+)
+
+// Command-specific completion codes
+const (
+	// Activate Payload
+	completionCodePayloadActive   CompletionCode = 0x80 // already active on another session
+	completionCodePayloadDisabled CompletionCode = 0x81
+	completionCodeCannotEncrypt   CompletionCode = 0x83
+	// Deactivate Payload
+	completionCodePayloadInactive CompletionCode = 0x80 // already deactivated
+	// Get Channel Payload Version
+	completionCodePayloadNotAvailable CompletionCode = 0x80
+	// Set/Get SOL Configuration Parameters
+	completionCodeParamNotSupported CompletionCode = 0x80
+	completionCodeParamReadOnly     CompletionCode = 0x82
+	// Close Session
+	completionCodeInvalidSessionID CompletionCode = 0x87
 )
 
 // Boot device mapping for IPMI boot option parameter 5

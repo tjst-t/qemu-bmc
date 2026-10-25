@@ -42,8 +42,24 @@ func (s *Server) handleGetManager(w http.ResponseWriter, r *http.Request) {
 			ManagerInChassis:  ODataID{ODataID: chassisPath},
 		},
 	}
+	if s.solPort != 0 {
+		mgr.SerialConsole = &ManagerSerialConsole{
+			ServiceEnabled:        true,
+			MaxConcurrentSessions: solMaxSessions,
+			ConnectTypesSupported: []string{"IPMI"},
+		}
+	}
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(mgr)
+}
+
+// solMaxSessions is how many IPMI SOL sessions there can be at a time.
+const solMaxSessions = 1
+
+// SetIPMISerialConsole reports the VM serial console as offered over IPMI
+// SOL on port (Managers/1 and Systems/1 SerialConsole).
+func (s *Server) SetIPMISerialConsole(port int) {
+	s.solPort = port
 }
 
 // virtualMediaPath returns the VirtualMedia collection URI the request was

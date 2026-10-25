@@ -88,6 +88,17 @@ func (s *Server) handleGetSystem(w http.ResponseWriter, r *http.Request) {
 	if s.machine.SecureBootSupported() {
 		system.SecureBoot = &ODataID{ODataID: secureBootPath}
 	}
+	if s.solPort != 0 {
+		system.SerialConsole = &HostSerialConsole{
+			MaxConcurrentSessions: solMaxSessions,
+			IPMI: SerialConsoleProtocol{
+				ServiceEnabled: true,
+				Port:           s.solPort,
+				// ipmitool's escape sequence (sol activate)
+				HotKeySequenceDisplay: "Press ~. to exit the console (ipmitool)",
+			},
+		}
+	}
 	if httpBootURI != "" {
 		system.Boot.HttpBootUri = &httpBootURI
 	}
