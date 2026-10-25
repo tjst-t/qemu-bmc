@@ -112,6 +112,23 @@ func setCDBootIndex(args []string) []string {
 	return result
 }
 
+// setNICBootIndex gives the first NIC (a -device) boot priority, for PXE
+// with OVMF, which ignores QEMU's -boot order and would otherwise boot an
+// installed OS from the disk. Nothing is changed if another device already
+// has bootindex=0 or the NIC has a bootindex of its own.
+func setNICBootIndex(args []string) []string {
+	if hasBootIndex0(args) {
+		return args
+	}
+	result := make([]string, len(args))
+	copy(result, args)
+	if nics := findNICs(result); len(nics) > 0 && result[nics[0].pos-1] == "-device" &&
+		optionValue(result[nics[0].pos], "bootindex") == "" {
+		result[nics[0].pos] += ",bootindex=0"
+	}
+	return result
+}
+
 // optionValue returns the value of key in a QEMU option string such as
 // "if=none,id=cd0,file=a,,b.iso" (escaped commas are unescaped).
 func optionValue(opts, key string) string {

@@ -292,6 +292,43 @@ func TestApplyBootOverride_Pxe(t *testing.T) {
 	assert.Contains(t, result, "n")
 }
 
+// OVMF ignores -boot n: without bootindex it boots an installed OS from the
+// disk instead of the network (Ironic cleaning after undeploy hangs)
+func TestApplyBootOverride_PxeUEFISetsNICBootIndex(t *testing.T) {
+	result := ApplyBootOverride(uefiArgs, "Pxe")
+	assert.Equal(t, "virtio-net-pci,netdev=net0,mac=52:54:00:00:00:01,bootindex=0", result[7])
+	assert.Equal(t, "virtio-net-pci,netdev=net1,mac=52:54:00:00:00:02", result[11], "only the first NIC")
+	assert.Contains(t, result, "n")
+	assert.Equal(t, "virtio-net-pci,netdev=net0,mac=52:54:00:00:00:01", uefiArgs[7], "input not modified")
+}
+
+func TestApplyBootOverride_PxeUEFIBootIndexTaken(t *testing.T) {
+	args := append([]string{"-device", "virtio-blk-pci,drive=d,bootindex=0"}, uefiArgs...)
+	result := ApplyBootOverride(args, "Pxe")
+	assert.Equal(t, "virtio-net-pci,netdev=net0,mac=52:54:00:00:00:01", result[9])
+}
+
+func TestApplyBootOverride_PxeUEFIKeepsUserBootIndex(t *testing.T) {
+	args := []string{
+		"-drive", "if=pflash,format=raw,file=/OVMF_CODE.fd",
+		"-device", "e1000,netdev=n0,bootindex=2",
+	}
+	result := ApplyBootOverride(args, "Pxe")
+	assert.Equal(t, "e1000,netdev=n0,bootindex=2", result[3])
+}
+
+func TestApplyBootOverride_PxeBIOSNoBootIndex(t *testing.T) {
+	args := []string{"-netdev", "tap,id=net0", "-device", "virtio-net-pci,netdev=net0", "-device", "sga"}
+	result := ApplyBootOverride(args, "Pxe")
+	assert.Contains(t, result, "virtio-net-pci,netdev=net0")
+}
+
+func TestApplyBootOverride_OtherTargetsUEFINoNICBootIndex(t *testing.T) {
+	for _, target := range []string{"None", "Hdd", "Cd", "BiosSetup", "UefiHttp"} {
+		assert.Contains(t, ApplyBootOverride(uefiArgs, target), "virtio-net-pci,netdev=net0,mac=52:54:00:00:00:01", target)
+	}
+}
+
 func TestApplyBootOverride_Hdd(t *testing.T) {
 	result := ApplyBootOverride([]string{"-m", "4096"}, "Hdd")
 	assert.Contains(t, result, "-boot")

@@ -160,14 +160,20 @@ var bootTargetToQEMU = map[string]string{
 
 // ApplyBootOverride modifies QEMU args to apply a boot target override.
 // If target is "None" or empty, args are returned unchanged. For "Cd" the
-// managed CD drive also gets bootindex=0, which UEFI requires.
+// managed CD drive also gets bootindex=0, which UEFI requires; for "Pxe" with
+// UEFI firmware the first NIC does (SeaBIOS honors -boot n).
 func ApplyBootOverride(args []string, target string) []string {
 	bootVal, ok := bootTargetToQEMU[target]
 	if !ok {
 		return args
 	}
-	if target == "Cd" {
+	switch target {
+	case "Cd":
 		args = setCDBootIndex(args)
+	case "Pxe":
+		if IsUEFI(args) {
+			args = setNICBootIndex(args)
+		}
 	}
 
 	result := make([]string, 0, len(args)+2)
