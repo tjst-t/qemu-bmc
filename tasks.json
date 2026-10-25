@@ -1048,7 +1048,7 @@
       "number": 47,
       "kind": "task",
       "title": "シリアルの多重化（複数の利用者と、最近の出力のバッファ）",
-      "status": "in-progress",
+      "status": "done",
       "parent": "v0-10-0",
       "dependsOn": [
         "event-service"
@@ -1058,12 +1058,12 @@
       "labels": [],
       "body": "## なぜ\nいまは QEMU が `SERIAL_ADDR`（既定 localhost:9002）で TCP を待ち、1つの接続しか受けない。IPMI SOL・Redfish の SerialConsole・人の telnet を同時に使えるように、qemu-bmc が間に入って多重化する（次のタスク SOL の前提）。\n\n## 仕様\n- プロセス管理モード：QEMU のシリアルの chardev は qemu-bmc だけがつなぐ内部の UNIX ソケット（VMEDIA_DIR か実行時のディレクトリの中）にする。qemu-bmc がそれにつなぎ、QEMU が起動し直してもつなぎ直す。\n- qemu-bmc は `SERIAL_ADDR` で TCP を待ち、複数の接続を受ける（今と同じアドレスで、外から見た使い方は変えない。上限 8）。VM の出力は全部の接続へ送り、どの接続からの入力も VM へ送る。遅い接続は捨てる（全体を止めない）。\n- 最近の出力を覚えるリングバッファ（`SERIAL_BUFFER_BYTES`、既定 256KiB）。新しい接続には、`SERIAL_REPLAY`（既定 false）なら最初にバッファを送る。\n- Redfish に読み取りの出口を足す：`GET /redfish/v1/Systems/1/LogServices`・`.../LogServices/SerialConsole`（LogService、LogEntryType=Multiple でなくてよい）と `.../Entries` では大きすぎるので、代わりに Oem でない形が無ければ `/redfish/v1/Managers/1/SerialConsole/Log`（text/plain でバッファを返す、qemu-bmc 独自と README に書く）でよい。どの形にするかは Redfish の仕様を見て、検証器に引っかからない形を選ぶ。\n- 内部にシリアルの購読の API（Go の interface）を作り、次のタスクの SOL と WebSocket がこれを使う。\n- レガシーモード：QEMU は外にいるので、今と同じ（何もしない）。README にそう書く。\n- 既存の機能・試験（tests/ でシリアルに触っているもの、ipmi の VM chardev とは別物なので混同しない）を壊さない。\n\n## 確かめ方\n- 単体試験：多重化・バッファ・遅い接続を捨てる・QEMU 再起動でつなぎ直す。\n- コンテナ試験：Debian のゲストで、2つの接続を同時に開いてどちらにもログインの画面が出て、片方から入れたコマンドの出力が両方に出る。\n- README（英語と日本語）・CLAUDE.md。",
       "doneWhen": "go test -race ./... と go vet が通り、コンテナ試験でシリアルの TCP に2つ同時につないで両方に出力が出ることと、QEMU を電源オフ・オンしたあともつながることを確かめる",
-      "resolution": null,
+      "resolution": "Factory が取り込みました（factory/serial-mux）",
       "refs": [],
       "threads": [],
       "createdAt": "2026-10-25T10:54:29.647Z",
-      "updatedAt": "2026-10-25T13:13:18.809Z",
-      "closedAt": null,
+      "updatedAt": "2026-10-25T13:29:50.277Z",
+      "closedAt": "2026-10-25T13:29:50.277Z",
       "extra": {}
     },
     {
