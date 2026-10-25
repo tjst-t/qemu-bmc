@@ -43,7 +43,7 @@ func TestGetManager(t *testing.T) {
 	var mgr Manager
 	err := json.Unmarshal(w.Body.Bytes(), &mgr)
 	require.NoError(t, err)
-	assert.Equal(t, "#Manager.v1_3_0.Manager", mgr.ODataType)
+	assert.Equal(t, "#Manager.v1_7_0.Manager", mgr.ODataType)
 	assert.Equal(t, "BMC", mgr.ManagerType)
 }
 

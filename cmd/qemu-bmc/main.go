@@ -216,6 +216,10 @@ func main() {
 	redfishServer.SetUserStore(bmcState)
 	redfishServer.SetSystemUUID(systemUUID)
 	redfishServer.SetFirmwareVersion(version)
+	// Power state and setting changes, from Redfish, IPMI or the guest, are
+	// Redfish events
+	redfishServer.SetEventInsecureTLS(cfg.EventInsecureTLS)
+	redfishServer.SetEventSource(m)
 	addr := fmt.Sprintf(":%s", cfg.RedfishPort)
 	log.Printf("Starting Redfish server on %s", addr)
 

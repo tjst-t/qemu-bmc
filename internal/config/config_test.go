@@ -41,6 +41,7 @@ func TestLoad_Defaults(t *testing.T) {
 	assert.Equal(t, defaultVMediaDir("/vm"), cfg.VMediaDir)
 	assert.True(t, cfg.VMediaInsecureTLS)
 	assert.Equal(t, 10*time.Minute, cfg.VMediaTimeout)
+	assert.True(t, cfg.EventInsecureTLS)
 }
 
 func TestLoad_SystemIdentity(t *testing.T) {
@@ -63,6 +64,11 @@ func TestLoad_VMedia(t *testing.T) {
 	assert.Equal(t, "/data/iso", cfg.VMediaDir)
 	assert.False(t, cfg.VMediaInsecureTLS)
 	assert.Equal(t, 30*time.Second, cfg.VMediaTimeout)
+}
+
+func TestLoad_EventInsecureTLS(t *testing.T) {
+	t.Setenv("EVENT_INSECURE_TLS", "false")
+	assert.False(t, Load().EventInsecureTLS)
 }
 
 func TestDefaultVMediaDir(t *testing.T) {

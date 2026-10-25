@@ -40,6 +40,7 @@ type Server struct {
 	firmware     string
 	sessions     *sessionStore
 	users        UserStore
+	events       *eventService
 }
 
 // UserStore authenticates BMC users in addition to the configured
@@ -80,6 +81,7 @@ func NewServer(m MachineInterface, user, pass, vncAddr string) *Server {
 		pass:         pass,
 		novncHandler: novnc.NewHandler(vncAddr),
 		sessions:     newSessionStore(),
+		events:       newEventService(),
 	}
 	s.setupRoutes()
 	return s
@@ -125,6 +127,22 @@ func (s *Server) setupRoutes() {
 		s.router.HandleFunc(sessionsPath+p, s.handleCreateSession).Methods("POST")
 		s.router.HandleFunc(sessionsPath+"/{sid}"+p, s.handleGetSession).Methods("GET")
 		s.router.HandleFunc(sessionsPath+"/{sid}"+p, s.handleDeleteSession).Methods("DELETE")
+	}
+
+	// Events
+	for _, p := range []string{"", "/"} {
+		sub := subscriptionsPath + "/{subid}"
+		s.router.HandleFunc(eventServicePath+p, s.handleGetEventService).Methods("GET")
+		s.router.HandleFunc(eventServicePath+p, s.handlePatchEventService).Methods("PATCH")
+		s.router.HandleFunc(eventServicePath+"/Actions/EventService.SubmitTestEvent"+p, s.handleSubmitTestEvent).Methods("POST")
+		s.router.HandleFunc(ssePath+p, s.handleSSE).Methods("GET")
+		s.router.HandleFunc(subscriptionsPath+p, s.handleSubscriptionCollection).Methods("GET")
+		s.router.HandleFunc(subscriptionsPath+p, s.handleCreateSubscription).Methods("POST")
+		s.router.HandleFunc(sub+p, s.handleGetSubscription).Methods("GET")
+		s.router.HandleFunc(sub+p, s.handlePatchSubscription).Methods("PATCH")
+		s.router.HandleFunc(sub+p, s.handleDeleteSubscription).Methods("DELETE")
+		s.router.HandleFunc(sub+"/Actions/EventDestination.SuspendSubscription"+p, s.handleSuspendSubscription).Methods("POST")
+		s.router.HandleFunc(sub+"/Actions/EventDestination.ResumeSubscription"+p, s.handleResumeSubscription).Methods("POST")
 	}
 
 	// Systems

@@ -31,6 +31,7 @@ A Go single binary that controls QEMU VMs via both Redfish API (HTTPS) and IPMI 
 - **QMP Control** - Power operations, boot device changes, VirtualMedia mount
 - **UEFI HTTP boot and Secure Boot** - `UefiHttp` boot target with `Boot.HttpBootUri`; `Systems/1/SecureBoot` switches OVMF to its Secure Boot variant (Microsoft keys)
 - **Fault injection** - Unresponsive, slow or failing Redfish/IPMI and power actions that fail or do nothing, through a separate API, for testing management tools
+- **Redfish events** - EventService subscriptions (events POSTed to your URL) and an SSE stream: power state changes (from Redfish, IPMI or the guest itself) and settings changes, no polling needed
 - **Compatibility** - MAAS, Tinkerbell/Rufio
 
 ## Quick Start
@@ -212,6 +213,53 @@ curl -sk -X DELETE -H "X-Auth-Token: $TOKEN" https://localhost/redfish/v1/Sessio
 - A session expires after `SessionTimeout` seconds without use (1800 by default; `PATCH /redfish/v1/SessionService` with `{"SessionTimeout": n}`, 30–86400).
 - Sessions are kept in memory: they are lost when qemu-bmc restarts. Up to 64 sessions; creating more returns `503` until one is deleted or expires.
 
+### Events (EventService)
+
+Instead of polling, a management tool can subscribe to events, which qemu-bmc POSTs to it, or read them as a Server-Sent Events stream:
+
+```bash
+# Subscribe: events are POSTed to Destination (http or https) as Redfish Event resources
+curl -sk -u admin:password -H 'Content-Type: application/json' -d '{
+    "Destination": "http://10.0.0.5:8080/events", "Protocol": "Redfish", "Context": "node1",
+    "RegistryPrefixes": ["ResourceEvent"], "HttpHeaders": [{"Authorization": "Bearer xyz"}]
+  }' https://localhost/redfish/v1/EventService/Subscriptions
+# → 201, Location: /redfish/v1/EventService/Subscriptions/1
+
+# Or stream them (SSE); $filter is optional
+curl -sk -N -u admin:password \
+  "https://localhost/redfish/v1/EventService/SSE?\$filter=EventType%20eq%20'StatusChange'"
+# id: 3
+# data: {"@odata.type":"#Event.v1_7_0.Event","Id":"3","Name":"Event","Events":[{"EventType":"StatusChange",
+#        "MessageId":"ResourceEvent.1.3.ResourcePoweredOff","OriginOfCondition":{"@odata.id":"/redfish/v1/Systems/1"},...}],...}
+
+# Send a test event to everyone (only MessageId is required)
+curl -sk -u admin:password -H 'Content-Type: application/json' \
+  -d '{"MessageId": "ResourceEvent.1.3.ResourceChanged", "OriginOfCondition": "/redfish/v1/Systems/1"}' \
+  https://localhost/redfish/v1/EventService/Actions/EventService.SubmitTestEvent
+```
+
+Events (MessageIds of the DMTF `ResourceEvent` 1.3 registry):
+
+| Event | MessageId | EventType | OriginOfCondition |
+|-------|-----------|-----------|-------------------|
+| Power state `On` / `Off` / `PoweringOn` / `PoweringOff`, whoever changed it (Redfish, IPMI, the guest powering off, QEMU exiting or crashing) | `ResourceEvent.1.3.ResourcePoweredOn` / `ResourcePoweredOff` / `ResourcePoweringOn` / `ResourcePoweringOff` | `StatusChange` | `/redfish/v1/Systems/1` |
+| Boot override or `HttpBootUri` changed (Redfish PATCH, IPMI boot options, a `Once` override used) | `ResourceEvent.1.3.ResourceChanged` | `ResourceUpdated` | `/redfish/v1/Systems/1` |
+| VirtualMedia inserted or ejected (also a failed download ejecting it) | `ResourceEvent.1.3.ResourceChanged` | `ResourceUpdated` | `/redfish/v1/Systems/1/VirtualMedia/CD1` |
+| Secure Boot enabled/disabled, keys reset | `ResourceEvent.1.3.ResourceChanged` | `ResourceUpdated` | `/redfish/v1/Systems/1/SecureBoot` |
+| SessionService or EventService PATCHed | `ResourceEvent.1.3.ResourceChanged` | `ResourceUpdated` | the resource |
+| Session created (login) / deleted (logout) | `ResourceEvent.1.3.ResourceCreated` / `ResourceRemoved` | `ResourceAdded` / `ResourceRemoved` | the session |
+| `SubmitTestEvent` | as given | as given (`Other` if omitted) | as given |
+
+- Each Event has one record. `Context` is the subscription's (not sent on SSE). The power state is checked right after every power action and once a second, so a short state (e.g. `Off` during a `PowerCycle`) is reported too; a state shorter than that (e.g. a guest rebooting itself) is not.
+- **Filters** (subscriptions): `RegistryPrefixes` (`ResourceEvent`, `Base`), `ResourceTypes` (`ComputerSystem`, `VirtualMedia`, `SecureBoot`, `Session`, `SessionService`, `EventService`), `MessageIds` (with or without the version: `ResourceEvent.ResourcePoweredOn`), `OriginResources` (with `SubordinateResources: true` also the resources below them), and the older `EventTypes`. All given filters must match; none = all events. Unknown values are rejected (`400`).
+- **SSE** `$filter`: `<Property> eq '<value>'` on `EventType`, `MessageId`, `OriginResource`, `RegistryPrefix` or `ResourceType`, joined with `and` / `or` (no parentheses). The stream needs authentication like any other request; a comment line is sent every 15 s while idle.
+- **Delivery**: a `POST` with `Content-Type: application/json` and the subscription's `HttpHeaders` (write-only: `GET` returns `[]`); any `2xx` is a success. Events are delivered to each subscription one at a time, in order. A failed delivery is retried `DeliveryRetryAttempts` times (3), `DeliveryRetryIntervalSeconds` (5) apart; what then happens depends on the subscription's `DeliveryRetryPolicy`:
+  - `SuspendRetries` (default): the event is dropped and the subscription is kept but suspended (`Status.State` `Disabled`): nothing is sent to it, events in between are lost, until `POST .../Subscriptions/{id}/Actions/EventDestination.ResumeSubscription`.
+  - `TerminateAfterRetries`: the event is dropped and the subscription deleted.
+  - `RetryForever` / `RetryForeverWithBackoff`: the event is retried until delivered (the interval doubling up to 10 min with backoff); later events wait behind it (up to 256 per subscription, more are dropped).
+- `PATCH /redfish/v1/EventService`: `ServiceEnabled` (`false`: no events at all, `SubmitTestEvent` returns `503`), `DeliveryRetryAttempts` (0–100), `DeliveryRetryIntervalSeconds` (1–3600). `PATCH` a subscription: `Context`, `DeliveryRetryPolicy`.
+- Subscriptions are in memory only (lost on restart), at most 32 (`503` beyond). Certificates of https destinations are not verified unless `EVENT_INSECURE_TLS=false` (reported as `VerifyCertificate`).
+
 ### IPMI
 
 ```bash
@@ -376,6 +424,12 @@ A fault is `{"kind": ..., conditions..., "count": N, "durationSeconds": S}`: `co
 | POST | `.../VirtualMedia.EjectMedia` | Eject media (204) |
 | GET | `/redfish/v1/Chassis` | Chassis collection |
 | GET | `/redfish/v1/Chassis/1` | Chassis resource (PowerState same as Systems/1, Manufacturer, Model and SerialNumber same as Systems/1, Status; Links: ComputerSystems Systems/1, ManagedBy Managers/1) |
+| GET/PATCH | `/redfish/v1/EventService` | Event service (ServiceEnabled, DeliveryRetryAttempts, DeliveryRetryIntervalSeconds, ServerSentEventUri); see [Events](#events-eventservice) |
+| POST | `/redfish/v1/EventService/Actions/EventService.SubmitTestEvent` | Send a test event (204) |
+| GET | `/redfish/v1/EventService/SSE` | Server-Sent Events stream (`$filter`) |
+| GET/POST | `/redfish/v1/EventService/Subscriptions` | Subscription collection / subscribe (201, Location) |
+| GET/PATCH/DELETE | `/redfish/v1/EventService/Subscriptions/{id}` | Subscription (PATCH: Context, DeliveryRetryPolicy; DELETE: 204) |
+| POST | `.../Subscriptions/{id}/Actions/EventDestination.SuspendSubscription`, `.../ResumeSubscription` | Suspend / resume deliveries (204) |
 | GET | `/novnc/` | Redirect to noVNC UI |
 | GET | `/novnc/vnc.html` | Browser-based VNC console |
 | GET | `/websockify` | WebSocket-to-VNC proxy |
@@ -437,6 +491,7 @@ Another power action (Redfish or IPMI) during `PoweringOff` / `PoweringOn` ends 
 | `VMEDIA_DIR` | `/vm/vmedia` if `/vm` is writable, else `/tmp/vmedia` | Where VirtualMedia HTTP(S) images are downloaded. Also used for the UEFI HTTP boot image (`Boot.HttpBootUri`). The previous download is deleted when the medium (or URI) is replaced or ejected, and leftovers from an earlier run (`cd1-*.iso`, `httpboot-*.iso`) are deleted at startup. In legacy mode the external QEMU must be able to read this directory (same filesystem) |
 | `VMEDIA_INSECURE_TLS` | `true` | Skip certificate verification when downloading HTTPS images. With `false`, the system CAs are used; add your own CA with `SSL_CERT_FILE` |
 | `VMEDIA_TIMEOUT` | `600` | Seconds a power on or reset requested during a VirtualMedia (or UEFI HTTP boot image) download waits for it before booting without the image |
+| `EVENT_INSECURE_TLS` | `true` | Skip certificate verification when POSTing events to https subscription destinations. See [Events](#events-eventservice) |
 | `FAULT_API_ADDR` | (empty, disabled) | Listen address of the fault injection API (plain HTTP, e.g. `:8623`). See [Fault injection](#fault-injection) |
 | `FAULT_API_TOKEN` | (empty) | Bearer token required by the fault API; no authentication if empty |
 | `FAULTS` | (empty) | JSON array of faults active from startup |
@@ -488,7 +543,7 @@ go vet ./...
 
 # Container integration tests
 make container-test         # Quick smoke tests
-make container-test-all     # All 115 tests (10 categories)
+make container-test-all     # All 125 tests (11 categories)
 
 # Ironic end-to-end test: deploy Debian with a real Ironic (Redfish + IPMI drivers, ~20 min)
 make ironic-test            # see tests/ironic/README.md
@@ -563,6 +618,7 @@ QEMU VM を Redfish API (HTTPS) と IPMI over LAN (UDP) の両方で制御する
 - **QMP 制御** - 電源操作、ブートデバイス変更、VirtualMedia マウント
 - **UEFI HTTP ブートと Secure Boot** - 起動先 `UefiHttp` と `Boot.HttpBootUri`。`Systems/1/SecureBoot` で OVMF を Secure Boot 用（Microsoft の鍵入り）に切り替える
 - **故障の注入** - 応答しない・遅い・エラーを返す Redfish・IPMI や、失敗する・何もしない電源操作を別の API で起こせる（管理ツールの異常系の試験に）
+- **Redfish のイベント** - EventService の購読（指定した URL へ POST）と SSE。電源状態の変化（Redfish・IPMI・ゲスト自身のどれによるものでも）や設定の変化を、ポーリングせずに受け取れる
 - **互換性** - MAAS, Tinkerbell/Rufio
 
 ## クイックスタート
@@ -738,6 +794,53 @@ curl -sk -X DELETE -H "X-Auth-Token: $TOKEN" https://localhost/redfish/v1/Sessio
 - セッションは `SessionTimeout` 秒使われないと切れる（既定 1800。`PATCH /redfish/v1/SessionService` に `{"SessionTimeout": n}` で 30〜86400 に変えられる）。
 - セッションはメモリにだけあり、qemu-bmc を起動し直すと消える。同時に 64 個まで。それを超えて作ると、どれかが消えるか切れるまで `503` を返す。
 
+### イベント（EventService）
+
+管理ツールはポーリングしなくても、購読して qemu-bmc から POST で受け取るか、Server-Sent Events の流れとして読める。
+
+```bash
+# 購読：Destination（http か https）へ Redfish の Event 資源を POST する
+curl -sk -u admin:password -H 'Content-Type: application/json' -d '{
+    "Destination": "http://10.0.0.5:8080/events", "Protocol": "Redfish", "Context": "node1",
+    "RegistryPrefixes": ["ResourceEvent"], "HttpHeaders": [{"Authorization": "Bearer xyz"}]
+  }' https://localhost/redfish/v1/EventService/Subscriptions
+# → 201、Location: /redfish/v1/EventService/Subscriptions/1
+
+# SSE で読む（$filter は省略可）
+curl -sk -N -u admin:password \
+  "https://localhost/redfish/v1/EventService/SSE?\$filter=EventType%20eq%20'StatusChange'"
+# id: 3
+# data: {"@odata.type":"#Event.v1_7_0.Event","Id":"3","Name":"Event","Events":[{"EventType":"StatusChange",
+#        "MessageId":"ResourceEvent.1.3.ResourcePoweredOff","OriginOfCondition":{"@odata.id":"/redfish/v1/Systems/1"},...}],...}
+
+# 試しのイベントを全員に送る（要るのは MessageId だけ）
+curl -sk -u admin:password -H 'Content-Type: application/json' \
+  -d '{"MessageId": "ResourceEvent.1.3.ResourceChanged", "OriginOfCondition": "/redfish/v1/Systems/1"}' \
+  https://localhost/redfish/v1/EventService/Actions/EventService.SubmitTestEvent
+```
+
+出すイベント（MessageId は DMTF の `ResourceEvent` 1.3 レジストリのもの）：
+
+| 出来事 | MessageId | EventType | OriginOfCondition |
+|-------|-----------|-----------|-------------------|
+| 電源状態が `On`・`Off`・`PoweringOn`・`PoweringOff` になった（Redfish・IPMI・ゲストが自分で切った・QEMU が終わった・落ちた、のどれでも） | `ResourceEvent.1.3.ResourcePoweredOn`・`ResourcePoweredOff`・`ResourcePoweringOn`・`ResourcePoweringOff` | `StatusChange` | `/redfish/v1/Systems/1` |
+| 起動先の上書き・`HttpBootUri` が変わった（Redfish の PATCH、IPMI の boot options、`Once` を使い終えた） | `ResourceEvent.1.3.ResourceChanged` | `ResourceUpdated` | `/redfish/v1/Systems/1` |
+| VirtualMedia を差した・抜いた（ダウンロードの失敗で抜けたときも） | `ResourceEvent.1.3.ResourceChanged` | `ResourceUpdated` | `/redfish/v1/Systems/1/VirtualMedia/CD1` |
+| Secure Boot の有効・無効、鍵のリセット | `ResourceEvent.1.3.ResourceChanged` | `ResourceUpdated` | `/redfish/v1/Systems/1/SecureBoot` |
+| SessionService・EventService を PATCH した | `ResourceEvent.1.3.ResourceChanged` | `ResourceUpdated` | その資源 |
+| セッションの作成（ログイン）・削除（ログアウト） | `ResourceEvent.1.3.ResourceCreated`・`ResourceRemoved` | `ResourceAdded`・`ResourceRemoved` | そのセッション |
+| `SubmitTestEvent` | 渡したもの | 渡したもの（省略すると `Other`） | 渡したもの |
+
+- Event 1つにレコードは1つ。`Context` は購読のもの（SSE には付かない）。電源状態は電源操作のすぐ後と1秒ごとに見るので、短い状態（`PowerCycle` 中の `Off` など）も出る。それより短いもの（ゲストが自分で再起動したなど）は出ない。
+- **絞り込み**（購読）：`RegistryPrefixes`（`ResourceEvent`・`Base`）、`ResourceTypes`（`ComputerSystem`・`VirtualMedia`・`SecureBoot`・`Session`・`SessionService`・`EventService`）、`MessageIds`（版は省いてもよい：`ResourceEvent.ResourcePoweredOn`）、`OriginResources`（`SubordinateResources: true` ならその下の資源も）、古い形の `EventTypes`。指定したものが全部合うものだけ届く。何も指定しなければ全部。知らない値は `400`。
+- **SSE** の `$filter`：`EventType`・`MessageId`・`OriginResource`・`RegistryPrefix`・`ResourceType` についての `<Property> eq '<value>'` を `and`・`or` でつないだもの（括弧は不可）。ほかの要求と同じく認証が要る。何も無いときは 15 秒ごとにコメント行を送る。
+- **届け方**：`Content-Type: application/json` と購読の `HttpHeaders` を付けた `POST`（`HttpHeaders` は書くだけで、`GET` では `[]`）。`2xx` なら成功。購読ごとに1つずつ順番に届ける。失敗したら `DeliveryRetryIntervalSeconds`（5）おきに `DeliveryRetryAttempts`（3）回送り直し、それでも駄目なら購読の `DeliveryRetryPolicy` で次のようにする：
+  - `SuspendRetries`（既定）：そのイベントは捨て、購読は残したまま止める（`Status.State` が `Disabled`）。`POST .../Subscriptions/{id}/Actions/EventDestination.ResumeSubscription` まで何も送らず、その間のイベントは失われる。
+  - `TerminateAfterRetries`：そのイベントを捨て、購読を消す。
+  - `RetryForever`・`RetryForeverWithBackoff`：届くまで送り直す（backoff なら間隔を倍々に、最大 10 分）。後のイベントはその後ろで待つ（購読ごとに 256 件まで、超えた分は捨てる）。
+- `PATCH /redfish/v1/EventService`：`ServiceEnabled`（`false` ならイベントを一切出さず、`SubmitTestEvent` は `503`）、`DeliveryRetryAttempts`（0〜100）、`DeliveryRetryIntervalSeconds`（1〜3600）。購読の `PATCH`：`Context`・`DeliveryRetryPolicy`。
+- 購読はメモリにだけあり（起動し直すと消える）、32 件まで（超えると `503`）。https の Destination の証明書は `EVENT_INSECURE_TLS=false` にしない限り検証しない（`VerifyCertificate` に出る）。
+
 ### IPMI
 
 ```bash
@@ -902,6 +1005,12 @@ curl -H "$T" -X DELETE http://localhost:8623/faults      # 全部消す
 | POST | `.../VirtualMedia.EjectMedia` | メディア取り出し（204） |
 | GET | `/redfish/v1/Chassis` | シャーシコレクション |
 | GET | `/redfish/v1/Chassis/1` | シャーシリソース（PowerState、Manufacturer、Model、SerialNumber は Systems/1 と同じ値、Status。Links: ComputerSystems に Systems/1、ManagedBy に Managers/1） |
+| GET/PATCH | `/redfish/v1/EventService` | イベントサービス（ServiceEnabled・DeliveryRetryAttempts・DeliveryRetryIntervalSeconds・ServerSentEventUri）。[イベント](#イベントeventservice) を参照 |
+| POST | `/redfish/v1/EventService/Actions/EventService.SubmitTestEvent` | 試しのイベントを送る（204） |
+| GET | `/redfish/v1/EventService/SSE` | Server-Sent Events（`$filter`） |
+| GET/POST | `/redfish/v1/EventService/Subscriptions` | 購読の一覧・購読する（201、Location） |
+| GET/PATCH/DELETE | `/redfish/v1/EventService/Subscriptions/{id}` | 購読（PATCH は Context・DeliveryRetryPolicy、DELETE は 204） |
+| POST | `.../Subscriptions/{id}/Actions/EventDestination.SuspendSubscription`・`.../ResumeSubscription` | 届けるのを止める・再開する（204） |
 | GET | `/novnc/` | noVNC UI へリダイレクト |
 | GET | `/novnc/vnc.html` | ブラウザ VNC コンソール |
 | GET | `/websockify` | WebSocket-to-VNC プロキシ |
@@ -963,6 +1072,7 @@ curl -H "$T" -X DELETE http://localhost:8623/faults      # 全部消す
 | `VMEDIA_DIR` | `/vm` が書ければ `/vm/vmedia`、無理なら `/tmp/vmedia` | VirtualMedia の HTTP(S) イメージの保存先（UEFI HTTP ブートの `Boot.HttpBootUri` のイメージも）。差し替え・Eject（URI の変更・削除）で前に落としたファイルは消し、前の起動の残り（`cd1-*.iso`・`httpboot-*.iso`）は起動時に消す。レガシーモードでは外の QEMU がこのディレクトリを読める（同じファイルシステム）必要がある |
 | `VMEDIA_INSECURE_TLS` | `true` | HTTPS のイメージを落とすとき証明書を検証しない。`false` ならシステムの CA で検証する。自前の CA は `SSL_CERT_FILE` で足す |
 | `VMEDIA_TIMEOUT` | `600` | ダウンロード中（VirtualMedia・UEFI HTTP ブートのイメージ）に電源オン・リセットが来たとき、終わるまで待つ秒数（過ぎたら ISO 無しで起動） |
+| `EVENT_INSECURE_TLS` | `true` | https の購読先へイベントを POST するとき証明書を検証しない。[イベント](#イベントeventservice) を参照 |
 | `FAULT_API_ADDR` | (空、無効) | 故障の注入の API の待ち受けアドレス（TLS なしの HTTP。例 `:8623`）。[故障の注入](#故障の注入) を参照 |
 | `FAULT_API_TOKEN` | (空) | 故障の API に要る Bearer トークン。空なら認証なし |
 | `FAULTS` | (空) | 起動時から効く故障の JSON の配列 |
@@ -1014,7 +1124,7 @@ go vet ./...
 
 # コンテナ統合テスト
 make container-test         # クイックスモークテスト
-make container-test-all     # 全 115 テスト (10 カテゴリ)
+make container-test-all     # 全 125 テスト (11 カテゴリ)
 
 # Ironic 通し試験: 本物の Ironic で Debian を展開 (Redfish・IPMI ドライバ、約 20 分)
 make ironic-test            # tests/ironic/README.md 参照

@@ -71,7 +71,10 @@ func (m *Machine) SetSecureBootEnable(enable bool) error {
 			return err
 		}
 	}
-	m.secureBoot.enable = enable
+	if m.secureBoot.enable != enable {
+		m.secureBoot.enable = enable
+		m.publishChange(ResourceSecureBoot)
+	}
 	return nil
 }
 
@@ -93,5 +96,6 @@ func (m *Machine) ResetSecureBootKeys() error {
 	if m.secureBoot.running && m.processManager.IsRunning() {
 		m.secureBoot.keysReset = true
 	}
+	m.publishChange(ResourceSecureBoot)
 	return nil
 }

@@ -25,7 +25,8 @@ func (s *Server) handleManagerCollection(w http.ResponseWriter, r *http.Request)
 
 func (s *Server) handleGetManager(w http.ResponseWriter, r *http.Request) {
 	mgr := Manager{
-		ODataType:       "#Manager.v1_3_0.Manager",
+		// Manufacturer was added in v1_7_0
+		ODataType:       "#Manager.v1_7_0.Manager",
 		ODataID:         "/redfish/v1/Managers/1",
 		ODataContext:    "/redfish/v1/$metadata#Manager.Manager",
 		ID:              "1",

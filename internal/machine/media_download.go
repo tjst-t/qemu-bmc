@@ -127,6 +127,7 @@ func (m *Machine) insertURL(image, username, password string) error {
 	opts := m.vmedia
 	m.mu.Unlock()
 	removeMediaFile(old)
+	m.publishChange(ResourceVirtualMedia)
 
 	go m.runDownload(ctx, dl, gen, image, shown, username, password, opts)
 	// Take the previous image out of a running QEMU right away. Done in the
@@ -178,6 +179,7 @@ func (m *Machine) runDownload(ctx context.Context, dl *mediaDownload, gen uint64
 	if err != nil {
 		log.Printf("VirtualMedia: download of %s failed, ejecting: %v", shown, err)
 		m.media, m.mediaPath = Media{}, ""
+		m.publishChange(ResourceVirtualMedia)
 	} else {
 		log.Printf("VirtualMedia: downloaded %s to %s in %s", shown, path, time.Since(start).Round(time.Millisecond))
 		m.mediaPath, m.mediaFile = path, path

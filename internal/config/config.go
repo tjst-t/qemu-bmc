@@ -55,6 +55,10 @@ type Config struct {
 	VMediaInsecureTLS bool
 	VMediaTimeout     time.Duration
 
+	// EventInsecureTLS (EVENT_INSECURE_TLS) skips certificate verification
+	// when delivering Redfish events to https subscription destinations
+	EventInsecureTLS bool
+
 	// Fault injection: the fault API listens on FaultAPIAddr
 	// (FAULT_API_ADDR, disabled if empty) and needs the bearer token
 	// FaultAPIToken (FAULT_API_TOKEN) if set; Faults (FAULTS) is a JSON
@@ -94,6 +98,8 @@ func Load() *Config {
 		VMediaDir:         getEnv("VMEDIA_DIR", defaultVMediaDir("/vm")),
 		VMediaInsecureTLS: getBoolEnv("VMEDIA_INSECURE_TLS", true),
 		VMediaTimeout:     getSecondsEnv("VMEDIA_TIMEOUT", 10*time.Minute),
+
+		EventInsecureTLS: getBoolEnv("EVENT_INSECURE_TLS", true),
 
 		FaultAPIAddr:  getEnv("FAULT_API_ADDR", ""),
 		FaultAPIToken: getEnv("FAULT_API_TOKEN", ""),

@@ -114,6 +114,11 @@ type Machine struct {
 	// GracefulShutdown/GracefulRestart from being sent when it returns
 	// true (fault injection). Guarded by resetMu.
 	ignoreGraceful func(resetType string) bool
+
+	// events are sent to the SubscribeEvents subscribers; powerPoll is how
+	// often the power state is polled for them (0 = defaultPowerPoll).
+	events    eventBus
+	powerPoll time.Duration
 }
 
 // New creates a new Machine with the given QMP client (legacy mode)
@@ -292,6 +297,8 @@ func (m *Machine) getQMPStatusProcess() (qmp.Status, error) {
 // meanwhile, so that the VM boots from the image without blocking the caller
 // (the IPMI server handles one request at a time).
 func (m *Machine) Reset(resetType string) error {
+	// Runs after resetMu is released
+	defer m.checkPower()
 	mediaDeadline := m.mediaDeadline()
 	m.resetMu.Lock()
 	defer m.resetMu.Unlock()
@@ -315,7 +322,11 @@ func (m *Machine) Reset(resetType string) error {
 	}
 
 	gen := m.resetGen.Add(1)
-	m.setTransition(gen, "")
+	// Not setTransition: the state this ends is not reported (a
+	// PoweringOff ended by ForceOff goes to Off, not On and Off)
+	m.mu.Lock()
+	m.transition = ""
+	m.mu.Unlock()
 
 	if (resetType == "On" || resetType == "ForceRestart" || resetType == "PowerCycle") && m.downloadPending() {
 		if resetType == "On" {
@@ -364,11 +375,13 @@ func (m *Machine) resetAfterDownload(gen uint64, resetType string, mediaDeadline
 // was requested. gen is the Reset call setting it.
 func (m *Machine) setTransition(gen uint64, state PowerState) {
 	m.mu.Lock()
-	defer m.mu.Unlock()
 	if gen != m.resetGen.Load() {
+		m.mu.Unlock()
 		return
 	}
 	m.transition = state
+	m.mu.Unlock()
+	m.checkPower()
 }
 
 // resetDispatch runs a power action without touching the transition state.
@@ -448,9 +461,12 @@ func (m *Machine) resetProcessMode(resetType string, mediaDeadline time.Time) er
 		m.syncMedia(cdImage)
 
 		m.ConsumeBootOnce()
+		m.checkPower()
 		return nil
 
 	case "ForceOff":
+		// Report Off right away, also when On follows (PowerCycle)
+		defer m.checkPower()
 		if err := m.qmpClient.Quit(); err != nil {
 			// QMP may not be connected; force-kill the process
 			log.Printf("QMP quit failed (%v), killing process", err)
@@ -660,6 +676,7 @@ func (m *Machine) SetBootOverride(override BootOverride) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.bootOverride = override
+	m.publishChange(ResourceBoot)
 	return nil
 }
 
@@ -670,6 +687,7 @@ func (m *Machine) ConsumeBootOnce() {
 	if m.bootOverride.Enabled == "Once" {
 		m.bootOverride.Enabled = "Disabled"
 		m.bootOverride.Target = "None"
+		m.publishChange(ResourceBoot)
 	}
 }
 
@@ -722,6 +740,7 @@ func (m *Machine) InsertMedia(image, username, password string) error {
 	old := m.replaceMediaLocked(Media{Image: image, Inserted: true}, path, "")
 	m.mu.Unlock()
 	removeMediaFile(old)
+	m.publishChange(ResourceVirtualMedia)
 	return nil
 }
 
@@ -733,6 +752,7 @@ func (m *Machine) EjectMedia() error {
 	m.mu.Lock()
 	old := m.replaceMediaLocked(Media{}, "", "")
 	m.mu.Unlock()
+	m.publishChange(ResourceVirtualMedia)
 
 	m.resetMu.Lock()
 	defer m.resetMu.Unlock()

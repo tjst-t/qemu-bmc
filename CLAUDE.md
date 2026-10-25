@@ -14,8 +14,8 @@ cmd/qemu-bmc/main.go          # Entrypoint, goroutines for Redfish + IPMI
 internal/
   qmp/                         # QMP socket client (interface + implementation)
   qemu/                        # QEMU process management (args, process lifecycle)
-  machine/                     # VM state management (wraps QMP + ProcessManager)
-  redfish/                     # HTTP server with gorilla/mux, 15+ endpoints
+  machine/                     # VM state management (wraps QMP + ProcessManager), event bus (events.go)
+  redfish/                     # HTTP server with gorilla/mux, 15+ endpoints, EventService (events.go)
   ipmi/                        # UDP server + VM chardev server, RMCP/RMCP+, RAKP auth, chassis commands
   bmc/                         # BMC configuration state (users, LAN, channels)
   config/                      # Environment variable config
@@ -24,10 +24,10 @@ docker/
   Dockerfile                   # Multi-stage build (Go builder + Debian runtime)
   entrypoint.sh                # Environment variables → QEMU args conversion
   setup-network.sh             # TAP/bridge network setup for VM passthrough
-tests/                         # Bash-based container integration tests (115 tests)
+tests/                         # Bash-based container integration tests (125 tests)
   run_tests.sh                 # Test runner (category-based)
   test_helper.sh               # Assertions, container mgmt, IPMI/Redfish helpers
-  test_*.sh                    # Test categories (container, ipmi, redfish, power, boot, fault, etc.)
+  test_*.sh                    # Test categories (container, ipmi, redfish, power, boot, fault, events, etc.)
   ironic/run.sh                # Ironic end-to-end deploy test (make ironic-test; manual, not in CI)
 containerlab/
   example.yml                  # 2 nodes booting their own disk, BMC published on the host
@@ -81,7 +81,7 @@ make docker-build
 # Container integration tests (quick smoke tests)
 make container-test
 
-# Container integration tests (all 115 tests across 10 categories)
+# Container integration tests (all 125 tests across 11 categories)
 make container-test-all
 
 # Run specific test categories
@@ -122,6 +122,7 @@ make ironic-test                       # or IRONIC_FLOWS=redfish-vmedia, IRONIC_
 | `VMEDIA_DIR` | `/vm/vmedia` (if `/vm` is writable, else `/tmp/vmedia`) | Where VirtualMedia http(s) images (`cd1-*.iso`) and the UEFI HTTP boot image (`httpboot-*.iso`) are downloaded; the previous download is deleted on replace/eject, leftovers at startup |
 | `VMEDIA_INSECURE_TLS` | `true` | Skip certificate verification for https VirtualMedia downloads |
 | `VMEDIA_TIMEOUT` | `600` | Seconds a power on/reset (Redfish and IPMI) waits for a VirtualMedia (or, for UefiHttp, HttpBootUri) download in progress |
+| `EVENT_INSECURE_TLS` | `true` | Skip certificate verification when POSTing Redfish events to https subscription destinations |
 | `FAULT_API_ADDR` | (empty, disabled) | Fault injection API listen address (plain HTTP, e.g. `:8623`), see Fault Injection below |
 | `FAULT_API_TOKEN` | (empty) | Bearer token required by the fault API (none if empty) |
 | `FAULTS` | (empty) | JSON array of faults active from startup (works without `FAULT_API_ADDR`) |
@@ -148,7 +149,7 @@ make ironic-test                       # or IRONIC_FLOWS=redfish-vmedia, IRONIC_
 
 | Method | Path | Description |
 |--------|------|-------------|
-| GET | `/redfish`, `/redfish/v1` | Version document, ServiceRoot (no auth; root has SessionService and Links.Sessions) |
+| GET | `/redfish`, `/redfish/v1` | Version document, ServiceRoot (no auth; root has SessionService, EventService and Links.Sessions) |
 | GET/PATCH | `/redfish/v1/SessionService` | SessionTimeout (default 1800 s, 30–86400) |
 | GET/POST | `/redfish/v1/SessionService/Sessions` | Session collection / log in (POST needs no auth; 201 with X-Auth-Token and Location; 401 bad credentials; 503 over 64 sessions) |
 | GET/DELETE | `/redfish/v1/SessionService/Sessions/{id}` | Session / log out (204). Sessions are in memory and expire after SessionTimeout idle |
@@ -172,11 +173,16 @@ make ironic-test                       # or IRONIC_FLOWS=redfish-vmedia, IRONIC_
 | POST | `/redfish/v1/Systems/1/SecureBoot/Actions/SecureBoot.ResetKeys` | `ResetKeysType` `ResetAllKeysToDefault` only (else 400): deletes the secboot VARS, recopied from the template at the next QEMU start (204) |
 | POST | `/redfish/v1/Systems/1/Actions/ComputerSystem.Reset` | Power control: On, ForceOff, GracefulShutdown, ForceRestart, GracefulRestart, PowerCycle (process mode: QEMU stopped and restarted so boot override/VirtualMedia apply; legacy: system_reset; off: On), ForceOn (= On), Nmi (QMP inject-nmi; 409 when off; does not end a graceful action), PushPowerButton (off: On, on: GracefulShutdown) |
 | GET | `/redfish/v1/Managers` | Manager collection |
-| GET | `/redfish/v1/Managers/1` | BMC manager (ManagerType BMC, Manufacturer/Model `qemu-bmc`, FirmwareVersion = qemu-bmc version via SetFirmwareVersion, Status, Links.ManagerForServers → Systems/1, Links.ManagerInChassis → Chassis/1) |
+| GET | `/redfish/v1/Managers/1` | BMC manager (`#Manager.v1_7_0`, the first with Manufacturer; ManagerType BMC, Manufacturer/Model `qemu-bmc`, FirmwareVersion = qemu-bmc version via SetFirmwareVersion, Status, Links.ManagerForServers → Systems/1, Links.ManagerInChassis → Chassis/1) |
 | GET | `/redfish/v1/Managers/1/VirtualMedia` | VirtualMedia collection (deprecated location, kept for gofish/bmclib) |
 | GET | `/redfish/v1/Managers/1/VirtualMedia/CD1` | VirtualMedia resource (ImageName omitted when nothing is inserted; Image stays as "") |
 | POST | `.../VirtualMedia/CD1/Actions/VirtualMedia.InsertMedia` | Insert ISO (container path `/...` or `file://`, or http(s) URL downloaded in the background with optional UserName/Password Basic auth; 204, 400 if missing). Kept while off, attached at QEMU start; power on/reset during a download runs once it ends (reports PoweringOn meanwhile), a failed download ejects |
 | POST | `.../VirtualMedia/CD1/Actions/VirtualMedia.EjectMedia` | Eject ISO (204) |
+| GET/PATCH | `/redfish/v1/EventService` | `#EventService.v1_10_0`: ServiceEnabled, DeliveryRetryAttempts (3, 0–100), DeliveryRetryIntervalSeconds (5, 1–3600) are PATCHable (else 400 PropertyNotWritable), ETag/If-Match; EventFormatTypes [Event], RegistryPrefixes [ResourceEvent, Base], ResourceTypes, ServerSentEventUri, SSEFilterPropertiesSupported. ServiceEnabled false → no events at all. Linked from ServiceRoot |
+| POST | `/redfish/v1/EventService/Actions/EventService.SubmitTestEvent` | MessageId required; EventType (default Other), MessageSeverity/Severity (OK), Message (default from the ResourceEvent table), MessageArgs, OriginOfCondition (string or {"@odata.id"}), EventId, EventTimestamp (RFC 3339), EventGroupId. 204; 503 when disabled |
+| GET | `/redfish/v1/EventService/SSE` | text/event-stream `id: <EventId>` / `data: <Event JSON>` (no Context), `: keep-alive` every 15 s. `$filter`: `Prop eq 'v'` on EventType/MessageId/OriginResource/RegistryPrefix/ResourceType with and/or, no parentheses (`parseSSEFilter`); else 400 |
+| GET/POST | `/redfish/v1/EventService/Subscriptions` | `#EventDestination.v1_13_0`. POST: Destination http(s) + Protocol Redfish required; Context, EventTypes, RegistryPrefixes, ResourceTypes (values checked, 400), MessageIds (version optional), OriginResources (+SubordinateResources), HttpHeaders (sent, GET returns []), DeliveryRetryPolicy (default SuspendRetries). 201 + Location. Max 32 (503). Memory only |
+| GET/PATCH/DELETE | `/redfish/v1/EventService/Subscriptions/{id}` | PATCH Context, DeliveryRetryPolicy only; Status.State Disabled while suspended. Actions `EventDestination.SuspendSubscription` / `ResumeSubscription` (204) |
 | GET | `/redfish/v1/Chassis` | Chassis collection |
 | GET | `/redfish/v1/Chassis/1` | Chassis resource (PowerState same as Systems/1 incl. PoweringOff/PoweringOn, Manufacturer/Model/SerialNumber same as Systems/1, Status, Links.ComputerSystems → Systems/1, Links.ManagedBy → Managers/1) |
 
@@ -258,6 +264,13 @@ Fault JSON: `{"kind", "target" (optional, derived from kind), conditions..., "co
 | `bmc-unavailable` | Redfish held open until the fault ends then closed, IPMI dropped (session messages too) | — |
 
 Wiring (`cmd/qemu-bmc/main.go`): `faults.Middleware` wraps the Redfish handler (Redfish then HTTP/1.1 only so connections can be hijacked); `ipmi.Server.SetFaults`; `faultMachine` wraps `*machine.Machine` so Redfish/IPMI (and VM IPMI) `Reset` go through `Store.Reset`. Container tests: `tests/test_fault.sh` (category `fault`).
+
+## Events
+
+- `machine.Machine.SubscribeEvents()` (`internal/machine/events.go`): small bus, buffered channels (64, drop when full). `EventPowerState` is published by `checkPower` (synchronously after each Reset, setTransition, process ForceOff/start, so Off within a PowerCycle is seen; and by a 1 s poller running while there are subscribers, catching guest power off / QEMU exit / graceful timeout). The Reset-start clearing of the transition does not check, so a PoweringOff ended by ForceOff is PoweringOff → Off. `EventResourceChanged` for Boot (SetBootOverride, ConsumeBootOnce when Once, HTTP boot URI change), VirtualMedia (insert/eject/failed download), SecureBoot.
+- Redfish (`internal/redfish/events.go`): `Server.SetEventSource(m)` (main) converts them; MessageIds `ResourceEvent.1.3.*` (ResourcePoweredOn/Off, ResourcePoweringOn/Off with arg `/redfish/v1/Systems/1`, ResourceChanged; sessions ResourceCreated/ResourceRemoved), EventType StatusChange / ResourceUpdated / ResourceAdded / ResourceRemoved, origin Systems/1, Systems/1/VirtualMedia/CD1, Systems/1/SecureBoot, the session, SessionService, EventService.
+- Delivery: one goroutine per subscription (queue 256), POST JSON `#Event.v1_7_0` with one record, 2xx = success, 10 s timeout, 1 + DeliveryRetryAttempts tries `DeliveryRetryIntervalSeconds` apart (`retryUnit`, ms in tests). Then SuspendRetries → suspended (events dropped until ResumeSubscription), TerminateAfterRetries → deleted; RetryForever(WithBackoff) retries until delivered (backoff doubles, max 10 min).
+- Container tests: `tests/test_events.sh` (category `events`; python:3.12-slim receiver on its own docker network, SSE with curl -N).
 
 ## GitHub Pages
 

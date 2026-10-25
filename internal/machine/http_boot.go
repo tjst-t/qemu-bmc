@@ -67,7 +67,11 @@ func (m *Machine) SetHTTPBootURI(uri string) error {
 		m.httpBoot.download.cancel()
 	}
 	old := m.httpBoot.path
+	changed := uri != m.httpBoot.uri
 	m.httpBoot = httpBootState{uri: uri, gen: m.httpBoot.gen + 1}
+	if changed {
+		m.publishChange(ResourceBoot)
+	}
 	if uri == "" {
 		m.mu.Unlock()
 		removeMediaFile(old)

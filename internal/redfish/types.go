@@ -19,6 +19,7 @@ type ServiceRoot struct {
 	Managers       ODataID          `json:"Managers"`
 	Chassis        ODataID          `json:"Chassis"`
 	SessionService ODataID          `json:"SessionService"`
+	EventService   ODataID          `json:"EventService"`
 	Links          ServiceRootLinks `json:"Links"`
 }
 

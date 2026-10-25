@@ -224,6 +224,7 @@ func (s *Server) handlePatchSessionService(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	s.sessions.setTimeout(d)
+	s.publishResourceEvent("ResourceChanged", "/redfish/v1/SessionService")
 	s.handleGetSessionService(w, r)
 }
 
@@ -272,6 +273,7 @@ func (s *Server) handleCreateSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	res := sessionResource(*sess)
+	s.publishResourceEvent("ResourceCreated", res.ODataID)
 	w.Header().Set("X-Auth-Token", sess.token)
 	w.Header().Set("Location", res.ODataID)
 	writeJSON(w, http.StatusCreated, res)
@@ -288,10 +290,12 @@ func (s *Server) handleGetSession(w http.ResponseWriter, r *http.Request) {
 
 // handleDeleteSession logs out.
 func (s *Server) handleDeleteSession(w http.ResponseWriter, r *http.Request) {
-	if !s.sessions.delete(mux.Vars(r)["sid"]) {
+	id := mux.Vars(r)["sid"]
+	if !s.sessions.delete(id) {
 		writeError(w, http.StatusNotFound, "ResourceNotFound", "Session not found")
 		return
 	}
+	s.publishResourceEvent("ResourceRemoved", sessionsPath+"/"+id)
 	w.WriteHeader(http.StatusNoContent)
 }
 
