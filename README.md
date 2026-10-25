@@ -135,6 +135,7 @@ curl -k -u admin:password -X POST \
 - A power on or reset (Redfish `On` / `ForceOn` / `ForceRestart` / `PowerCycle`, IPMI `chassis power on` / `cycle` / `reset`) during a download is carried out once the download finishes (at most `VMEDIA_TIMEOUT` later), so the VM boots from the ISO. The request itself returns at once; the power state is `PoweringOn` meanwhile, and another power action (e.g. `ForceOff`) cancels it. If the download fails (e.g. `404`), the medium is ejected (`Inserted: false`) and the reason is logged. A download finishing while the VM runs is attached over QMP. Inserting another image or ejecting abandons the download and deletes the previously downloaded file.
 - The medium is kept by qemu-bmc while the VM is powered off and attached when QEMU starts; while the VM is running it is swapped live over QMP.
 - Boot target `Cd` (Redfish `BootSourceOverrideTarget`, IPMI `chassis bootdev cdrom`) boots the inserted ISO in both BIOS and UEFI mode (the CD drive gets `bootindex=0`, which OVMF requires).
+- Boot target `Pxe` (Redfish, IPMI `chassis bootdev pxe`) boots from the network in UEFI mode too, even when the disk holds an OS: OVMF ignores `-boot n`, so the first NIC gets `bootindex=0` (BIOS uses `-boot n`).
 - `GET .../VirtualMedia/CD1` reports `Image`, `ImageName`, `Inserted`, `ConnectedVia` (`URI` / `NotConnected`), `WriteProtected` (always `true`) and `MediaTypes`.
 - Legacy mode (external QEMU) only changes the medium over QMP; the path refers to the external QEMU's filesystem. The CD drive is located with `query-block` (first removable drive) in both modes.
 
@@ -428,6 +429,9 @@ go vet ./...
 # Container integration tests
 make container-test         # Quick smoke tests
 make container-test-all     # All 103 tests (9 categories)
+
+# Ironic end-to-end test: deploy Debian with a real Ironic (Redfish + IPMI drivers, ~20 min)
+make ironic-test            # see tests/ironic/README.md
 ```
 
 ## Architecture
@@ -448,6 +452,7 @@ docker/
   entrypoint.sh                # Environment variables → QEMU args
   setup-network.sh             # TAP/bridge network setup
 tests/                         # Bash-based container integration tests
+  ironic/run.sh                # Ironic end-to-end deploy test (make ironic-test)
 containerlab/                  # containerlab topology examples (see containerlab/README.md)
 ```
 
@@ -595,6 +600,7 @@ curl -k -u admin:password -X POST \
 - ダウンロード中に電源オン・リセット（Redfish の `On` / `ForceOn` / `ForceRestart` / `PowerCycle`、IPMI の `chassis power on` / `cycle` / `reset`）が来たら、ダウンロードが終わってから（最大 `VMEDIA_TIMEOUT` 待つ）実行するので、ISO から起動できる。要求そのものはすぐ返り、その間の電源状態は `PoweringOn`。別の電源操作（`ForceOff` など）が来たら取りやめる。ダウンロードに失敗したら（`404` など）中身を外し（`Inserted: false`）、理由をログに出す。VM が動いている間に終わったら QMP で差す。別のイメージを差す・Eject すると、ダウンロードはやめ、前に落としたファイルは消す。
 - 差した中身は電源オフ中も qemu-bmc が覚えていて、QEMU を起動するときに付ける。VM が動いていれば QMP でその場で差し替える。
 - 起動先 `Cd`（Redfish の `BootSourceOverrideTarget`、IPMI の `chassis bootdev cdrom`）で、差した ISO から起動する。BIOS・UEFI のどちらでも動く（UEFI（OVMF）のため CD ドライブに `bootindex=0` を付ける）。
+- 起動先 `Pxe`（Redfish、IPMI の `chassis bootdev pxe`）は、ディスクに OS が入っていても UEFI でネットワークから起動する（OVMF は `-boot n` を見ないので、最初の NIC に `bootindex=0` を付ける。BIOS は `-boot n`）。
 - `GET .../VirtualMedia/CD1` は `Image`・`ImageName`・`Inserted`・`ConnectedVia`（`URI` / `NotConnected`）・`WriteProtected`（常に `true`）・`MediaTypes` を返す。
 - レガシーモード（外部の QEMU）は QMP で差し替えるだけ。パスは外部 QEMU 側のファイルシステムのもの。どちらのモードも CD ドライブは `query-block` で探す（最初の取り外し可能なドライブ）。
 
@@ -888,6 +894,9 @@ go vet ./...
 # コンテナ統合テスト
 make container-test         # クイックスモークテスト
 make container-test-all     # 全 103 テスト (9 カテゴリ)
+
+# Ironic 通し試験: 本物の Ironic で Debian を展開 (Redfish・IPMI ドライバ、約 20 分)
+make ironic-test            # tests/ironic/README.md 参照
 ```
 
 ## アーキテクチャ
@@ -908,6 +917,7 @@ docker/
   entrypoint.sh                # 環境変数 → QEMU 引数変換
   setup-network.sh             # TAP/ブリッジネットワーク設定
 tests/                         # Bash ベースのコンテナ統合テスト
+  ironic/run.sh                # Ironic 通し試験 (make ironic-test)
 containerlab/                  # containerlab トポロジ例 (containerlab/README.md 参照)
 ```
 

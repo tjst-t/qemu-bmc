@@ -1,4 +1,4 @@
-.PHONY: build test test-race vet coverage docker-build integration integration-up integration-down container-test container-test-all ci clean download-novnc
+.PHONY: build test test-race vet coverage docker-build integration integration-up integration-down container-test container-test-all ironic-test ci clean download-novnc
 
 BINARY := qemu-bmc
 DOCKER_IMAGE := qemu-bmc
@@ -57,6 +57,12 @@ container-test:
 
 container-test-all:
 	./tests/run_tests.sh --build all
+
+# Deploy Debian with a real Ironic (Redfish and IPMI drivers), see tests/ironic/README.md
+# IRONIC_FLOWS: redfish-vmedia redfish-https ipmi-pxe all; IRONIC_ARGS e.g. --image ghcr.io/tjst-t/qemu-bmc:0.9
+IRONIC_FLOWS ?= all
+ironic-test:
+	./tests/ironic/run.sh $(IRONIC_ARGS) $(IRONIC_FLOWS)
 
 ci: vet test-race integration
 

@@ -27,6 +27,7 @@ tests/                         # Bash-based container integration tests (103 tes
   run_tests.sh                 # Test runner (category-based)
   test_helper.sh               # Assertions, container mgmt, IPMI/Redfish helpers
   test_*.sh                    # Test categories (container, ipmi, redfish, power, boot, etc.)
+  ironic/run.sh                # Ironic end-to-end deploy test (make ironic-test; manual, not in CI)
 containerlab/
   example.yml                  # 2 nodes booting their own disk, BMC published on the host
   mgmt-network.yml             # Separate BMC mgmt / VM data networks + operator container
@@ -84,6 +85,9 @@ make container-test-all
 
 # Run specific test categories
 ./tests/run_tests.sh --build container ipmi redfish power boot
+
+# Ironic end-to-end test (real Ironic deploys Debian; Redfish vmedia/https, IPMI PXE UEFI+BIOS)
+make ironic-test                       # or IRONIC_FLOWS=redfish-vmedia, IRONIC_ARGS="--image ghcr.io/..."
 ```
 
 ## Environment Variables
@@ -159,7 +163,7 @@ make container-test-all
 | GET | `/redfish/v1/Systems/1/SimpleStorage/1` | Devices: [{Name, CapacityBytes, Status}] per disk |
 | GET | `/redfish/v1/Systems/1/VirtualMedia` | VirtualMedia collection (recommended location; same single CD drive as Managers/1/VirtualMedia, shared state) |
 | GET | `/redfish/v1/Systems/1/VirtualMedia/CD1` | VirtualMedia resource, same as Managers/1/VirtualMedia/CD1; `@odata.id` and action targets follow the URI requested. InsertMedia/EjectMedia actions below work under both |
-| PATCH | `/redfish/v1/Systems/1` | Boot device override (with ETag support; ETag includes HttpBootUri). Targets None/Pxe/Hdd/Cd/BiosSetup/UefiHttp. `Boot.HttpBootUri` (always in GET, null when unset): http(s) URL, or null/"" to clear (else 400); kept after Once is used until cleared. UefiHttp with a URI: image downloaded like VirtualMedia (VMEDIA_*, starts at PATCH, power on/reset waits; failure → that boot goes on without it) and booted from a hidden CD (`httpboot0` on its own ich9-ahci, bootindex=0; not VirtualMedia). Without a URI: network boot (-boot n); with OVMF also fw_cfg IPv4/IPv6PXESupport=n and first NIC `romfile=,bootindex=0` (`qemu.ApplyHTTPBoot`). Only for boots the override applies to. Legacy mode: UefiHttp / a URI → 400 |
+| PATCH | `/redfish/v1/Systems/1` | Boot device override (with ETag support; ETag includes HttpBootUri). Targets None/Pxe/Hdd/Cd/BiosSetup/UefiHttp. Cd gets the managed CD `bootindex=0`; Pxe with OVMF gets the first NIC `bootindex=0` (OVMF ignores `-boot n` and would boot the disk), unless a device already has bootindex=0. `Boot.HttpBootUri` (always in GET, null when unset): http(s) URL, or null/"" to clear (else 400); kept after Once is used until cleared. UefiHttp with a URI: image downloaded like VirtualMedia (VMEDIA_*, starts at PATCH, power on/reset waits; failure → that boot goes on without it) and booted from a hidden CD (`httpboot0` on its own ich9-ahci, bootindex=0; not VirtualMedia). Without a URI: network boot (-boot n); with OVMF also fw_cfg IPv4/IPv6PXESupport=n and first NIC `romfile=,bootindex=0` (`qemu.ApplyHTTPBoot`). Only for boots the override applies to. Legacy mode: UefiHttp / a URI → 400 |
 | GET/PATCH | `/redfish/v1/Systems/1/SecureBoot` | Only in process mode with OVMF pflash drives (`qemu.FindSecureBootFirmware`: `-drive if=pflash` with an `OVMF_CODE*.fd` plus a VARS pflash); else no `SecureBoot` link on Systems/1 and 404. `#SecureBoot.v1_1_0`: SecureBootEnable (next boot), SecureBootCurrentBoot (running/last started QEMU used the secboot OVMF), SecureBootMode `UserMode` (ms VARS have a PK), ETag/If-Match. PATCH `SecureBootEnable` bool only (else 400; true → 400 if `OVMF_CODE_4M.secboot.fd` or `OVMF_VARS_4M.ms.fd` is missing). Enabled boots: CODE → `OVMF_CODE_4M.secboot.fd` (same dir; always 4M — Debian's 2M secboot build hangs), VARS → `<vars>.secboot.fd` next to the configured VARS, copied from `OVMF_VARS_4M.ms.fd` if missing or of another size; `smm=on` on `-machine`, `-global driver=cfi.pflash01,property=secure,value=on`. ForceRestart restarts QEMU (not system_reset) when the setting changed or keys were reset |
 | POST | `/redfish/v1/Systems/1/SecureBoot/Actions/SecureBoot.ResetKeys` | `ResetKeysType` `ResetAllKeysToDefault` only (else 400): deletes the secboot VARS, recopied from the template at the next QEMU start (204) |
 | POST | `/redfish/v1/Systems/1/Actions/ComputerSystem.Reset` | Power control: On, ForceOff, GracefulShutdown, ForceRestart, GracefulRestart, PowerCycle (process mode: QEMU stopped and restarted so boot override/VirtualMedia apply; legacy: system_reset; off: On), ForceOn (= On), Nmi (QMP inject-nmi; 409 when off; does not end a graceful action), PushPowerButton (off: On, on: GracefulShutdown) |

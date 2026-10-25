@@ -1,0 +1,50 @@
+name: Ironic e2e
+
+# Deploys Debian onto a qemu-bmc node with a real Ironic (tests/ironic/run.sh).
+# Run by hand only (Actions > Ironic e2e > Run workflow); not part of CI.
+
+on:
+  workflow_dispatch:
+    inputs:
+      flows:
+        description: "Flows (redfish-vmedia redfish-https ipmi-pxe all)"
+        default: all
+        type: string
+      image:
+        description: "qemu-bmc image to test (empty = build this commit, e.g. ghcr.io/tjst-t/qemu-bmc:0.9)"
+        default: ""
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  ironic-e2e:
+    runs-on: ubuntu-latest
+    # Without /dev/kvm QEMU runs under TCG and everything is several times slower
+    timeout-minutes: 360
+    steps:
+      - uses: actions/checkout@v4
+      - name: Enable KVM (falls back to TCG if unavailable)
+        run: |
+          if [ -e /dev/kvm ]; then
+            echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+            sudo udevadm control --reload-rules
+            sudo udevadm trigger --name-match=kvm
+            echo "KVM available"
+          else
+            echo "KVM not available, QEMU will use TCG"
+          fi
+      - name: Cache IPA and Debian images
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/qemu-bmc-ironic-e2e
+          key: ironic-e2e-images-${{ github.run_id }}
+          restore-keys: ironic-e2e-images-
+      - name: Ironic e2e
+        env:
+          FLOWS: ${{ inputs.flows }}
+          IMAGE: ${{ inputs.image }}
+        run: |
+          # shellcheck disable=SC2086
+          ./tests/ironic/run.sh ${IMAGE:+--image "$IMAGE"} $FLOWS
