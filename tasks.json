@@ -958,7 +958,7 @@
       "number": 43,
       "kind": "task",
       "title": "VM の SMBIOS と Redfish の Manufacturer・Model・SerialNumber を揃える",
-      "status": "ready",
+      "status": "in-progress",
       "parent": "v0-10-0",
       "dependsOn": [],
       "milestone": null,
@@ -970,7 +970,7 @@
       "refs": [],
       "threads": [],
       "createdAt": "2026-10-25T10:54:29.647Z",
-      "updatedAt": "2026-10-25T10:54:29.647Z",
+      "updatedAt": "2026-10-25T10:54:49.851Z",
       "closedAt": null,
       "extra": {}
     },
