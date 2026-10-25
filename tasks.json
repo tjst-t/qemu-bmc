@@ -1025,7 +1025,7 @@
       "number": 46,
       "kind": "task",
       "title": "Redfish EventService（購読と SSE。電源状態などの変化を通知）",
-      "status": "ready",
+      "status": "in-progress",
       "parent": "v0-10-0",
       "dependsOn": [
         "fault-injection"
@@ -1039,7 +1039,7 @@
       "refs": [],
       "threads": [],
       "createdAt": "2026-10-25T10:54:29.647Z",
-      "updatedAt": "2026-10-25T10:54:29.647Z",
+      "updatedAt": "2026-10-25T12:43:05.302Z",
       "closedAt": null,
       "extra": {}
     },
