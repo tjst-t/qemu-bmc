@@ -930,7 +930,7 @@
       "number": 42,
       "kind": "story",
       "title": "v0.10.0：SMBIOS・Ironic の通し試験・故障の注入・EventService・シリアルコンソール（SOL）・Bios",
-      "status": "backlog",
+      "status": "in-progress",
       "parent": null,
       "dependsOn": [],
       "milestone": null,
@@ -942,9 +942,14 @@
       "doneWhen": "7つのタスクが全部 done で、Ironic の通し試験（Redfish と IPMI の両ドライバ）・go test -race・コンテナの試験・Redfish-Service-Validator（失敗0件）が通る",
       "resolution": null,
       "refs": [],
-      "threads": [],
+      "threads": [
+        {
+          "projectId": "af352873-ba2b-4e39-8094-679762e5c88b",
+          "threadId": "4bd065fd-af9b-4333-ada0-b76759212b76"
+        }
+      ],
       "createdAt": "2026-10-25T10:52:46.486Z",
-      "updatedAt": "2026-10-25T10:52:46.486Z",
+      "updatedAt": "2026-10-25T10:54:45.873Z",
       "closedAt": null,
       "extra": {}
     },
