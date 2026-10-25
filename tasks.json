@@ -1048,7 +1048,7 @@
       "number": 47,
       "kind": "task",
       "title": "シリアルの多重化（複数の利用者と、最近の出力のバッファ）",
-      "status": "ready",
+      "status": "in-progress",
       "parent": "v0-10-0",
       "dependsOn": [
         "event-service"
@@ -1062,7 +1062,7 @@
       "refs": [],
       "threads": [],
       "createdAt": "2026-10-25T10:54:29.647Z",
-      "updatedAt": "2026-10-25T10:54:29.647Z",
+      "updatedAt": "2026-10-25T13:13:18.809Z",
       "closedAt": null,
       "extra": {}
     },
