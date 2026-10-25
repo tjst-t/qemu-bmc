@@ -1002,7 +1002,7 @@
       "number": 45,
       "kind": "task",
       "title": "故障の注入（BMC の応答なし・遅延・エラー、電源操作の失敗など）",
-      "status": "ready",
+      "status": "in-progress",
       "parent": "v0-10-0",
       "dependsOn": [
         "ironic-e2e"
@@ -1016,7 +1016,7 @@
       "refs": [],
       "threads": [],
       "createdAt": "2026-10-25T10:54:29.647Z",
-      "updatedAt": "2026-10-25T10:54:29.647Z",
+      "updatedAt": "2026-10-25T12:26:06.181Z",
       "closedAt": null,
       "extra": {}
     },
