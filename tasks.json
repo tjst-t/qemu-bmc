@@ -1002,7 +1002,7 @@
       "number": 45,
       "kind": "task",
       "title": "故障の注入（BMC の応答なし・遅延・エラー、電源操作の失敗など）",
-      "status": "in-progress",
+      "status": "done",
       "parent": "v0-10-0",
       "dependsOn": [
         "ironic-e2e"
@@ -1012,12 +1012,12 @@
       "labels": [],
       "body": "## なぜ\n管理ツール（主に sakutei）の異常系の試験に、実機では作りにくい BMC の故障を起こせるようにする。qemu-bmc ならではの機能。\n\n## 仕様\n- 故障を操作する API は Redfish・IPMI とは別のポートに置く（Redfish 自体を応答なしにできるように）。環境変数 `FAULT_API_ADDR`（例 `:8623`。空＝無効、既定は空）。HTTP（TLS なし）、認証は `FAULT_API_TOKEN` を設定したときだけ Bearer で要る。\n  - `GET /faults` 一覧、`POST /faults`（1件足す。id を返す）、`DELETE /faults/{id}`、`DELETE /faults`（全部消す）。\n  - 起動時の故障を `FAULTS`（JSON の配列）で渡せる。\n- 故障の1件の形（JSON）：`{\"kind\": ..., \"target\": ..., 条件..., \"count\": N（何回効いたら消えるか、省略で無限）, \"durationSeconds\": S（何秒で消えるか、省略で無限）}`\n- 種類（kind）\n  - `redfish-delay`：応答を `delayMs` 遅らせる。\n  - `redfish-error`：`status`（500・503 など）で返す。Redfish の error の本文の形で。\n  - `redfish-hang`：応答しない（接続を開いたまま、クライアントが諦めるまで。サーバ側は `hangSeconds` で既定 300 秒後に閉じる）。\n  - `redfish-drop`：TCP をすぐ閉じる。\n  - Redfish の4つは `method`（省略で全部）と `path`（前方一致か glob、省略で全部）で絞れる。故障の API 自身と、サービスルートを除くなどの例外は作らない（人が絞る）。\n  - `ipmi-drop`：IPMI の要求に応えない。`ipmi-delay`：`delayMs` 遅らせる。`ipmi-error`：completion code（`completionCode`、既定 0xFF）を返す。`netfn`・`cmd` で絞れる（省略で全部。セッションを開く RMCP+ の手順も含めるかは `includeSession`、既定 false）。\n  - `power-action-fail`：電源操作（Redfish の Reset・IPMI の chassis control）を受け付けたように見せず、Redfish は 500、IPMI は completion code を返す。`action`（On・ForceOff・GracefulShutdown など、省略で全部）で絞る。\n  - `power-action-ignored`：電源操作を成功（204・cc 0）と返すが、実際には何もしない（「BMC は受けたのに機械が動かない」）。\n  - `graceful-ignored`：GracefulShutdown・GracefulRestart の ACPI を VM に送らない（OS が止まらない機械）。既存の GRACEFUL_TIMEOUT の動き（PoweringOff のあと On に戻る）がそのまま試せる。\n  - `bmc-unavailable`：Redfish と IPMI の両方が `durationSeconds` の間、応答しない（BMC の再起動中を模す）。\n- 効いたらログに1行出す（`fault: <id> <kind> applied to ...`）。\n- Redfish には故障の操作を出さない（Oem も作らない）。\n\n## 確かめ方\n- 単体試験：条件の照合、count・duration で消えること、各種類の効き目。\n- コンテナ試験：FAULT_API_ADDR を開けて、redfish-error・redfish-hang（curl の --max-time で切れる）・ipmi-drop（ipmitool がタイムアウト）・power-action-ignored・bmc-unavailable を確かめる。\n- README（英語と日本語）・CLAUDE.md に、使い方と JSON の例を書く。",
       "doneWhen": "go test -race ./... と go vet が通り、コンテナ試験で FAULT_API 経由の redfish-error・redfish-hang・ipmi-drop・power-action-ignored・bmc-unavailable が効いて、消すと元に戻ることを確かめる",
-      "resolution": null,
+      "resolution": "Factory が取り込みました（factory/fault-injection）",
       "refs": [],
       "threads": [],
       "createdAt": "2026-10-25T10:54:29.647Z",
-      "updatedAt": "2026-10-25T12:26:06.181Z",
-      "closedAt": null,
+      "updatedAt": "2026-10-25T12:38:58.341Z",
+      "closedAt": "2026-10-25T12:38:58.341Z",
       "extra": {}
     },
     {
