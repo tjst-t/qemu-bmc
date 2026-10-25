@@ -1337,3 +1337,33 @@ func TestReset_Nmi_KeepsGracefulShutdown(t *testing.T) {
 	require.NoError(t, m.Reset("Nmi"))
 	assert.Equal(t, PoweringOff, powerState(t, m))
 }
+
+func TestReset_GracefulFilter_DoesNotSendACPI(t *testing.T) {
+	mock := newMockQMPClient(qmp.StatusRunning)
+	m := New(mock)
+	m.SetGracefulTimeout(50 * time.Millisecond)
+	m.pollInterval = 10 * time.Millisecond
+	var filtered []string
+	m.SetGracefulFilter(func(resetType string) bool {
+		filtered = append(filtered, resetType)
+		return true
+	})
+
+	require.NoError(t, m.Reset("GracefulShutdown"))
+	assert.Empty(t, filterPowerCalls(mock.Calls()), "no ACPI power button event")
+	assert.Equal(t, []string{"GracefulShutdown"}, filtered)
+
+	// Like a guest ignoring ACPI: PoweringOff, then On after the timeout
+	state, err := m.GetPowerState()
+	require.NoError(t, err)
+	assert.Equal(t, PoweringOff, state)
+	assert.Eventually(t, func() bool {
+		state, err := m.GetPowerState()
+		return err == nil && state == PowerOn
+	}, time.Second, 10*time.Millisecond)
+
+	// Without the filter the event is sent
+	m.SetGracefulFilter(nil)
+	require.NoError(t, m.Reset("GracefulShutdown"))
+	assert.Equal(t, []string{"SystemPowerdown"}, filterPowerCalls(mock.Calls()))
+}

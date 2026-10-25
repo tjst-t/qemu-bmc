@@ -226,3 +226,21 @@ func TestRedfishBootMode(t *testing.T) {
 		assert.Equal(t, want, c.RedfishBootMode(), "VM_BOOT_MODE=%q", in)
 	}
 }
+
+func TestLoad_Faults(t *testing.T) {
+	t.Setenv("FAULT_API_ADDR", "")
+	t.Setenv("FAULT_API_TOKEN", "")
+	t.Setenv("FAULTS", "")
+	cfg := Load()
+	assert.Equal(t, "", cfg.FaultAPIAddr, "disabled by default")
+	assert.Equal(t, "", cfg.FaultAPIToken)
+	assert.Equal(t, "", cfg.Faults)
+
+	t.Setenv("FAULT_API_ADDR", ":8623")
+	t.Setenv("FAULT_API_TOKEN", "secret")
+	t.Setenv("FAULTS", `[{"kind":"ipmi-drop"}]`)
+	cfg = Load()
+	assert.Equal(t, ":8623", cfg.FaultAPIAddr)
+	assert.Equal(t, "secret", cfg.FaultAPIToken)
+	assert.Equal(t, `[{"kind":"ipmi-drop"}]`, cfg.Faults)
+}

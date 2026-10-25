@@ -4,6 +4,7 @@ import (
 	"errors"
 	"log"
 
+	"github.com/tjst-t/qemu-bmc/internal/fault"
 	"github.com/tjst-t/qemu-bmc/internal/machine"
 )
 
@@ -78,6 +79,10 @@ func handleChassisControl(reqData []byte, m MachineInterface) (CompletionCode, [
 		return CompletionCodeInvalidField, nil
 	}
 
+	var faultErr *fault.PowerActionError
+	if errors.As(err, &faultErr) {
+		return CompletionCode(faultErr.CompletionCode), nil
+	}
 	if err != nil {
 		return CompletionCodeUnspecified, nil
 	}

@@ -54,6 +54,14 @@ type Config struct {
 	VMediaDir         string
 	VMediaInsecureTLS bool
 	VMediaTimeout     time.Duration
+
+	// Fault injection: the fault API listens on FaultAPIAddr
+	// (FAULT_API_ADDR, disabled if empty) and needs the bearer token
+	// FaultAPIToken (FAULT_API_TOKEN) if set; Faults (FAULTS) is a JSON
+	// array of the faults active at start
+	FaultAPIAddr  string
+	FaultAPIToken string
+	Faults        string
 }
 
 // Load reads configuration from environment variables with defaults
@@ -86,6 +94,10 @@ func Load() *Config {
 		VMediaDir:         getEnv("VMEDIA_DIR", defaultVMediaDir("/vm")),
 		VMediaInsecureTLS: getBoolEnv("VMEDIA_INSECURE_TLS", true),
 		VMediaTimeout:     getSecondsEnv("VMEDIA_TIMEOUT", 10*time.Minute),
+
+		FaultAPIAddr:  getEnv("FAULT_API_ADDR", ""),
+		FaultAPIToken: getEnv("FAULT_API_TOKEN", ""),
+		Faults:        getEnv("FAULTS", ""),
 		// entrypoint.sh passes these to QEMU as -m / -smp, so parse them the
 		// same way QEMU does
 		VMMemoryMiB: qemu.ParseMemoryMiB(getEnv("VM_MEMORY", "2048")),

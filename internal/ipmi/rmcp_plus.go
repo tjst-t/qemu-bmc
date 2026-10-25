@@ -129,6 +129,17 @@ func integrityAuthCode(session *Session, data []byte) []byte {
 
 // HandleRMCPPlusMessage processes an RMCP+ message and returns a response
 func HandleRMCPPlusMessage(data []byte, sessionMgr *SessionManager, user, pass string, machine MachineInterface, state *bmc.State) ([]byte, error) {
+	return handleRMCPPlusMessage(data, sessionMgr, user, pass, state, func(msg *IPMIMessage) (CompletionCode, []byte, error) {
+		code, resp := handleIPMICommand(msg, machine, state)
+		return code, resp, nil
+	})
+}
+
+// commandHandler handles the IPMI command of a request. It returns
+// errNoResponse if no response is to be sent.
+type commandHandler func(msg *IPMIMessage) (CompletionCode, []byte, error)
+
+func handleRMCPPlusMessage(data []byte, sessionMgr *SessionManager, user, pass string, state *bmc.State, handle commandHandler) ([]byte, error) {
 	if len(data) < 12 {
 		return nil, fmt.Errorf("RMCP+ message too short")
 	}
@@ -150,9 +161,9 @@ func HandleRMCPPlusMessage(data []byte, sessionMgr *SessionManager, user, pass s
 		return handleRAKPMessage3(buf.Bytes(), header, sessionMgr, pass, state)
 	case PayloadTypeIPMI:
 		if header.SessionID == 0 {
-			return handlePreSessionIPMI(data, header, machine, state)
+			return handlePreSessionIPMI(data, header, handle)
 		}
-		return handleEncryptedIPMI(data, header, sessionMgr, machine, state)
+		return handleEncryptedIPMI(data, header, sessionMgr, handle)
 	default:
 		return nil, fmt.Errorf("unsupported RMCP+ payload type: 0x%02x", payloadType)
 	}
@@ -432,7 +443,7 @@ func handleRAKPMessage3(payload []byte, header *RMCPPlusSessionHeader, sessionMg
 	return wrapRMCPPlusResponse(PayloadTypeRAKPMessage4, 0, 0, resp.Bytes()), nil
 }
 
-func handlePreSessionIPMI(data []byte, header *RMCPPlusSessionHeader, machine MachineInterface, state *bmc.State) ([]byte, error) {
+func handlePreSessionIPMI(data []byte, header *RMCPPlusSessionHeader, handle commandHandler) ([]byte, error) {
 	// Pre-session IPMI messages (e.g., Get Channel Auth Capabilities) sent via RMCP+
 	// with session ID 0, no encryption, no authentication
 	payloadStart := 12
@@ -451,13 +462,16 @@ func handlePreSessionIPMI(data []byte, header *RMCPPlusSessionHeader, machine Ma
 		return nil, err
 	}
 
-	responseCode, responseData := handleIPMICommand(msg, machine, state)
+	responseCode, responseData, err := handle(msg)
+	if err != nil {
+		return nil, err
+	}
 	respMsg := buildIPMIResponseMessageWithSeq(msg.GetNetFn()|0x01, msg.Command, responseCode, responseData, msg.SourceLun)
 
 	return wrapRMCPPlusResponse(PayloadTypeIPMI, 0, 0, respMsg), nil
 }
 
-func handleEncryptedIPMI(data []byte, header *RMCPPlusSessionHeader, sessionMgr *SessionManager, machine MachineInterface, state *bmc.State) ([]byte, error) {
+func handleEncryptedIPMI(data []byte, header *RMCPPlusSessionHeader, sessionMgr *SessionManager, handle commandHandler) ([]byte, error) {
 	session, ok := sessionMgr.GetSession(header.SessionID)
 	if !ok {
 		return nil, fmt.Errorf("session not found: 0x%08x", header.SessionID)
@@ -507,7 +521,10 @@ func handleEncryptedIPMI(data []byte, header *RMCPPlusSessionHeader, sessionMgr 
 	}
 
 	// Route to handler
-	responseCode, responseData := handleIPMICommand(msg, machine, state)
+	responseCode, responseData, err := handle(msg)
+	if err != nil {
+		return nil, err
+	}
 
 	// Build response IPMI message (echo request's sequence number)
 	respMsg := buildIPMIResponseMessageWithSeq(msg.GetNetFn()|0x01, msg.Command, responseCode, responseData, msg.SourceLun)

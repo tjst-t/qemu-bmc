@@ -19,14 +19,15 @@ internal/
   ipmi/                        # UDP server + VM chardev server, RMCP/RMCP+, RAKP auth, chassis commands
   bmc/                         # BMC configuration state (users, LAN, channels)
   config/                      # Environment variable config
+  fault/                       # Fault injection: store, fault API, Redfish middleware, IPMI/power hooks
 docker/
   Dockerfile                   # Multi-stage build (Go builder + Debian runtime)
   entrypoint.sh                # Environment variables → QEMU args conversion
   setup-network.sh             # TAP/bridge network setup for VM passthrough
-tests/                         # Bash-based container integration tests (103 tests)
+tests/                         # Bash-based container integration tests (115 tests)
   run_tests.sh                 # Test runner (category-based)
   test_helper.sh               # Assertions, container mgmt, IPMI/Redfish helpers
-  test_*.sh                    # Test categories (container, ipmi, redfish, power, boot, etc.)
+  test_*.sh                    # Test categories (container, ipmi, redfish, power, boot, fault, etc.)
   ironic/run.sh                # Ironic end-to-end deploy test (make ironic-test; manual, not in CI)
 containerlab/
   example.yml                  # 2 nodes booting their own disk, BMC published on the host
@@ -80,7 +81,7 @@ make docker-build
 # Container integration tests (quick smoke tests)
 make container-test
 
-# Container integration tests (all 103 tests across 9 categories)
+# Container integration tests (all 115 tests across 10 categories)
 make container-test-all
 
 # Run specific test categories
@@ -121,6 +122,9 @@ make ironic-test                       # or IRONIC_FLOWS=redfish-vmedia, IRONIC_
 | `VMEDIA_DIR` | `/vm/vmedia` (if `/vm` is writable, else `/tmp/vmedia`) | Where VirtualMedia http(s) images (`cd1-*.iso`) and the UEFI HTTP boot image (`httpboot-*.iso`) are downloaded; the previous download is deleted on replace/eject, leftovers at startup |
 | `VMEDIA_INSECURE_TLS` | `true` | Skip certificate verification for https VirtualMedia downloads |
 | `VMEDIA_TIMEOUT` | `600` | Seconds a power on/reset (Redfish and IPMI) waits for a VirtualMedia (or, for UefiHttp, HttpBootUri) download in progress |
+| `FAULT_API_ADDR` | (empty, disabled) | Fault injection API listen address (plain HTTP, e.g. `:8623`), see Fault Injection below |
+| `FAULT_API_TOKEN` | (empty) | Bearer token required by the fault API (none if empty) |
+| `FAULTS` | (empty) | JSON array of faults active from startup (works without `FAULT_API_ADDR`) |
 
 ### Container Configuration (entrypoint.sh)
 
@@ -234,6 +238,26 @@ qemu-system-x86_64 \
 Plus all existing chassis and app commands (Get Device ID, Chassis Status, Boot Options, etc.)
 
 Uses the OpenIPMI VM wire protocol over TCP with framing (0xA0/0xA1), byte escaping (0xAA), and two's complement checksums.
+
+## Fault Injection
+
+`internal/fault` (`fault.Store`). Enabled by `FAULT_API_ADDR` and/or `FAULTS`; otherwise main wires nothing (nil store). API on its own port, not Redfish (no Oem either): `GET /faults`, `POST /faults` (201 + `id`), `DELETE /faults/{id}`, `DELETE /faults`; Bearer `FAULT_API_TOKEN` if set.
+
+Fault JSON: `{"kind", "target" (optional, derived from kind), conditions..., "count" (uses before removal), "durationSeconds"}`. Checked in insertion order, first match applies; each use logs `fault: <id> <kind> applied to <request>`. GET adds `applied` and `expiresAt`.
+
+| Kind | Effect | Conditions |
+|------|--------|------------|
+| `redfish-delay` | `delayMs` later | `method`, `path` (prefix, or `path.Match` glob with `*?[`) |
+| `redfish-error` | `status` (default 500) + Redfish error body, handler not run | same |
+| `redfish-hang` | no response until client gives up / fault deleted / `hangSeconds` (300), then conn closed | same |
+| `redfish-drop` | hijack + close (SetLinger 0 on the TCP conn under TLS) | same |
+| `ipmi-drop` / `ipmi-delay` / `ipmi-error` | no response / response sent `delayMs` later (`time.AfterFunc`, serve loop not blocked) / `completionCode` (0xFF) without running the command | `netfn`, `cmd`, `includeSession` (session open/close messages: ASF ping, Open Session/RAKP, App 0x38/0x39/0x3A/0x3B/0x3C/0x54) |
+| `power-action-fail` | Redfish 500, IPMI `completionCode` (0xFF) via `*fault.PowerActionError` | `action` (requested ResetType; IPMI chassis control → ForceOff/On/PowerCycle/ForceRestart/GracefulShutdown/Nmi) |
+| `power-action-ignored` | 204 / cc 0, nothing done | `action` |
+| `graceful-ignored` | no ACPI powerdown (`machine.SetGracefulFilter`), GRACEFUL_TIMEOUT behaviour unchanged | `action` |
+| `bmc-unavailable` | Redfish held open until the fault ends then closed, IPMI dropped (session messages too) | — |
+
+Wiring (`cmd/qemu-bmc/main.go`): `faults.Middleware` wraps the Redfish handler (Redfish then HTTP/1.1 only so connections can be hijacked); `ipmi.Server.SetFaults`; `faultMachine` wraps `*machine.Machine` so Redfish/IPMI (and VM IPMI) `Reset` go through `Store.Reset`. Container tests: `tests/test_fault.sh` (category `fault`).
 
 ## GitHub Pages
 

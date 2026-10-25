@@ -30,6 +30,7 @@ A Go single binary that controls QEMU VMs via both Redfish API (HTTPS) and IPMI 
 - **noVNC** - Browser-based VNC console served on the Redfish HTTP port (no extra port needed)
 - **QMP Control** - Power operations, boot device changes, VirtualMedia mount
 - **UEFI HTTP boot and Secure Boot** - `UefiHttp` boot target with `Boot.HttpBootUri`; `Systems/1/SecureBoot` switches OVMF to its Secure Boot variant (Microsoft keys)
+- **Fault injection** - Unresponsive, slow or failing Redfish/IPMI and power actions that fail or do nothing, through a separate API, for testing management tools
 - **Compatibility** - MAAS, Tinkerbell/Rufio
 
 ## Quick Start
@@ -277,6 +278,62 @@ ipmitool channel setaccess 1 3 callin=on ipmi=on link=on privilege=4
 ipmitool user enable 3
 ```
 
+### Fault injection
+
+For testing how management tools cope with a misbehaving BMC, qemu-bmc can inject faults: no response, delays, errors, and power actions that fail or do nothing. Faults are managed through a separate HTTP API (not Redfish, so that Redfish itself can be made unresponsive), enabled by `FAULT_API_ADDR` (e.g. `:8623`; publish the port too). It is plain HTTP; set `FAULT_API_TOKEN` to require `Authorization: Bearer <token>`. Nothing about faults is shown over Redfish or IPMI.
+
+```bash
+docker run ... -p 8623:8623 -e FAULT_API_ADDR=:8623 -e FAULT_API_TOKEN=secret ghcr.io/tjst-t/qemu-bmc
+T='Authorization: Bearer secret'
+
+# Systems/... answers 503 (Redfish error body)
+curl -H "$T" -d '{"kind":"redfish-error","status":503,"path":"/redfish/v1/Systems"}' http://localhost:8623/faults
+# → 201 {"id":"1","kind":"redfish-error","target":"redfish",...}
+
+# The next 3 chassis control requests (IPMI) get no response
+curl -H "$T" -d '{"kind":"ipmi-drop","netfn":"0x00","cmd":"0x02","count":3}' http://localhost:8623/faults
+
+# ForceOff is accepted (204 / cc 0x00) but the VM keeps running
+curl -H "$T" -d '{"kind":"power-action-ignored","action":"ForceOff"}' http://localhost:8623/faults
+
+# The BMC "reboots": neither Redfish nor IPMI answers for 60 s
+curl -H "$T" -d '{"kind":"bmc-unavailable","durationSeconds":60}' http://localhost:8623/faults
+
+curl -H "$T" http://localhost:8623/faults                # list the active faults
+curl -H "$T" -X DELETE http://localhost:8623/faults/1    # delete one
+curl -H "$T" -X DELETE http://localhost:8623/faults      # delete all
+```
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/faults` | Active faults (with `id`, `applied` = times applied, remaining `count`, `expiresAt`) |
+| POST | `/faults` | Add a fault (JSON below). 201 with the fault and its `id`; 400 if invalid |
+| DELETE | `/faults/{id}` | Delete a fault (204; 404 if unknown) |
+| DELETE | `/faults` | Delete all faults (204) |
+
+`FAULTS` takes a JSON array of faults active from startup (it works without `FAULT_API_ADDR` too), e.g. `FAULTS='[{"kind":"graceful-ignored"}]'`.
+
+A fault is `{"kind": ..., conditions..., "count": N, "durationSeconds": S}`: `count` is how many times it applies before it is removed, `durationSeconds` how long it lasts (both unlimited if omitted). `target` (`redfish`, `ipmi`, `power`, `bmc`) is optional and filled in from `kind`. Faults are checked in the order added and the first matching one applies. Each application is logged as `fault: <id> <kind> applied to <request>`.
+
+| Kind | Effect | Conditions / parameters |
+|------|--------|-------------------------|
+| `redfish-delay` | Respond `delayMs` later | `delayMs` (required), `method`, `path` |
+| `redfish-error` | Respond with HTTP `status` (default 500) and a Redfish error body; the request is not carried out | `status`, `method`, `path` |
+| `redfish-hang` | No response: the connection stays open until the client gives up, the fault is deleted or after `hangSeconds` (default 300), then it is closed | `hangSeconds`, `method`, `path` |
+| `redfish-drop` | Close the TCP connection at once (reset) | `method`, `path` |
+| `ipmi-drop` | No response to the IPMI request | `netfn`, `cmd`, `includeSession` |
+| `ipmi-delay` | Respond `delayMs` later (other requests are not held back) | `delayMs` (required), `netfn`, `cmd`, `includeSession` |
+| `ipmi-error` | Respond with `completionCode` (default `0xFF`) without carrying the command out | `completionCode`, `netfn`, `cmd`, `includeSession` |
+| `power-action-fail` | A power action (Redfish `ComputerSystem.Reset`, IPMI chassis control) fails: Redfish 500, IPMI `completionCode` (default `0xFF`); nothing is done | `action`, `completionCode` |
+| `power-action-ignored` | A power action reports success (204, cc 0x00) but nothing is done — "the BMC took it, the machine did not move" | `action` |
+| `graceful-ignored` | `GracefulShutdown` / `GracefulRestart` (IPMI `power soft`) does not send the ACPI power button event to the VM, like an OS that does not shut down: `PoweringOff`, then back to `On` after `GRACEFUL_TIMEOUT` | `action` |
+| `bmc-unavailable` | Neither Redfish nor IPMI responds (Redfish connections are held open until the fault ends, then closed), like a rebooting BMC | `durationSeconds` |
+
+- `method`: HTTP method, any if omitted. `path`: a path prefix (`/redfish/v1/Systems`), or a glob if it has `*`, `?` or `[` (`/redfish/v1/Systems/*/Actions/*`; `*` does not match `/`); any if omitted. No paths are exempt (the service root, sessions, noVNC included) — narrow it with `path` as needed.
+- `netfn`, `cmd`: number or string (`"0x06"`); any if omitted. Without `includeSession: true`, the messages opening/closing a session (ASF ping, RMCP+ Open Session/RAKP, Get Channel Auth Capabilities, Get Session Challenge, Activate Session, Set Session Privilege, Close Session, Get Channel Cipher Suites) are not affected, so that e.g. `ipmitool` gets a session and then times out on the command. With `netfn`/`cmd`, Open Session/RAKP and ASF ping never match (they are no IPMI commands).
+- `action`: the Redfish `ResetType` as requested (`On`, `ForceOff`, `GracefulShutdown`, `ForceRestart`, `GracefulRestart`, `PowerCycle`, `ForceOn`, `Nmi`, `PushPowerButton`); IPMI chassis control maps to `ForceOff` (off), `On` (on), `PowerCycle` (cycle), `ForceRestart` (reset), `GracefulShutdown` (soft), `Nmi` (diag). Any if omitted.
+- With `FAULT_API_ADDR` or `FAULTS` set, Redfish serves HTTP/1.1 only (an HTTP/2 connection cannot be dropped as a whole).
+
 ## Redfish Endpoints
 
 | Method | Path | Description |
@@ -380,6 +437,9 @@ Another power action (Redfish or IPMI) during `PoweringOff` / `PoweringOn` ends 
 | `VMEDIA_DIR` | `/vm/vmedia` if `/vm` is writable, else `/tmp/vmedia` | Where VirtualMedia HTTP(S) images are downloaded. Also used for the UEFI HTTP boot image (`Boot.HttpBootUri`). The previous download is deleted when the medium (or URI) is replaced or ejected, and leftovers from an earlier run (`cd1-*.iso`, `httpboot-*.iso`) are deleted at startup. In legacy mode the external QEMU must be able to read this directory (same filesystem) |
 | `VMEDIA_INSECURE_TLS` | `true` | Skip certificate verification when downloading HTTPS images. With `false`, the system CAs are used; add your own CA with `SSL_CERT_FILE` |
 | `VMEDIA_TIMEOUT` | `600` | Seconds a power on or reset requested during a VirtualMedia (or UEFI HTTP boot image) download waits for it before booting without the image |
+| `FAULT_API_ADDR` | (empty, disabled) | Listen address of the fault injection API (plain HTTP, e.g. `:8623`). See [Fault injection](#fault-injection) |
+| `FAULT_API_TOKEN` | (empty) | Bearer token required by the fault API; no authentication if empty |
+| `FAULTS` | (empty) | JSON array of faults active from startup |
 | `SYSTEM_UUID` | (derived) | Fixed system UUID, passed to QEMU as `-uuid` and reported by Redfish `Systems/1` `UUID` and IPMI `mc guid`. If unset, it is read from `SYSTEM_UUID_FILE`, or derived from the hostname and saved there. Set it (or use a fixed `--hostname` / a mounted `/vm`) to keep it across container re-creation |
 | `SYSTEM_UUID_FILE` | `<VM_DISK dir>/system-uuid` | Where a derived UUID is persisted |
 | `VM_MACS` | (derived) | Comma-separated MAC addresses of the VM NICs, in order (an empty entry is derived). Unset MACs are derived from the system UUID, so they stay fixed per node and do not overlap between nodes. Reported by Redfish `Systems/1/EthernetInterfaces` |
@@ -428,7 +488,7 @@ go vet ./...
 
 # Container integration tests
 make container-test         # Quick smoke tests
-make container-test-all     # All 103 tests (9 categories)
+make container-test-all     # All 115 tests (10 categories)
 
 # Ironic end-to-end test: deploy Debian with a real Ironic (Redfish + IPMI drivers, ~20 min)
 make ironic-test            # see tests/ironic/README.md
@@ -447,6 +507,7 @@ internal/
   novnc/                       # noVNC static files (embedded) + WebSocket-to-VNC proxy
   bmc/                         # BMC configuration state (users, LAN, channels)
   config/                      # Environment variable config
+  fault/                       # Fault injection (fault API, Redfish/IPMI/power faults)
 docker/
   Dockerfile                   # Multi-stage build (Go builder + Debian runtime)
   entrypoint.sh                # Environment variables → QEMU args
@@ -501,6 +562,7 @@ QEMU VM を Redfish API (HTTPS) と IPMI over LAN (UDP) の両方で制御する
 - **noVNC** - Redfish HTTP ポートでブラウザから VNC コンソールにアクセス（追加ポート不要）
 - **QMP 制御** - 電源操作、ブートデバイス変更、VirtualMedia マウント
 - **UEFI HTTP ブートと Secure Boot** - 起動先 `UefiHttp` と `Boot.HttpBootUri`。`Systems/1/SecureBoot` で OVMF を Secure Boot 用（Microsoft の鍵入り）に切り替える
+- **故障の注入** - 応答しない・遅い・エラーを返す Redfish・IPMI や、失敗する・何もしない電源操作を別の API で起こせる（管理ツールの異常系の試験に）
 - **互換性** - MAAS, Tinkerbell/Rufio
 
 ## クイックスタート
@@ -742,6 +804,62 @@ ipmitool channel setaccess 1 3 callin=on ipmi=on link=on privilege=4
 ipmitool user enable 3
 ```
 
+### 故障の注入
+
+管理ツールが調子の悪い BMC をどう扱うかを試すため、qemu-bmc は故障を起こせる（応答なし・遅延・エラー、失敗する・何もしない電源操作）。故障は Redfish とは別の HTTP API で操作する（Redfish 自体を応答なしにできるように）。`FAULT_API_ADDR`（例 `:8623`。ポートの公開も要る）で有効になる。TLS なしの HTTP で、`FAULT_API_TOKEN` を設定すると `Authorization: Bearer <token>` が要る。Redfish・IPMI には故障のことは何も出さない。
+
+```bash
+docker run ... -p 8623:8623 -e FAULT_API_ADDR=:8623 -e FAULT_API_TOKEN=secret ghcr.io/tjst-t/qemu-bmc
+T='Authorization: Bearer secret'
+
+# Systems/... を 503 にする（Redfish の error の本文）
+curl -H "$T" -d '{"kind":"redfish-error","status":503,"path":"/redfish/v1/Systems"}' http://localhost:8623/faults
+# → 201 {"id":"1","kind":"redfish-error","target":"redfish",...}
+
+# 次の 3 回の chassis control（IPMI）に応えない
+curl -H "$T" -d '{"kind":"ipmi-drop","netfn":"0x00","cmd":"0x02","count":3}' http://localhost:8623/faults
+
+# ForceOff を受け付けたように返す（204・cc 0x00）が VM は動いたまま
+curl -H "$T" -d '{"kind":"power-action-ignored","action":"ForceOff"}' http://localhost:8623/faults
+
+# BMC の再起動中: 60 秒間 Redfish も IPMI も応えない
+curl -H "$T" -d '{"kind":"bmc-unavailable","durationSeconds":60}' http://localhost:8623/faults
+
+curl -H "$T" http://localhost:8623/faults                # 効いている故障の一覧
+curl -H "$T" -X DELETE http://localhost:8623/faults/1    # 1 件消す
+curl -H "$T" -X DELETE http://localhost:8623/faults      # 全部消す
+```
+
+| メソッド | パス | 説明 |
+|--------|------|-------------|
+| GET | `/faults` | 効いている故障（`id`、効いた回数 `applied`、残りの `count`、`expiresAt` 付き） |
+| POST | `/faults` | 故障を 1 件足す（JSON は下）。201 で `id` 付きの故障を返す。不正なら 400 |
+| DELETE | `/faults/{id}` | 1 件消す（204。無ければ 404） |
+| DELETE | `/faults` | 全部消す（204） |
+
+`FAULTS` に JSON の配列を渡すと、起動時から効く（`FAULT_API_ADDR` なしでも効く）。例 `FAULTS='[{"kind":"graceful-ignored"}]'`。
+
+故障の形は `{"kind": ..., 条件..., "count": N, "durationSeconds": S}`。`count` は何回効いたら消えるか、`durationSeconds` は何秒で消えるか（どちらも省略で無限）。`target`（`redfish`・`ipmi`・`power`・`bmc`）は省略でき、`kind` から決まる。故障は足した順に照合し、最初に合ったものが効く。効くたびにログに `fault: <id> <kind> applied to <要求>` を出す。
+
+| kind | 効き目 | 条件・パラメータ |
+|------|--------|-------------------------|
+| `redfish-delay` | `delayMs` 遅れて応える | `delayMs`（必須）、`method`、`path` |
+| `redfish-error` | HTTP `status`（既定 500）と Redfish の error の本文で返す。要求は実行しない | `status`、`method`、`path` |
+| `redfish-hang` | 応えない。接続はクライアントが諦めるか、故障が消えるか、`hangSeconds`（既定 300）経つまで開いたままで、その後閉じる | `hangSeconds`、`method`、`path` |
+| `redfish-drop` | TCP をすぐ閉じる（リセット） | `method`、`path` |
+| `ipmi-drop` | IPMI の要求に応えない | `netfn`、`cmd`、`includeSession` |
+| `ipmi-delay` | `delayMs` 遅れて応える（ほかの要求は待たせない） | `delayMs`（必須）、`netfn`、`cmd`、`includeSession` |
+| `ipmi-error` | コマンドを実行せず `completionCode`（既定 `0xFF`）を返す | `completionCode`、`netfn`、`cmd`、`includeSession` |
+| `power-action-fail` | 電源操作（Redfish の `ComputerSystem.Reset`、IPMI の chassis control）が失敗する。Redfish は 500、IPMI は `completionCode`（既定 `0xFF`）。何もしない | `action`、`completionCode` |
+| `power-action-ignored` | 電源操作に成功（204・cc 0x00）と返すが、何もしない（「BMC は受けたのに機械が動かない」） | `action` |
+| `graceful-ignored` | `GracefulShutdown` / `GracefulRestart`（IPMI の `power soft`）で ACPI の電源ボタンを VM に送らない（OS が止まらない機械）。`PoweringOff` のあと `GRACEFUL_TIMEOUT` で `On` に戻る | `action` |
+| `bmc-unavailable` | Redfish も IPMI も応えない（BMC の再起動中）。Redfish の接続は故障が終わるまで開いたままで、その後閉じる | `durationSeconds` |
+
+- `method`: HTTP メソッド。省略で全部。`path`: パスの前方一致（`/redfish/v1/Systems`）、`*`・`?`・`[` を含めば glob（`/redfish/v1/Systems/*/Actions/*`。`*` は `/` に合わない）。省略で全部。例外は作らない（サービスルート・セッション・noVNC も含む）ので、必要なら `path` で絞る。
+- `netfn`・`cmd`: 数か文字列（`"0x06"`）。省略で全部。`includeSession: true` でなければ、セッションを開く・閉じるメッセージ（ASF ping、RMCP+ の Open Session・RAKP、Get Channel Auth Capabilities、Get Session Challenge、Activate Session、Set Session Privilege、Close Session、Get Channel Cipher Suites）には効かない。たとえば `ipmitool` はセッションを開けて、コマンドでタイムアウトする。`netfn`・`cmd` を指定すると、Open Session・RAKP と ASF ping には効かない（IPMI のコマンドではないので）。
+- `action`: 要求された Redfish の `ResetType`（`On`・`ForceOff`・`GracefulShutdown`・`ForceRestart`・`GracefulRestart`・`PowerCycle`・`ForceOn`・`Nmi`・`PushPowerButton`）。IPMI の chassis control は `ForceOff`（off）・`On`（on）・`PowerCycle`（cycle）・`ForceRestart`（reset）・`GracefulShutdown`（soft）・`Nmi`（diag）になる。省略で全部。
+- `FAULT_API_ADDR` か `FAULTS` を設定すると、Redfish は HTTP/1.1 だけになる（HTTP/2 の接続はまるごと閉じられないので）。
+
 ## Redfish エンドポイント
 
 | メソッド | パス | 説明 |
@@ -845,6 +963,9 @@ ipmitool user enable 3
 | `VMEDIA_DIR` | `/vm` が書ければ `/vm/vmedia`、無理なら `/tmp/vmedia` | VirtualMedia の HTTP(S) イメージの保存先（UEFI HTTP ブートの `Boot.HttpBootUri` のイメージも）。差し替え・Eject（URI の変更・削除）で前に落としたファイルは消し、前の起動の残り（`cd1-*.iso`・`httpboot-*.iso`）は起動時に消す。レガシーモードでは外の QEMU がこのディレクトリを読める（同じファイルシステム）必要がある |
 | `VMEDIA_INSECURE_TLS` | `true` | HTTPS のイメージを落とすとき証明書を検証しない。`false` ならシステムの CA で検証する。自前の CA は `SSL_CERT_FILE` で足す |
 | `VMEDIA_TIMEOUT` | `600` | ダウンロード中（VirtualMedia・UEFI HTTP ブートのイメージ）に電源オン・リセットが来たとき、終わるまで待つ秒数（過ぎたら ISO 無しで起動） |
+| `FAULT_API_ADDR` | (空、無効) | 故障の注入の API の待ち受けアドレス（TLS なしの HTTP。例 `:8623`）。[故障の注入](#故障の注入) を参照 |
+| `FAULT_API_TOKEN` | (空) | 故障の API に要る Bearer トークン。空なら認証なし |
+| `FAULTS` | (空) | 起動時から効く故障の JSON の配列 |
 | `SYSTEM_UUID` | （導出） | システム UUID を固定する。QEMU に `-uuid` で渡し、Redfish `Systems/1` の `UUID` と IPMI `mc guid` で返す。未指定なら `SYSTEM_UUID_FILE` から読み、無ければホスト名から導出してそこへ保存する。コンテナを作り直しても保つには、これを指定するか、`--hostname` を固定するか、`/vm` をマウントする |
 | `SYSTEM_UUID_FILE` | `<VM_DISK のディレクトリ>/system-uuid` | 導出した UUID の保存先 |
 | `VM_MACS` | （導出） | VM の NIC の MAC アドレスを順にカンマ区切りで指定する（空の項目は導出）。未指定の MAC はシステム UUID から導出するので、ノードごとに固定され、ノード間で重ならない。Redfish `Systems/1/EthernetInterfaces` で返す |
@@ -893,7 +1014,7 @@ go vet ./...
 
 # コンテナ統合テスト
 make container-test         # クイックスモークテスト
-make container-test-all     # 全 103 テスト (9 カテゴリ)
+make container-test-all     # 全 115 テスト (10 カテゴリ)
 
 # Ironic 通し試験: 本物の Ironic で Debian を展開 (Redfish・IPMI ドライバ、約 20 分)
 make ironic-test            # tests/ironic/README.md 参照
@@ -912,6 +1033,7 @@ internal/
   novnc/                       # noVNC 静的ファイル（埋め込み）+ WebSocket-to-VNC プロキシ
   bmc/                         # BMC 設定状態 (ユーザー、LAN、チャネル)
   config/                      # 環境変数設定
+  fault/                       # 故障の注入（故障の API、Redfish・IPMI・電源の故障）
 docker/
   Dockerfile                   # マルチステージビルド (Go ビルダー + Debian ランタイム)
   entrypoint.sh                # 環境変数 → QEMU 引数変換

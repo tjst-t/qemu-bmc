@@ -146,6 +146,7 @@ start_test_container() {
         case "$1" in
             -e) extra_env+=(-e "$2"); shift 2 ;;
             -v) extra_args="$extra_args -v $2"; shift 2 ;;
+            -p) extra_args="$extra_args -p $2"; shift 2 ;;
             --hostname) extra_args="$extra_args --hostname $2"; shift 2 ;;
             --no-kvm) extra_args="$extra_args --device /dev/net/tun:/dev/net/tun"; shift ;;
             *) shift ;;

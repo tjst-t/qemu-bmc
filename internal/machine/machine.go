@@ -109,6 +109,11 @@ type Machine struct {
 
 	gracefulTimeout time.Duration
 	pollInterval    time.Duration
+
+	// ignoreGraceful, if set, keeps the ACPI power button event of a
+	// GracefulShutdown/GracefulRestart from being sent when it returns
+	// true (fault injection). Guarded by resetMu.
+	ignoreGraceful func(resetType string) bool
 }
 
 // New creates a new Machine with the given QMP client (legacy mode)
@@ -148,6 +153,25 @@ func (m *Machine) SetGracefulTimeout(d time.Duration) {
 	m.resetMu.Lock()
 	defer m.resetMu.Unlock()
 	m.gracefulTimeout = d
+}
+
+// SetGracefulFilter sets a function deciding, for each GracefulShutdown and
+// GracefulRestart, whether the ACPI power button event is not sent to the
+// guest (as if the guest ignored it; the graceful timeout still applies).
+func (m *Machine) SetGracefulFilter(ignore func(resetType string) bool) {
+	m.resetMu.Lock()
+	defer m.resetMu.Unlock()
+	m.ignoreGraceful = ignore
+}
+
+// systemPowerdown sends the ACPI power button event of a GracefulShutdown
+// or GracefulRestart, unless the graceful filter drops it. Callers hold
+// resetMu.
+func (m *Machine) systemPowerdown(resetType string) error {
+	if m.ignoreGraceful != nil && m.ignoreGraceful(resetType) {
+		return nil
+	}
+	return m.qmpClient.SystemPowerdown()
 }
 
 // GetPowerState returns the current power state of the VM, including the
@@ -381,13 +405,13 @@ func (m *Machine) resetLegacy(resetType string, mediaDeadline time.Time) error {
 	case "ForceOff":
 		return m.qmpClient.Stop()
 	case "GracefulShutdown":
-		return m.qmpClient.SystemPowerdown()
+		return m.systemPowerdown(resetType)
 	case "ForceRestart", "PowerCycle":
 		m.waitMediaDownload(mediaDeadline)
 		m.applyMedia()
 		return m.qmpClient.SystemReset()
 	case "GracefulRestart":
-		return m.qmpClient.SystemPowerdown()
+		return m.systemPowerdown(resetType)
 	default:
 		return fmt.Errorf("unsupported reset type: %s", resetType)
 	}
@@ -466,10 +490,10 @@ func (m *Machine) resetProcessMode(resetType string, mediaDeadline time.Time) er
 
 	case "GracefulShutdown":
 		// QEMU exits by itself once the guest powers off
-		return m.qmpClient.SystemPowerdown()
+		return m.systemPowerdown(resetType)
 
 	case "GracefulRestart":
-		return m.qmpClient.SystemPowerdown()
+		return m.systemPowerdown(resetType)
 
 	default:
 		return fmt.Errorf("unsupported reset type: %s", resetType)

@@ -2,12 +2,19 @@ package ipmi
 
 import (
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"log"
 	"net"
+	"time"
 
 	"github.com/tjst-t/qemu-bmc/internal/bmc"
+	"github.com/tjst-t/qemu-bmc/internal/fault"
 )
+
+// errNoResponse is returned for a request that is not answered (fault
+// injection).
+var errNoResponse = errors.New("no response (injected fault)")
 
 // Server is the IPMI UDP server
 type Server struct {
@@ -17,6 +24,7 @@ type Server struct {
 	user       string
 	pass       string
 	conn       net.PacketConn
+	faults     *fault.Store
 }
 
 // NewServer creates a new IPMI server
@@ -28,6 +36,12 @@ func NewServer(m MachineInterface, state *bmc.State, user, pass string) *Server 
 		user:       user,
 		pass:       pass,
 	}
+}
+
+// SetFaults makes the server apply the ipmi-* and bmc-unavailable faults of
+// the store.
+func (s *Server) SetFaults(faults *fault.Store) {
+	s.faults = faults
 }
 
 // ListenAndServe starts the IPMI UDP server
@@ -59,28 +73,94 @@ func (s *Server) serve() error {
 		data := make([]byte, n)
 		copy(data, buf[:n])
 
-		resp, err := s.HandleMessage(data)
+		resp, delay, err := s.handleMessage(data)
+		if errors.Is(err, errNoResponse) {
+			continue
+		}
 		if err != nil {
 			log.Printf("IPMI error: %v", err)
 			continue
 		}
 
 		if resp != nil {
-			if _, err := s.conn.WriteTo(resp, addr); err != nil {
-				log.Printf("IPMI write error: %v", err)
+			if delay > 0 {
+				// Later, without holding back the next requests
+				time.AfterFunc(delay, func() { s.write(resp, addr) })
+			} else {
+				s.write(resp, addr)
 			}
 		}
 	}
 }
 
+func (s *Server) write(resp []byte, addr net.Addr) {
+	if _, err := s.conn.WriteTo(resp, addr); err != nil {
+		log.Printf("IPMI write error: %v", err)
+	}
+}
+
 // HandleMessage processes a single IPMI/RMCP message and returns a response
 func (s *Server) HandleMessage(data []byte) ([]byte, error) {
+	resp, delay, err := s.handleMessage(data)
+	if delay > 0 {
+		time.Sleep(delay)
+	}
+	return resp, err
+}
+
+// sessionCommands are the commands opening or closing a session, affected
+// by the IPMI faults only with includeSession (NetFn App)
+var sessionCommands = map[uint8]bool{
+	CmdGetChannelAuthCapabilities: true,
+	CmdGetSessionChallenge:        true,
+	CmdActivateSession:            true,
+	CmdSetSessionPrivilege:        true,
+	CmdCloseSession:               true,
+	CmdGetChannelCipherSuites:     true,
+}
+
+// handleMessage processes a single IPMI/RMCP message and returns the
+// response and how long to wait before sending it, or errNoResponse.
+func (s *Server) handleMessage(data []byte) ([]byte, time.Duration, error) {
+	var delay time.Duration
+	// apply applies the faults; false if the request is not answered
+	apply := func(r fault.IPMIRequest) (fault.IPMIAction, bool) {
+		a := s.faults.IPMI(r)
+		delay = a.Delay
+		return a, !a.Drop
+	}
+	handle := func(msg *IPMIMessage) (CompletionCode, []byte, error) {
+		netFn := msg.GetNetFn()
+		a, ok := apply(fault.IPMIRequest{
+			HasCommand: true,
+			NetFn:      netFn,
+			Cmd:        msg.Command,
+			Session:    netFn == NetFnApp && sessionCommands[msg.Command],
+		})
+		if !ok {
+			return 0, nil, errNoResponse
+		}
+		if a.Error {
+			return CompletionCode(a.CompletionCode), nil, nil
+		}
+		code, resp := handleIPMICommand(msg, s.machine, s.bmcState)
+		return code, resp, nil
+	}
+
+	resp, err := s.dispatch(data, handle, apply)
+	return resp, delay, err
+}
+
+func (s *Server) dispatch(data []byte, handle commandHandler, apply func(fault.IPMIRequest) (fault.IPMIAction, bool)) ([]byte, error) {
 	header, payload, err := ParseRMCPMessage(data)
 	if err != nil {
 		return nil, err
 	}
 
 	if header.Class == RMCPClassASF {
+		if _, ok := apply(fault.IPMIRequest{Session: true}); !ok {
+			return nil, errNoResponse
+		}
 		return handleASFPing(payload)
 	}
 
@@ -90,7 +170,13 @@ func (s *Server) HandleMessage(data []byte) ([]byte, error) {
 
 	// Check if this is RMCP+ (auth type 0x06 at first byte of payload)
 	if len(payload) > 0 && payload[0] == AuthTypeRMCPPlus {
-		resp, err := HandleRMCPPlusMessage(payload, s.sessionMgr, s.user, s.pass, s.machine, s.bmcState)
+		if len(payload) > 1 && payload[1]&0x3F != PayloadTypeIPMI {
+			// Open Session / RAKP
+			if _, ok := apply(fault.IPMIRequest{Session: true}); !ok {
+				return nil, errNoResponse
+			}
+		}
+		resp, err := handleRMCPPlusMessage(payload, s.sessionMgr, s.user, s.pass, s.bmcState, handle)
 		if err != nil {
 			return nil, err
 		}
@@ -107,7 +193,10 @@ func (s *Server) HandleMessage(data []byte) ([]byte, error) {
 		return nil, fmt.Errorf("no IPMI message parsed")
 	}
 
-	code, respData := handleIPMICommand(msg, s.machine, s.bmcState)
+	code, respData, err := handle(msg)
+	if err != nil {
+		return nil, err
+	}
 
 	respPayload := SerializeIPMIResponse(session, msg.GetNetFn()|0x01, msg.Command, code, respData, msg.SourceLun, s.pass)
 	return SerializeRMCPMessage(RMCPClassIPMI, respPayload), nil

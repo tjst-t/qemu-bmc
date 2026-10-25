@@ -13,6 +13,7 @@ import (
 
 	"github.com/tjst-t/qemu-bmc/internal/bmc"
 	"github.com/tjst-t/qemu-bmc/internal/config"
+	"github.com/tjst-t/qemu-bmc/internal/fault"
 	"github.com/tjst-t/qemu-bmc/internal/ipmi"
 	"github.com/tjst-t/qemu-bmc/internal/machine"
 	"github.com/tjst-t/qemu-bmc/internal/qemu"
@@ -166,6 +167,21 @@ func main() {
 	})
 	m.CleanStaleDownloads()
 
+	// Fault injection (FAULT_API_ADDR, FAULTS); nil if disabled
+	faults := startFaults(cfg)
+	if faults != nil {
+		m.SetGracefulFilter(faults.IgnoreGraceful)
+	}
+	// What the Redfish and IPMI servers control: power actions go through
+	// the power-action-* faults
+	var bmcMachine interface {
+		redfish.MachineInterface
+		ipmi.MachineInterface
+	} = m
+	if faults != nil {
+		bmcMachine = faultMachine{m, faults}
+	}
+
 	// Create BMC state
 	bmcState := bmc.NewState(cfg.IPMIUser, cfg.IPMIPass)
 	if systemUUID != "" {
@@ -174,7 +190,7 @@ func main() {
 
 	// Start VM IPMI server (only if configured)
 	if cfg.VMIPMIAddr != "" {
-		vmServer := ipmi.NewVMServer(m, bmcState)
+		vmServer := ipmi.NewVMServer(bmcMachine, bmcState)
 		go func() {
 			log.Printf("Starting VM IPMI server on %s", cfg.VMIPMIAddr)
 			if err := vmServer.ListenAndServe(cfg.VMIPMIAddr); err != nil {
@@ -184,7 +200,8 @@ func main() {
 	}
 
 	// Start IPMI server
-	ipmiServer := ipmi.NewServer(m, bmcState, cfg.IPMIUser, cfg.IPMIPass)
+	ipmiServer := ipmi.NewServer(bmcMachine, bmcState, cfg.IPMIUser, cfg.IPMIPass)
+	ipmiServer.SetFaults(faults)
 	go func() {
 		addr := fmt.Sprintf(":%s", cfg.IPMIPort)
 		log.Printf("Starting IPMI server on %s", addr)
@@ -194,7 +211,7 @@ func main() {
 	}()
 
 	// Start Redfish server
-	redfishServer := redfish.NewServer(m, cfg.IPMIUser, cfg.IPMIPass, cfg.VNCAddr)
+	redfishServer := redfish.NewServer(bmcMachine, cfg.IPMIUser, cfg.IPMIPass, cfg.VNCAddr)
 	redfishServer.SetSystemInfo(systemInfo)
 	redfishServer.SetUserStore(bmcState)
 	redfishServer.SetSystemUUID(systemUUID)
@@ -205,6 +222,12 @@ func main() {
 	httpServer := &http.Server{
 		Addr:    addr,
 		Handler: redfishServer,
+	}
+	if faults != nil {
+		httpServer.Handler = faults.Middleware(redfishServer)
+		// HTTP/1.1 only: an HTTP/2 connection cannot be hijacked, so
+		// redfish-drop could only reset the stream, not the connection
+		httpServer.TLSNextProto = map[string]func(*http.Server, *tls.Conn, http.Handler){}
 	}
 
 	go func() {
@@ -243,6 +266,54 @@ func main() {
 		// Give process time to exit
 		time.Sleep(500 * time.Millisecond)
 	}
+}
+
+// faultMachine runs the power actions of the Redfish and IPMI servers
+// through the power-action-fail and power-action-ignored faults.
+type faultMachine struct {
+	*machine.Machine
+	faults *fault.Store
+}
+
+func (f faultMachine) Reset(resetType string) error {
+	return f.faults.Reset(resetType, f.Machine.Reset)
+}
+
+// startFaults sets up fault injection: the faults of FAULTS and the fault
+// API on FAULT_API_ADDR. It returns nil if both are unset.
+func startFaults(cfg *config.Config) *fault.Store {
+	if cfg.FaultAPIAddr == "" && cfg.Faults == "" {
+		return nil
+	}
+	faults := fault.NewStore()
+	if cfg.Faults != "" {
+		list, err := fault.Parse(cfg.Faults)
+		if err != nil {
+			log.Fatalf("Invalid FAULTS: %v", err)
+		}
+		for _, f := range list {
+			if _, err := faults.Add(f); err != nil {
+				log.Fatalf("Invalid FAULTS: %v", err)
+			}
+		}
+	}
+	if cfg.FaultAPIAddr != "" {
+		if cfg.FaultAPIToken == "" {
+			log.Printf("WARN: FAULT_API_TOKEN is not set, the fault API needs no authentication")
+		}
+		srv := &http.Server{
+			Addr:              cfg.FaultAPIAddr,
+			Handler:           faults.APIHandler(cfg.FaultAPIToken),
+			ReadHeaderTimeout: 10 * time.Second,
+		}
+		go func() {
+			log.Printf("Starting fault API on %s (HTTP)", cfg.FaultAPIAddr)
+			if err := srv.ListenAndServe(); err != nil {
+				log.Fatalf("Fault API server error: %v", err)
+			}
+		}()
+	}
+	return faults
 }
 
 // probeDisks finds the guest hard disks in the QEMU args and reads their
