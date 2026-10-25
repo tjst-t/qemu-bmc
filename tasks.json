@@ -1071,7 +1071,7 @@
       "number": 48,
       "kind": "task",
       "title": "IPMI SOL と Redfish の SerialConsole",
-      "status": "ready",
+      "status": "in-progress",
       "parent": "v0-10-0",
       "dependsOn": [
         "serial-mux"
@@ -1085,7 +1085,7 @@
       "refs": [],
       "threads": [],
       "createdAt": "2026-10-25T10:54:29.647Z",
-      "updatedAt": "2026-10-25T10:54:29.647Z",
+      "updatedAt": "2026-10-25T13:40:31.810Z",
       "closedAt": null,
       "extra": {}
     },
