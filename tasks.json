@@ -1094,7 +1094,7 @@
       "number": 49,
       "kind": "task",
       "title": "Redfish の Bios（属性・Settings・ResetBios）",
-      "status": "ready",
+      "status": "in-progress",
       "parent": "v0-10-0",
       "dependsOn": [
         "ipmi-sol"
@@ -1108,7 +1108,7 @@
       "refs": [],
       "threads": [],
       "createdAt": "2026-10-25T10:54:29.647Z",
-      "updatedAt": "2026-10-25T10:54:29.647Z",
+      "updatedAt": "2026-10-26T06:45:58.429Z",
       "closedAt": null,
       "extra": {}
     }
