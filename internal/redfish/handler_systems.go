@@ -88,6 +88,9 @@ func (s *Server) handleGetSystem(w http.ResponseWriter, r *http.Request) {
 	if s.machine.SecureBootSupported() {
 		system.SecureBoot = &ODataID{ODataID: secureBootPath}
 	}
+	if s.bios != nil {
+		system.Bios = &ODataID{ODataID: biosPath}
+	}
 	if s.solPort != 0 {
 		system.SerialConsole = &HostSerialConsole{
 			MaxConcurrentSessions: solMaxSessions,

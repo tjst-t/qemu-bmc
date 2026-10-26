@@ -115,6 +115,11 @@ type Machine struct {
 	// true (fault injection). Guarded by resetMu.
 	ignoreGraceful func(resetType string) bool
 
+	// bootHook, if set, is called each time the VM boots: before QEMU is
+	// started or continued from off and before a system_reset. Guarded by
+	// resetMu.
+	bootHook func()
+
 	// events are sent to the SubscribeEvents subscribers; powerPoll is how
 	// often the power state is polled for them (0 = defaultPowerPoll).
 	events    eventBus
@@ -167,6 +172,22 @@ func (m *Machine) SetGracefulFilter(ignore func(resetType string) bool) {
 	m.resetMu.Lock()
 	defer m.resetMu.Unlock()
 	m.ignoreGraceful = ignore
+}
+
+// SetBootHook sets a function called each time the VM boots (power on,
+// restart, reset; also powering on after QEMU went down), before the
+// firmware runs. Pending BIOS settings are applied there.
+func (m *Machine) SetBootHook(hook func()) {
+	m.resetMu.Lock()
+	defer m.resetMu.Unlock()
+	m.bootHook = hook
+}
+
+// booting runs the boot hook. Callers must hold resetMu.
+func (m *Machine) booting() {
+	if m.bootHook != nil {
+		m.bootHook()
+	}
 }
 
 // systemPowerdown sends the ACPI power button event of a GracefulShutdown
@@ -407,6 +428,7 @@ func (m *Machine) resetLegacy(resetType string, mediaDeadline time.Time) error {
 		}
 		m.waitMediaDownload(mediaDeadline)
 		m.applyMedia()
+		m.booting()
 		if status, err := m.qmpClient.QueryStatus(); err == nil && status == qmp.StatusShutdown {
 			// The guest powered off (QEMU -no-shutdown); QEMU must be reset
 			// before it can run again.
@@ -422,6 +444,7 @@ func (m *Machine) resetLegacy(resetType string, mediaDeadline time.Time) error {
 	case "ForceRestart", "PowerCycle":
 		m.waitMediaDownload(mediaDeadline)
 		m.applyMedia()
+		m.booting()
 		return m.qmpClient.SystemReset()
 	case "GracefulRestart":
 		return m.systemPowerdown(resetType)
@@ -445,6 +468,8 @@ func (m *Machine) resetProcessMode(resetType string, mediaDeadline time.Time) er
 		cdImage := m.insertedPath()
 		secureBoot := m.secureBoot.enable
 		m.mu.RUnlock()
+
+		m.booting()
 
 		if err := m.processManager.Start(target, cdImage, httpBootImage, secureBoot); err != nil {
 			log.Printf("Cannot start QEMU: %v", err)
@@ -488,6 +513,7 @@ func (m *Machine) resetProcessMode(resetType string, mediaDeadline time.Time) er
 		// The running process already has the requested boot target, so
 		// this reset uses it; consume Once so the next reset reverts.
 		m.applyMedia()
+		m.booting()
 		if err := m.qmpClient.SystemReset(); err != nil {
 			return err
 		}

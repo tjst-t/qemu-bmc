@@ -42,7 +42,8 @@ type Server struct {
 	users        UserStore
 	events       *eventService
 	serialLog    SerialLog
-	solPort      int // IPMI port SOL is served on, 0 if none
+	bios         BiosStore // nil = no Systems/1/Bios
+	solPort      int       // IPMI port SOL is served on, 0 if none
 }
 
 // UserStore authenticates BMC users in addition to the configured
@@ -183,6 +184,13 @@ func (s *Server) setupRoutes() {
 		s.router.HandleFunc(sys+"/SecureBoot"+p, s.handleGetSecureBoot).Methods("GET")
 		s.router.HandleFunc(sys+"/SecureBoot"+p, s.handlePatchSecureBoot).Methods("PATCH")
 		s.router.HandleFunc(sys+"/SecureBoot/Actions/SecureBoot.ResetKeys"+p, s.handleResetKeys).Methods("POST")
+		s.router.HandleFunc(sys+"/Bios"+p, s.handleGetBios).Methods("GET")
+		s.router.HandleFunc(sys+"/Bios/Settings"+p, s.handleGetBiosSettings).Methods("GET")
+		s.router.HandleFunc(sys+"/Bios/Settings"+p, s.handlePatchBiosSettings).Methods("PATCH")
+		s.router.HandleFunc(sys+"/Bios/Actions/Bios.ResetBios"+p, s.handleResetBios).Methods("POST")
+		s.router.HandleFunc(registriesPath+p, s.handleRegistryCollection).Methods("GET")
+		s.router.HandleFunc(registriesPath+"/{regid}"+p, s.handleGetRegistryFile).Methods("GET")
+		s.router.HandleFunc(biosRegistryURI+p, s.handleGetBiosRegistry).Methods("GET")
 	}
 
 	// Actions

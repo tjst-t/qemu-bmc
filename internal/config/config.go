@@ -66,6 +66,10 @@ type Config struct {
 	// when delivering Redfish events to https subscription destinations
 	EventInsecureTLS bool
 
+	// BiosAttributes (BIOS_ATTRIBUTES) is a JSON object replacing the
+	// defaults of the Redfish Bios attributes (saved to BiosFile)
+	BiosAttributes string
+
 	// Fault injection: the fault API listens on FaultAPIAddr
 	// (FAULT_API_ADDR, disabled if empty) and needs the bearer token
 	// FaultAPIToken (FAULT_API_TOKEN) if set; Faults (FAULTS) is a JSON
@@ -110,6 +114,8 @@ func Load() *Config {
 		VMediaInsecureTLS: getBoolEnv("VMEDIA_INSECURE_TLS", true),
 		VMediaTimeout:     getSecondsEnv("VMEDIA_TIMEOUT", 10*time.Minute),
 
+		BiosAttributes: getEnv("BIOS_ATTRIBUTES", ""),
+
 		EventInsecureTLS: getBoolEnv("EVENT_INSECURE_TLS", true),
 
 		FaultAPIAddr:  getEnv("FAULT_API_ADDR", ""),
@@ -120,6 +126,12 @@ func Load() *Config {
 		VMMemoryMiB: qemu.ParseMemoryMiB(getEnv("VM_MEMORY", "2048")),
 		VMCPUs:      qemu.ParseSMPCPUs(getEnv("VM_CPUS", "2")),
 	}
+}
+
+// BiosFile is where the Redfish Bios attributes are saved: next to the
+// VirtualMedia downloads.
+func (c *Config) BiosFile() string {
+	return filepath.Join(c.VMediaDir, "bios-settings.json")
 }
 
 // defaultVMediaDir returns <base>/vmedia if base is a writable directory,

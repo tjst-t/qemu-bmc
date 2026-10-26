@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
     inputs:
       flows:
-        description: "Flows (redfish-vmedia redfish-https ipmi-pxe all)"
+        description: "Flows (redfish-vmedia redfish-bios redfish-https ipmi-pxe all)"
         default: all
         type: string
       image:

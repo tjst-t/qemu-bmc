@@ -91,6 +91,14 @@ func TestLoad_EventInsecureTLS(t *testing.T) {
 	assert.False(t, Load().EventInsecureTLS)
 }
 
+func TestLoad_Bios(t *testing.T) {
+	t.Setenv("VMEDIA_DIR", "/data/vm")
+	t.Setenv("BIOS_ATTRIBUTES", `{"NumLock":"Off"}`)
+	cfg := Load()
+	assert.Equal(t, `{"NumLock":"Off"}`, cfg.BiosAttributes)
+	assert.Equal(t, "/data/vm/bios-settings.json", cfg.BiosFile())
+}
+
 func TestDefaultVMediaDir(t *testing.T) {
 	dir := t.TempDir()
 	assert.Equal(t, filepath.Join(dir, "vmedia"), defaultVMediaDir(dir))

@@ -21,15 +21,17 @@ internal/
   config/                      # Environment variable config
   fault/                       # Fault injection: store, fault API, Redfish middleware, IPMI/power hooks
   serial/                      # Serial console mux (Console interface, QEMU UNIX socket, TCP server, ring buffer)
+  bios/                        # BIOS attributes (definitions, pending settings, ResetBios, JSON file)
 docker/
   Dockerfile                   # Multi-stage build (Go builder + Debian runtime)
   entrypoint.sh                # Environment variables → QEMU args conversion
   setup-network.sh             # TAP/bridge network setup for VM passthrough
-tests/                         # Bash-based container integration tests (134 tests)
+tests/                         # Bash-based container integration tests (142 tests)
   run_tests.sh                 # Test runner (category-based)
   test_helper.sh               # Assertions, container mgmt, IPMI/Redfish helpers
-  test_*.sh                    # Test categories (container, ipmi, redfish, power, boot, fault, events, serial, sol, etc.)
+  test_*.sh                    # Test categories (container, ipmi, redfish, power, boot, fault, events, serial, sol, bios, etc.)
   sol_console.py               # expect-like pty driver for ipmitool sol activate (test_sol.sh)
+  bios_sushy.py                # sushy client for test_bios.sh (attributes, set, reset, registry)
   ironic/run.sh                # Ironic end-to-end deploy test (make ironic-test; manual, not in CI)
 containerlab/
   example.yml                  # 2 nodes booting their own disk, BMC published on the host
@@ -83,14 +85,14 @@ make docker-build
 # Container integration tests (quick smoke tests)
 make container-test
 
-# Container integration tests (all 134 tests across 13 categories)
+# Container integration tests (all 142 tests across 14 categories)
 make container-test-all
 
 # Run specific test categories
 ./tests/run_tests.sh --build container ipmi redfish power boot
 
 # Ironic end-to-end test (real Ironic deploys Debian; Redfish vmedia/https, IPMI PXE UEFI+BIOS)
-make ironic-test                       # or IRONIC_FLOWS=redfish-vmedia, IRONIC_ARGS="--image ghcr.io/..."
+make ironic-test                       # or IRONIC_FLOWS=redfish-vmedia (redfish-bios, redfish-https, ipmi-pxe), IRONIC_ARGS="--image ghcr.io/..."
 ```
 
 ## Environment Variables
@@ -127,6 +129,7 @@ make ironic-test                       # or IRONIC_FLOWS=redfish-vmedia, IRONIC_
 | `VMEDIA_INSECURE_TLS` | `true` | Skip certificate verification for https VirtualMedia downloads |
 | `VMEDIA_TIMEOUT` | `600` | Seconds a power on/reset (Redfish and IPMI) waits for a VirtualMedia (or, for UefiHttp, HttpBootUri) download in progress |
 | `EVENT_INSECURE_TLS` | `true` | Skip certificate verification when POSTing Redfish events to https subscription destinations |
+| `BIOS_ATTRIBUTES` | (empty) | JSON object replacing the defaults of writable Bios attributes (`bios.NewStore`; invalid → exit). State saved to `<VMEDIA_DIR>/bios-settings.json` (`Config.BiosFile`, both modes); saved values win over the defaults |
 | `FAULT_API_ADDR` | (empty, disabled) | Fault injection API listen address (plain HTTP, e.g. `:8623`), see Fault Injection below |
 | `FAULT_API_TOKEN` | (empty) | Bearer token required by the fault API (none if empty) |
 | `FAULTS` | (empty) | JSON array of faults active from startup (works without `FAULT_API_ADDR`) |
@@ -153,12 +156,12 @@ make ironic-test                       # or IRONIC_FLOWS=redfish-vmedia, IRONIC_
 
 | Method | Path | Description |
 |--------|------|-------------|
-| GET | `/redfish`, `/redfish/v1` | Version document, ServiceRoot (no auth; root has SessionService, EventService and Links.Sessions) |
+| GET | `/redfish`, `/redfish/v1` | Version document, ServiceRoot (no auth; root has SessionService, EventService, Registries and Links.Sessions) |
 | GET/PATCH | `/redfish/v1/SessionService` | SessionTimeout (default 1800 s, 30–86400) |
 | GET/POST | `/redfish/v1/SessionService/Sessions` | Session collection / log in (POST needs no auth; 201 with X-Auth-Token and Location; 401 bad credentials; 503 over 64 sessions) |
 | GET/DELETE | `/redfish/v1/SessionService/Sessions/{id}` | Session / log out (204). Sessions are in memory and expire after SessionTimeout idle |
 | GET | `/redfish/v1/Systems` | System collection |
-| GET | `/redfish/v1/Systems/1` | Computer system (`#ComputerSystem.v1_13_0`: Manufacturer, Model, SerialNumber, SKU (VM_* identity), PowerState, Boot, MemorySummary, ProcessorSummary, Processors, Storage, SimpleStorage, EthernetInterfaces, VirtualMedia → Systems/1/VirtualMedia, SecureBoot (UEFI process mode only), SerialConsole (process mode: MaxConcurrentSessions 1, IPMI {ServiceEnabled, Port = IPMI_PORT, HotKeySequenceDisplay}), Actions, Status, Links.ManagedBy → Managers/1, Links.Chassis → Chassis/1) |
+| GET | `/redfish/v1/Systems/1` | Computer system (`#ComputerSystem.v1_13_0`: Manufacturer, Model, SerialNumber, SKU (VM_* identity), PowerState, Boot, MemorySummary, ProcessorSummary, Processors, Storage, SimpleStorage, EthernetInterfaces, VirtualMedia → Systems/1/VirtualMedia, SecureBoot (UEFI process mode only), Bios (when SetBios), SerialConsole (process mode: MaxConcurrentSessions 1, IPMI {ServiceEnabled, Port = IPMI_PORT, HotKeySequenceDisplay}), Actions, Status, Links.ManagedBy → Managers/1, Links.Chassis → Chassis/1) |
 | GET | `/redfish/v1/Systems/1/EthernetInterfaces` | NIC collection (one per guest NIC, command-line order) |
 | GET | `/redfish/v1/Systems/1/EthernetInterfaces/{n}` | NIC (MACAddress, LinkStatus: LinkUp while the VM runs) |
 | GET | `/redfish/v1/Systems/1/Processors` | Processor collection: CPU1, or no members when the CPU count (SystemInfo.CPUs) is 0 |
@@ -177,6 +180,11 @@ make ironic-test                       # or IRONIC_FLOWS=redfish-vmedia, IRONIC_
 | GET | `/redfish/v1/Systems/1/VirtualMedia/CD1` | VirtualMedia resource, same as Managers/1/VirtualMedia/CD1; `@odata.id` and action targets follow the URI requested. InsertMedia/EjectMedia actions below work under both |
 | PATCH | `/redfish/v1/Systems/1` | Boot device override (with ETag support; ETag includes HttpBootUri). Targets None/Pxe/Hdd/Cd/BiosSetup/UefiHttp. Cd gets the managed CD `bootindex=0`; Pxe with OVMF gets the first NIC `bootindex=0` (OVMF ignores `-boot n` and would boot the disk), unless a device already has bootindex=0. `Boot.HttpBootUri` (always in GET, null when unset): http(s) URL, or null/"" to clear (else 400); kept after Once is used until cleared. UefiHttp with a URI: image downloaded like VirtualMedia (VMEDIA_*, starts at PATCH, power on/reset waits; failure → that boot goes on without it) and booted from a hidden CD (`httpboot0` on its own ich9-ahci, bootindex=0; not VirtualMedia). Without a URI: network boot (-boot n); with OVMF also fw_cfg IPv4/IPv6PXESupport=n and first NIC `romfile=,bootindex=0` (`qemu.ApplyHTTPBoot`). Only for boots the override applies to. Legacy mode: UefiHttp / a URI → 400 |
 | GET/PATCH | `/redfish/v1/Systems/1/SecureBoot` | Only in process mode with OVMF pflash drives (`qemu.FindSecureBootFirmware`: `-drive if=pflash` with an `OVMF_CODE*.fd` plus a VARS pflash); else no `SecureBoot` link on Systems/1 and 404. `#SecureBoot.v1_1_0`: SecureBootEnable (next boot), SecureBootCurrentBoot (running/last started QEMU used the secboot OVMF), SecureBootMode `UserMode` (ms VARS have a PK), ETag/If-Match. PATCH `SecureBootEnable` bool only (else 400; true → 400 if `OVMF_CODE_4M.secboot.fd` or `OVMF_VARS_4M.ms.fd` is missing). Enabled boots: CODE → `OVMF_CODE_4M.secboot.fd` (same dir; always 4M — Debian's 2M secboot build hangs), VARS → `<vars>.secboot.fd` next to the configured VARS, copied from `OVMF_VARS_4M.ms.fd` if missing or of another size; `smm=on` on `-machine`, `-global driver=cfi.pflash01,property=secure,value=on`. ForceRestart restarts QEMU (not system_reset) when the setting changed or keys were reset |
+| GET | `/redfish/v1/Systems/1/Bios` | `#Bios.v1_2_0` (when `Server.SetBios`; main always): AttributeRegistry `BiosAttributeRegistry.1.0.0`, Attributes (current), ResetBiosToDefaultsPending, `@Redfish.Settings` (SettingsObject → Bios/Settings, SupportedApplyTimes [OnReset]; no ETag/Time/Messages), Actions `#Bios.ResetBios`, ETag. See BIOS below |
+| GET/PATCH | `/redfish/v1/Systems/1/Bios/Settings` | Pending attributes (`@Redfish.SettingsApplyTime` OnReset). PATCH `{"Attributes": {...}}` (+ optional `@Redfish.SettingsApplyTime` OnReset, `@odata.*` ignored, other keys 400 PropertyUnknown) merged into pending; invalid → 400 `Base.1.8.GeneralError` with one `@Message.ExtendedInfo` per attribute (PropertyUnknown/PropertyNotWritable/PropertyValueTypeError/PropertyValueNotInList/StringValueTooLong, RelatedProperties `#/Attributes/<name>`), nothing changed. ETag/If-Match. 200 + Settings body |
+| POST | `/redfish/v1/Systems/1/Bios/Actions/Bios.ResetBios` | Body ignored (sushy posts none first). 204. Drops pending, sets ResetBiosToDefaultsPending |
+| GET | `/redfish/v1/Registries`, `/redfish/v1/Registries/BiosAttributeRegistry` | `#MessageRegistryFileCollection` (linked from ServiceRoot; empty without SetBios); `#MessageRegistryFile.v1_1_0` (Registry `BiosAttributeRegistry.1.0`, Languages [en], Location Uri below) |
+| GET | `/redfish/v1/Registries/BiosAttributeRegistry/BiosAttributeRegistry.1.0.0.json` | `#AttributeRegistry.v1_3_6` (Id = Bios AttributeRegistry, so sushy `get_attribute_registry` matches it; Language en, OwningEntity qemu-bmc, SupportedSystems SystemId `qemubmc` (validator: alphanumeric), RegistryEntries.Attributes: AttributeName, DisplayName, HelpText, Type, Value [{ValueName, ValueDisplayName}], DefaultValue (omitted if empty), ReadOnly, ResetRequired, MinLength/MaxLength for String) |
 | POST | `/redfish/v1/Systems/1/SecureBoot/Actions/SecureBoot.ResetKeys` | `ResetKeysType` `ResetAllKeysToDefault` only (else 400): deletes the secboot VARS, recopied from the template at the next QEMU start (204) |
 | POST | `/redfish/v1/Systems/1/Actions/ComputerSystem.Reset` | Power control: On, ForceOff, GracefulShutdown, ForceRestart, GracefulRestart, PowerCycle (process mode: QEMU stopped and restarted so boot override/VirtualMedia apply; legacy: system_reset; off: On), ForceOn (= On), Nmi (QMP inject-nmi; 409 when off; does not end a graceful action), PushPowerButton (off: On, on: GracefulShutdown) |
 | GET | `/redfish/v1/Managers` | Manager collection |
@@ -235,6 +243,13 @@ RMCP+ session packets (IPMI and SOL) go through `openSessionPayload` (session mu
 - Deactivate by the holder: stop. By another session: "SOL deactivating" (0x10) packet to the holder and its session closed (ipmitool exits with "SOL session closed by BMC" at the next key / keepalive). Also on Close Session, idle timeout, SOL Enable set to 0.
 - Faults: SOL packets are `fault.IPMIRequest{SOL: true}` (matched only by faults without netfn/cmd).
 - Container tests: `tests/test_sol.sh` (category `sol`; Debian guest via `prepare_debian_disk` in test_helper.sh; ipmitool runs in the container with `docker exec -it` under `tests/sol_console.py` so the port is 623; -C 3 and -C 17 root login + command output, `~.`, second activate refused, `sol deactivate` from another session). Ironic: `tests/ironic/run.sh` ipmi-pxe uses `--console-interface ipmitool-socat` (Ironic image + socat, `OS_DEFAULT__ENABLED_CONSOLE_INTERFACES`, `OS_CONSOLE__PORT_RANGE`) and logs in through the console URL (`check_console`).
+
+## BIOS
+
+- `internal/bios` (`bios.Store`): `Definitions` (BootMode, SecureBoot read-only; ProcVirtualization, ProcHyperThreading, SriovGlobalEnable, PxeDev1EnDis, BootRetry, PowerProfile, NumLock, SerialConsoleRedirection: Enumeration; AssetTag: String max 64). Values are display only (they do not change the VM); read-only values come from `SetReadOnlyValue` (main: BootMode from `cfg.RedfishBootMode()`, SecureBoot from `GetSecureBoot().Enable`).
+- `SetPending` validates everything first (`bios.Errors`, all invalid attributes), then merges; `ResetToDefaults` drops pending and sets ResetPending; `Apply` (reset → defaults, then pending) clears both. Every change is saved (tmp + rename) as `{"Attributes", "Pending", "ResetPending"}`; on load invalid/unknown/read-only entries are dropped with a warning, an unreadable file is ignored.
+- Applied by `machine.SetBootHook` (main `startBios`, set before POWER_ON_AT_START): `Machine.booting()` runs under resetMu right before QEMU `Start` (process On, also from ForceRestart restart / PowerCycle / GracefulRestart / QEMU gone) and before `system_reset` (process ForceRestart, legacy On from off / ForceRestart / PowerCycle). Guest-initiated reboots are not seen.
+- Container tests: `tests/test_bios.sh` (category `bios`; image `qemu-bmc-sushy-test` = python:3.12-slim + pip sushy, built once, `--network host`, driven by `tests/bios_sushy.py`; BIOS_ATTRIBUTES defaults, registry, invalid values 400, applied at ForceOff/On and ForceRestart, kept in a new container on the VMEDIA_DIR volume, reset_bios + PowerCycle). Ironic: `tests/ironic/run.sh` flow `redfish-bios` (bios setting list, manual cleaning `--disable-ramdisk` apply_configuration ProcVirtualization=Disabled then factory_reset, no "BIOS settings are not supported" in the Ironic log).
 
 ## VM IPMI (In-Band)
 

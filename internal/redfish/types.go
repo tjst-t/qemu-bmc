@@ -20,6 +20,7 @@ type ServiceRoot struct {
 	Chassis        ODataID          `json:"Chassis"`
 	SessionService ODataID          `json:"SessionService"`
 	EventService   ODataID          `json:"EventService"`
+	Registries     ODataID          `json:"Registries"`
 	Links          ServiceRootLinks `json:"Links"`
 }
 
@@ -63,6 +64,7 @@ type ComputerSystem struct {
 	VirtualMedia       ODataID            `json:"VirtualMedia"`
 	LogServices        ODataID            `json:"LogServices"`
 	SecureBoot         *ODataID           `json:"SecureBoot,omitempty"`
+	Bios               *ODataID           `json:"Bios,omitempty"`
 	SerialConsole      *HostSerialConsole `json:"SerialConsole,omitempty"`
 	Status             ResourceStatus     `json:"Status"`
 	Links              SystemLinks        `json:"Links"`
@@ -205,8 +207,9 @@ type RedfishError struct {
 
 // RedfishErrorBody is the body of a Redfish error
 type RedfishErrorBody struct {
-	Code    string `json:"code"`
-	Message string `json:"message"`
+	Code         string    `json:"code"`
+	Message      string    `json:"message"`
+	ExtendedInfo []Message `json:"@Message.ExtendedInfo,omitempty"`
 }
 
 // ManagerCollection is a collection of managers

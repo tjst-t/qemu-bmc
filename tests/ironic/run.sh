@@ -4,6 +4,8 @@
 #
 # Usage: tests/ironic/run.sh [options] [flow...]
 #   flows: redfish-vmedia  Redfish + VirtualMedia (also inspection checks)
+#          redfish-bios    Redfish BIOS settings: bios setting list, manual
+#                          cleaning bios.apply_configuration / factory_reset
 #          redfish-https   Redfish + UEFI HTTP boot
 #          ipmi-pxe        IPMI + iPXE, UEFI and BIOS; serial console
 #                          (ipmitool-socat, i.e. IPMI SOL) on the deployed node
@@ -83,19 +85,19 @@ T0=$(date +%s)
 log() { printf '[%5ss] %s\n' "$(( $(date +%s) - T0 ))" "$*"; }
 fail() { log "FAIL: $*" >&2; exit 1; }
 
-usage() { sed -n '2,19p' "$0" | sed 's/^# \{0,1\}//'; }
+usage() { sed -n '2,21p' "$0" | sed 's/^# \{0,1\}//'; }
 
 while [ $# -gt 0 ]; do
     case "$1" in
         --image) IMAGE="$2"; shift 2 ;;
         --keep) KEEP=true; shift ;;
         -h|--help) usage; exit 0 ;;
-        all) FLOWS+=(redfish-vmedia redfish-https ipmi-pxe); shift ;;
-        redfish-vmedia|redfish-https|ipmi-pxe) FLOWS+=("$1"); shift ;;
+        all) FLOWS+=(redfish-vmedia redfish-bios redfish-https ipmi-pxe); shift ;;
+        redfish-vmedia|redfish-bios|redfish-https|ipmi-pxe) FLOWS+=("$1"); shift ;;
         *) echo "unknown argument: $1" >&2; usage >&2; exit 2 ;;
     esac
 done
-[ ${#FLOWS[@]} -eq 0 ] && FLOWS=(redfish-vmedia redfish-https ipmi-pxe)
+[ ${#FLOWS[@]} -eq 0 ] && FLOWS=(redfish-vmedia redfish-bios redfish-https ipmi-pxe)
 
 # Without KVM QEMU runs under TCG: allow much longer for every wait
 if [ -r /dev/kvm ] && [ -w /dev/kvm ]; then
@@ -540,6 +542,61 @@ flow_redfish_vmedia() {
     manage_and_provide inspect
     deploy_and_check
     undeploy
+}
+
+# Ironic's cached BIOS setting $1 of the node
+bios_setting() {
+    bm node bios setting show "$IRONIC_NODE" "$1" -f value -c value
+}
+
+# Redfish Systems/1/Bios attribute $1
+redfish_bios_attribute() {
+    redfish_get /redfish/v1/Systems/1/Bios |
+        docker exec -i "$C_CLI" python3 -c 'import json, sys; print(json.load(sys.stdin)["Attributes"][sys.argv[1]])' "$1"
+}
+
+# Manual cleaning with the clean step $1 (JSON), no ramdisk (the bios steps
+# run on the conductor and reboot the node to apply the settings)
+manual_clean() {
+    log "manual cleaning: $1"
+    bm node clean "$IRONIC_NODE" --disable-ramdisk --clean-steps "[$1]"
+    wait_state manageable 900
+}
+
+flow_redfish_bios() {
+    ensure_redfish_node redfish-virtual-media
+    log "manage"
+    bm node manage "$IRONIC_NODE"
+    wait_state manageable 300
+
+    log "BIOS settings (baremetal node bios setting list):"
+    bm node bios setting list "$IRONIC_NODE" -f value -c name -c value | sed 's/^/    /'
+    [ "$(bios_setting BootMode)" = Uefi ] || fail "BootMode should be Uefi, got '$(bios_setting BootMode)'"
+    [ "$(bios_setting ProcVirtualization)" = Enabled ] ||
+        fail "ProcVirtualization should start Enabled, got '$(bios_setting ProcVirtualization)'"
+    # Ironic took the attribute registry (allowable values, read-only)
+    bm node bios setting show "$IRONIC_NODE" BootMode -f value -c read_only | grep -qx True ||
+        fail "BootMode is not read-only in Ironic: registry not read"
+
+    manual_clean '{"interface": "bios", "step": "apply_configuration",
+                   "args": {"settings": [{"name": "ProcVirtualization", "value": "Disabled"}]}}'
+    [ "$(bios_setting ProcVirtualization)" = Disabled ] ||
+        fail "Ironic: ProcVirtualization should be Disabled after apply_configuration, got '$(bios_setting ProcVirtualization)'"
+    [ "$(redfish_bios_attribute ProcVirtualization)" = Disabled ] || fail "Redfish: ProcVirtualization is not Disabled"
+    log "apply_configuration: ProcVirtualization=Disabled applied"
+
+    manual_clean '{"interface": "bios", "step": "factory_reset"}'
+    [ "$(redfish_bios_attribute ProcVirtualization)" = Enabled ] || fail "Redfish: ProcVirtualization not back to Enabled"
+    [ "$(bios_setting ProcVirtualization)" = Enabled ] ||
+        fail "Ironic: ProcVirtualization should be Enabled after factory_reset, got '$(bios_setting ProcVirtualization)'"
+    log "factory_reset: ProcVirtualization=Enabled again"
+
+    if docker logs "$C_IRONIC" 2>&1 | grep -F "BIOS settings are not supported"; then
+        fail "Ironic logged 'BIOS settings are not supported'"
+    fi
+    log "provide"
+    bm node provide "$IRONIC_NODE"
+    wait_state available 1800
 }
 
 flow_redfish_https() {

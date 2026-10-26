@@ -34,6 +34,7 @@ A Go single binary that controls QEMU VMs via both Redfish API (HTTPS) and IPMI 
 - **Redfish events** - EventService subscriptions (events POSTed to your URL) and an SSE stream: power state changes (from Redfish, IPMI or the guest itself) and settings changes, no polling needed
 - **Shared serial console** - Several clients on `SERIAL_ADDR` at once (output to all, input from any), recent output kept and readable over Redfish; survives QEMU restarts
 - **IPMI SOL** - `ipmitool -I lanplus sol activate` (cipher suites 3 and 17) on the same console, e.g. Ironic's `ipmitool-socat` console; Redfish `SerialConsole` on `Managers/1` and `Systems/1`
+- **BIOS settings** - Redfish `Systems/1/Bios` with an attribute registry, pending `Settings` applied at the next boot and `ResetBios`, for Ironic's `bios` interface (`apply_configuration`, `factory_reset`) and Metal3 firmware settings. Display only: the values do not change the VM
 - **Compatibility** - MAAS, Tinkerbell/Rufio
 
 ## Quick Start
@@ -186,6 +187,44 @@ curl -k -u admin:password -X POST https://localhost/redfish/v1/Systems/1/SecureB
 - `ResetKeys` only takes `ResetAllKeysToDefault` (else `400`). It deletes the Secure Boot VARS, which is copied from the template again at the next start; a VM running with Secure Boot keeps its keys until the next reset, which restarts QEMU.
 - `VM_SECURE_BOOT` sets the initial `SecureBootEnable`. A PATCHed value is kept in memory only: after qemu-bmc restarts it is `VM_SECURE_BOOT` again (the VARS files stay).
 - In BIOS mode and legacy mode `Systems/1` has no `SecureBoot` link and `/SecureBoot` returns `404`.
+
+#### BIOS settings
+
+`Systems/1/Bios` reports BIOS attributes as a typical server does, so tools that configure BIOS settings (Ironic's `bios` interface, Metal3 firmware settings, sushy) can be tested. **The attributes are display only**: apart from `BootMode` and `SecureBoot`, which reflect the VM, their values do not change how the VM runs.
+
+```bash
+# Current values and the pending settings
+curl -k -u admin:password https://localhost/redfish/v1/Systems/1/Bios
+curl -k -u admin:password https://localhost/redfish/v1/Systems/1/Bios/Settings
+
+# Change attributes: they apply at the next boot (power off and on, a reset)
+curl -k -u admin:password -X PATCH https://localhost/redfish/v1/Systems/1/Bios/Settings \
+  -H 'Content-Type: application/json' -d '{"Attributes": {"ProcVirtualization": "Disabled"}}'
+
+# Back to the defaults at the next boot
+curl -k -u admin:password -X POST https://localhost/redfish/v1/Systems/1/Bios/Actions/Bios.ResetBios
+```
+
+| Attribute | Values | Default |
+|-----------|--------|---------|
+| `BootMode` | `Uefi` / `Bios`, read-only | `VM_BOOT_MODE` |
+| `SecureBoot` | `Enabled` / `Disabled`, read-only | `SecureBootEnable` of `Systems/1/SecureBoot` |
+| `ProcVirtualization` | `Enabled` / `Disabled` | `Enabled` |
+| `ProcHyperThreading` | `Enabled` / `Disabled` | `Enabled` |
+| `SriovGlobalEnable` | `Enabled` / `Disabled` | `Disabled` |
+| `PxeDev1EnDis` | `Enabled` / `Disabled` | `Enabled` |
+| `BootRetry` | `Enabled` / `Disabled` | `Enabled` |
+| `PowerProfile` | `MaxPerformance` / `Balanced` / `PowerSaving` | `MaxPerformance` |
+| `NumLock` | `On` / `Off` | `On` |
+| `SerialConsoleRedirection` | `Enabled` / `Disabled` | `Enabled` |
+| `AssetTag` | string, up to 64 characters | (empty) |
+
+- `PATCH .../Bios/Settings` adds `Attributes` to the pending settings (`@Redfish.SettingsApplyTime` `OnReset` is accepted, the only apply time). An unknown attribute, a read-only one, a value of the wrong type or not allowed, or a string too long is rejected with `400` and a Base message per attribute in `@Message.ExtendedInfo` (`PropertyUnknown`, `PropertyNotWritable`, `PropertyValueTypeError`, `PropertyValueNotInList`, `StringValueTooLong`); nothing is changed then. `Settings` has an ETag (`If-Match` is checked if sent).
+- The pending settings apply each time the VM boots: power on from off (also after QEMU went down), `ForceRestart`, `PowerCycle`, `GracefulRestart`. Then `Settings` is empty again. A reboot from inside the guest does not apply them.
+- `ResetBios` (no parameters, a body is optional) sets `ResetBiosToDefaultsPending`; at the next boot the attributes go back to the defaults, then the settings PATCHed after the reset apply. Settings pending before the reset are dropped.
+- The attribute registry is listed in `/redfish/v1/Registries` (`BiosAttributeRegistry`, linked from the service root); its `Location` `Uri` is served by qemu-bmc, so sushy's `get_attribute_registry()` and Ironic (allowable values, read-only) read it.
+- `BIOS_ATTRIBUTES` (JSON object, e.g. `{"PowerProfile":"Balanced","AssetTag":"rack-1"}`) replaces defaults; an invalid value stops qemu-bmc with an error. The defaults are the initial values and what `ResetBios` goes back to.
+- The values and the pending settings are saved to `bios-settings.json` in `VMEDIA_DIR` (in both modes), so they survive a power off and a container restart when that directory is on a volume. Saved values win over `BIOS_ATTRIBUTES`; delete the file (or `ResetBios`) to start over from the defaults.
 
 #### System identity (SMBIOS)
 
@@ -440,6 +479,11 @@ A fault is `{"kind": ..., conditions..., "count": N, "durationSeconds": S}`: `co
 | POST | `/redfish/v1/Systems/1/Actions/ComputerSystem.Reset` | Power control |
 | GET/PATCH | `/redfish/v1/Systems/1/SecureBoot` | Secure Boot (`SecureBootEnable`, `SecureBootCurrentBoot`, `SecureBootMode`; UEFI in process management mode only, else `404`; see [Secure Boot](#secure-boot)) |
 | POST | `/redfish/v1/Systems/1/SecureBoot/Actions/SecureBoot.ResetKeys` | Reset the Secure Boot keys (`ResetAllKeysToDefault`) |
+| GET | `/redfish/v1/Systems/1/Bios` | BIOS attributes (`Attributes`, `AttributeRegistry`, `@Redfish.Settings`, `ResetBiosToDefaultsPending`; see [BIOS settings](#bios-settings)) |
+| GET/PATCH | `/redfish/v1/Systems/1/Bios/Settings` | Settings pending until the next boot / add to them (`400` with `@Message.ExtendedInfo` for invalid attributes) |
+| POST | `/redfish/v1/Systems/1/Bios/Actions/Bios.ResetBios` | Reset the attributes to the defaults at the next boot (204) |
+| GET | `/redfish/v1/Registries` | Registry files: `BiosAttributeRegistry` |
+| GET | `/redfish/v1/Registries/BiosAttributeRegistry` | MessageRegistryFile; `Location` `Uri` → `/redfish/v1/Registries/BiosAttributeRegistry/BiosAttributeRegistry.1.0.0.json` (the AttributeRegistry) |
 | GET | `/redfish/v1/Systems/1/EthernetInterfaces` | NIC collection |
 | GET | `/redfish/v1/Systems/1/EthernetInterfaces/{n}` | NIC (MACAddress, LinkStatus) |
 | GET | `/redfish/v1/Systems/1/Processors` | Processor collection (CPU1; empty if the CPU count is unknown) |
@@ -545,6 +589,7 @@ Another power action (Redfish or IPMI) during `PoweringOff` / `PoweringOn` ends 
 | `VMEDIA_INSECURE_TLS` | `true` | Skip certificate verification when downloading HTTPS images. With `false`, the system CAs are used; add your own CA with `SSL_CERT_FILE` |
 | `VMEDIA_TIMEOUT` | `600` | Seconds a power on or reset requested during a VirtualMedia (or UEFI HTTP boot image) download waits for it before booting without the image |
 | `EVENT_INSECURE_TLS` | `true` | Skip certificate verification when POSTing events to https subscription destinations. See [Events](#events-eventservice) |
+| `BIOS_ATTRIBUTES` | (empty) | JSON object replacing the defaults of the Redfish BIOS attributes (e.g. `{"PowerProfile":"Balanced"}`); the values are saved to `VMEDIA_DIR/bios-settings.json`. See [BIOS settings](#bios-settings) |
 | `FAULT_API_ADDR` | (empty, disabled) | Listen address of the fault injection API (plain HTTP, e.g. `:8623`). See [Fault injection](#fault-injection) |
 | `FAULT_API_TOKEN` | (empty) | Bearer token required by the fault API; no authentication if empty |
 | `FAULTS` | (empty) | JSON array of faults active from startup |
@@ -596,7 +641,7 @@ go vet ./...
 
 # Container integration tests
 make container-test         # Quick smoke tests
-make container-test-all     # All 134 tests (13 categories)
+make container-test-all     # All 142 tests (14 categories)
 
 # Ironic end-to-end test: deploy Debian with a real Ironic (Redfish + IPMI drivers, ~20 min)
 make ironic-test            # see tests/ironic/README.md
@@ -617,6 +662,7 @@ internal/
   config/                      # Environment variable config
   fault/                       # Fault injection (fault API, Redfish/IPMI/power faults)
   serial/                      # Serial console multiplexer (QEMU socket, TCP clients, recent output)
+  bios/                        # BIOS attributes (pending settings, saved to a file)
 docker/
   Dockerfile                   # Multi-stage build (Go builder + Debian runtime)
   entrypoint.sh                # Environment variables → QEMU args
@@ -675,6 +721,7 @@ QEMU VM を Redfish API (HTTPS) と IPMI over LAN (UDP) の両方で制御する
 - **Redfish のイベント** - EventService の購読（指定した URL へ POST）と SSE。電源状態の変化（Redfish・IPMI・ゲスト自身のどれによるものでも）や設定の変化を、ポーリングせずに受け取れる
 - **シリアルコンソールの共有** - `SERIAL_ADDR` に同時に複数つなげる（出力は全員へ、入力はどれからでも）。最近の出力を覚えていて Redfish で読める。QEMU が起動し直してもつながったまま
 - **IPMI SOL** - 同じコンソールを `ipmitool -I lanplus sol activate`（暗号スイート 3 と 17）で使える。Ironic の `ipmitool-socat` のコンソールなど。Redfish の `Managers/1` と `Systems/1` に `SerialConsole`
+- **BIOS の設定** - Redfish の `Systems/1/Bios`（属性レジストリ、次の起動で反映する `Settings`、`ResetBios`）。Ironic の `bios` インターフェース（`apply_configuration`・`factory_reset`）や Metal3 の firmware settings を試せる。見せるだけで、値は VM の動きを変えない
 - **互換性** - MAAS, Tinkerbell/Rufio
 
 ## クイックスタート
@@ -821,6 +868,44 @@ curl -k -u admin:password -X POST https://localhost/redfish/v1/Systems/1/SecureB
 - `ResetKeys` は `ResetAllKeysToDefault` だけ受ける（それ以外は `400`）。Secure Boot 用の VARS を消し、次の起動で雛形からコピーし直す。Secure Boot で動いている VM は次のリセットまで今の鍵のままで、そのリセットで QEMU を起こし直す。
 - `VM_SECURE_BOOT` が起動時の `SecureBootEnable`。PATCH した値はメモリにだけ持つので、qemu-bmc を起動し直すと `VM_SECURE_BOOT` の値に戻る（VARS のファイルは残る）。
 - BIOS モードとレガシーモードでは `Systems/1` に `SecureBoot` のリンクを出さず、`/SecureBoot` は `404`。
+
+#### BIOS の設定
+
+`Systems/1/Bios` に一般的なサーバのような BIOS の属性を出す。BIOS を設定するツール（Ironic の `bios` インターフェース、Metal3 の firmware settings、sushy）を試すためのもの。**属性は見せるだけ**で、VM を映す `BootMode` と `SecureBoot` のほかは、値を変えても VM の動きは変わらない。
+
+```bash
+# 今の値と保留中の設定
+curl -k -u admin:password https://localhost/redfish/v1/Systems/1/Bios
+curl -k -u admin:password https://localhost/redfish/v1/Systems/1/Bios/Settings
+
+# 属性を変える：次の起動（電源オフ→オン、リセット）で反映する
+curl -k -u admin:password -X PATCH https://localhost/redfish/v1/Systems/1/Bios/Settings \
+  -H 'Content-Type: application/json' -d '{"Attributes": {"ProcVirtualization": "Disabled"}}'
+
+# 次の起動で既定値に戻す
+curl -k -u admin:password -X POST https://localhost/redfish/v1/Systems/1/Bios/Actions/Bios.ResetBios
+```
+
+| 属性 | 値 | 既定値 |
+|------|----|--------|
+| `BootMode` | `Uefi` / `Bios`、読み取り専用 | `VM_BOOT_MODE` |
+| `SecureBoot` | `Enabled` / `Disabled`、読み取り専用 | `Systems/1/SecureBoot` の `SecureBootEnable` |
+| `ProcVirtualization` | `Enabled` / `Disabled` | `Enabled` |
+| `ProcHyperThreading` | `Enabled` / `Disabled` | `Enabled` |
+| `SriovGlobalEnable` | `Enabled` / `Disabled` | `Disabled` |
+| `PxeDev1EnDis` | `Enabled` / `Disabled` | `Enabled` |
+| `BootRetry` | `Enabled` / `Disabled` | `Enabled` |
+| `PowerProfile` | `MaxPerformance` / `Balanced` / `PowerSaving` | `MaxPerformance` |
+| `NumLock` | `On` / `Off` | `On` |
+| `SerialConsoleRedirection` | `Enabled` / `Disabled` | `Enabled` |
+| `AssetTag` | 文字列、64 文字まで | （空） |
+
+- `PATCH .../Bios/Settings` は `Attributes` を保留中の設定に足す（`@Redfish.SettingsApplyTime` は `OnReset` を受ける。これしか無い）。知らない属性・読み取り専用の属性・型違い・許されない値・長すぎる文字列は `400` で、属性ごとに Base のメッセージ（`PropertyUnknown`・`PropertyNotWritable`・`PropertyValueTypeError`・`PropertyValueNotInList`・`StringValueTooLong`）を `@Message.ExtendedInfo` に入れる。そのときは何も変えない。`Settings` には ETag があり、`If-Match` を送れば確かめる。
+- 保留中の設定は VM が起動するたびに反映する：オフからの電源オン（QEMU が落ちたあとも）、`ForceRestart`、`PowerCycle`、`GracefulRestart`。反映すると `Settings` は空に戻る。ゲストの中からの再起動では反映しない。
+- `ResetBios`（引数なし、本文は無くてもよい）は `ResetBiosToDefaultsPending` を立てる。次の起動で属性を既定値に戻し、そのあと ResetBios より後に PATCH した設定を反映する。ResetBios より前の保留は捨てる。
+- 属性レジストリは `/redfish/v1/Registries`（サービスルートからリンク）の `BiosAttributeRegistry`。その `Location` の `Uri` は qemu-bmc が配るので、sushy の `get_attribute_registry()` や Ironic（許される値、読み取り専用）が読める。
+- `BIOS_ATTRIBUTES`（JSON の object。例 `{"PowerProfile":"Balanced","AssetTag":"rack-1"}`）で既定値を変えられる。値が正しくなければ qemu-bmc はエラーで終わる。既定値は最初の値であり、`ResetBios` で戻る値。
+- 値と保留中の設定は `VMEDIA_DIR` の `bios-settings.json` に残す（両方のモードで）。そのディレクトリがボリュームにあれば、電源オフやコンテナの作り直しを越えて覚えている。残した値は `BIOS_ATTRIBUTES` より強い。既定値からやり直すにはファイルを消す（か `ResetBios`）。
 
 #### システムの識別情報（SMBIOS）
 
@@ -1075,6 +1160,11 @@ curl -H "$T" -X DELETE http://localhost:8623/faults      # 全部消す
 | POST | `/redfish/v1/Systems/1/Actions/ComputerSystem.Reset` | 電源制御 |
 | GET/PATCH | `/redfish/v1/Systems/1/SecureBoot` | Secure Boot（`SecureBootEnable`・`SecureBootCurrentBoot`・`SecureBootMode`。プロセス管理モードの UEFI だけ、それ以外は `404`。「Secure Boot」を参照） |
 | POST | `/redfish/v1/Systems/1/SecureBoot/Actions/SecureBoot.ResetKeys` | Secure Boot の鍵を戻す（`ResetAllKeysToDefault`） |
+| GET | `/redfish/v1/Systems/1/Bios` | BIOS の属性（`Attributes`・`AttributeRegistry`・`@Redfish.Settings`・`ResetBiosToDefaultsPending`。「BIOS の設定」を参照） |
+| GET/PATCH | `/redfish/v1/Systems/1/Bios/Settings` | 次の起動まで保留中の設定 / それに足す（正しくない属性は `400` と `@Message.ExtendedInfo`） |
+| POST | `/redfish/v1/Systems/1/Bios/Actions/Bios.ResetBios` | 次の起動で属性を既定値に戻す（204） |
+| GET | `/redfish/v1/Registries` | レジストリのファイル：`BiosAttributeRegistry` |
+| GET | `/redfish/v1/Registries/BiosAttributeRegistry` | MessageRegistryFile。`Location` の `Uri` → `/redfish/v1/Registries/BiosAttributeRegistry/BiosAttributeRegistry.1.0.0.json`（AttributeRegistry） |
 | GET | `/redfish/v1/Systems/1/EthernetInterfaces` | NIC 一覧 |
 | GET | `/redfish/v1/Systems/1/EthernetInterfaces/{n}` | NIC（MACAddress・LinkStatus） |
 | GET | `/redfish/v1/Systems/1/Processors` | プロセッサ一覧（CPU1。CPU 数が分からないときは空） |
@@ -1180,6 +1270,7 @@ curl -H "$T" -X DELETE http://localhost:8623/faults      # 全部消す
 | `VMEDIA_INSECURE_TLS` | `true` | HTTPS のイメージを落とすとき証明書を検証しない。`false` ならシステムの CA で検証する。自前の CA は `SSL_CERT_FILE` で足す |
 | `VMEDIA_TIMEOUT` | `600` | ダウンロード中（VirtualMedia・UEFI HTTP ブートのイメージ）に電源オン・リセットが来たとき、終わるまで待つ秒数（過ぎたら ISO 無しで起動） |
 | `EVENT_INSECURE_TLS` | `true` | https の購読先へイベントを POST するとき証明書を検証しない。[イベント](#イベントeventservice) を参照 |
+| `BIOS_ATTRIBUTES` | （空） | Redfish の BIOS の属性の既定値を変える JSON の object（例 `{"PowerProfile":"Balanced"}`）。値は `VMEDIA_DIR/bios-settings.json` に残す。「BIOS の設定」を参照 |
 | `FAULT_API_ADDR` | (空、無効) | 故障の注入の API の待ち受けアドレス（TLS なしの HTTP。例 `:8623`）。[故障の注入](#故障の注入) を参照 |
 | `FAULT_API_TOKEN` | (空) | 故障の API に要る Bearer トークン。空なら認証なし |
 | `FAULTS` | (空) | 起動時から効く故障の JSON の配列 |
@@ -1231,7 +1322,7 @@ go vet ./...
 
 # コンテナ統合テスト
 make container-test         # クイックスモークテスト
-make container-test-all     # 全 134 テスト (13 カテゴリ)
+make container-test-all     # 全 142 テスト (14 カテゴリ)
 
 # Ironic 通し試験: 本物の Ironic で Debian を展開 (Redfish・IPMI ドライバ、約 20 分)
 make ironic-test            # tests/ironic/README.md 参照
@@ -1252,6 +1343,7 @@ internal/
   config/                      # 環境変数設定
   fault/                       # 故障の注入（故障の API、Redfish・IPMI・電源の故障）
   serial/                      # シリアルコンソールの多重化（QEMU のソケット、TCP の接続、最近の出力）
+  bios/                        # BIOS の属性（保留中の設定、ファイルへの保存）
 docker/
   Dockerfile                   # マルチステージビルド (Go ビルダー + Debian ランタイム)
   entrypoint.sh                # 環境変数 → QEMU 引数変換

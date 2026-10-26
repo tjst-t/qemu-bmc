@@ -8,6 +8,7 @@ before a release; it is not part of the regular CI.
 ```bash
 make ironic-test                                   # all flows, image built from this repository
 make ironic-test IRONIC_FLOWS=redfish-vmedia       # one flow
+make ironic-test IRONIC_FLOWS=redfish-bios         # BIOS settings only (creates the node itself)
 make ironic-test IRONIC_ARGS="--image ghcr.io/tjst-t/qemu-bmc:0.9"
 ./tests/ironic/run.sh --keep ipmi-pxe              # leave everything running afterwards
 ```
@@ -17,6 +18,7 @@ make ironic-test IRONIC_ARGS="--image ghcr.io/tjst-t/qemu-bmc:0.9"
 | Flow | Ironic node | What is checked |
 |------|-------------|-----------------|
 | `redfish-vmedia` | `--driver redfish --boot-interface redfish-virtual-media` | manage → inspect → provide → deploy → active, Debian boots from the disk, undeploy → available. The inspection inventory must match the node: CPU count, memory, MAC, disk size and the SMBIOS manufacturer / product / serial (also compared with Redfish Systems/1) |
+| `redfish-bios` | same node (created and provided if the flow runs alone) | manage, `baremetal node bios setting list` (BootMode `Uefi`, ProcVirtualization `Enabled`, BootMode read-only from the attribute registry), manual cleaning (`--disable-ramdisk`) with `bios.apply_configuration` setting ProcVirtualization to `Disabled`: Ironic sets it pending, reboots the node and checks it was applied; then `bios.factory_reset` brings it back to `Enabled` (checked in Ironic and in Redfish `Systems/1/Bios`). The Ironic log must not contain "BIOS settings are not supported". provide → available |
 | `redfish-https` | same node, `--boot-interface redfish-https` (UEFI HTTP boot) | deploy → active, Debian boots from the disk, undeploy → available |
 | `ipmi-pxe` | `--driver ipmi --boot-interface ipxe --console-interface ipmitool-socat`, IPA booted by Ironic's dnsmasq (PXE → iPXE) | manage → provide → deploy → active, Debian boots from the disk, the serial console (IPMI SOL), undeploy → available; once with `VM_BOOT_MODE=uefi` and once with `VM_BOOT_MODE=bios` (`capabilities=boot_mode:<mode>`) |
 | `all` | all of the above (default) | |
@@ -96,9 +98,10 @@ With KVM, downloads cached:
 |------|------|
 | Build images, start Ironic | ~0.5 min (first run: a few minutes more for the builds and pulls, plus the ~800 MB downloads) |
 | `redfish-vmedia` | ~6 min |
+| `redfish-bios` | ~2 min after `redfish-vmedia` (~3.5 min alone: it creates and cleans the node first) |
 | `redfish-https` | ~2.5 min |
 | `ipmi-pxe` (UEFI + BIOS) | ~11.5 min |
-| `all` | ~21 min |
+| `all` | ~23 min |
 
 Without `/dev/kvm` QEMU falls back to TCG; the script multiplies its timeouts
 by 6 and a run takes hours.

@@ -22,6 +22,7 @@ func (s *Server) handleServiceRoot(w http.ResponseWriter, r *http.Request) {
 		Chassis:        ODataID{ODataID: "/redfish/v1/Chassis"},
 		SessionService: ODataID{ODataID: "/redfish/v1/SessionService"},
 		EventService:   ODataID{ODataID: eventServicePath},
+		Registries:     ODataID{ODataID: registriesPath},
 		Links:          ServiceRootLinks{Sessions: ODataID{ODataID: sessionsPath}},
 	}
 

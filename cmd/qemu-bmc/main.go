@@ -14,6 +14,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/tjst-t/qemu-bmc/internal/bios"
 	"github.com/tjst-t/qemu-bmc/internal/bmc"
 	"github.com/tjst-t/qemu-bmc/internal/config"
 	"github.com/tjst-t/qemu-bmc/internal/fault"
@@ -48,6 +49,7 @@ func main() {
 	var systemUUID string
 	var identity qemu.SMBIOS
 	var serialConsole *serial.Mux // nil in legacy mode
+	var biosStore *bios.Store
 
 	if len(qemuArgs) > 0 {
 		// Process management mode
@@ -113,6 +115,9 @@ func main() {
 			log.Printf("Secure Boot enabled (VM_SECURE_BOOT)")
 		}
 
+		// Before the first power on: pending BIOS settings apply at boot
+		biosStore = startBios(cfg, m)
+
 		if cfg.PowerOnAtStart {
 			log.Printf("Starting QEMU: %s %v", cfg.QEMUBinary, cmdArgs)
 			if err := m.Reset("On"); err != nil {
@@ -132,6 +137,7 @@ func main() {
 		log.Println("Connected to QMP socket")
 
 		m = machine.New(qmpClient)
+		biosStore = startBios(cfg, m)
 		if cfg.VMSecureBoot {
 			log.Printf("WARN: VM_SECURE_BOOT is ignored in legacy mode: %v", machine.ErrSecureBootUnsupported)
 		}
@@ -229,6 +235,7 @@ func main() {
 	redfishServer.SetUserStore(bmcState)
 	redfishServer.SetSystemUUID(systemUUID)
 	redfishServer.SetFirmwareVersion(version)
+	redfishServer.SetBios(biosStore)
 	if serialConsole != nil {
 		redfishServer.SetSerialLog(serialConsole)
 		if port, err := strconv.Atoi(cfg.IPMIPort); err == nil {
@@ -337,6 +344,30 @@ func startFaults(cfg *config.Config) *fault.Store {
 		}()
 	}
 	return faults
+}
+
+// startBios loads the BIOS attributes (BIOS_ATTRIBUTES defaults, saved
+// values) and applies the pending settings each time the VM boots. BootMode
+// reflects VM_BOOT_MODE, SecureBoot the SecureBootEnable setting.
+func startBios(cfg *config.Config, m *machine.Machine) *bios.Store {
+	store, err := bios.NewStore(cfg.BiosFile(), cfg.BiosAttributes)
+	if err != nil {
+		log.Fatalf("Invalid BIOS_ATTRIBUTES: %v", err)
+	}
+	bootMode := "Bios"
+	if cfg.RedfishBootMode() == "UEFI" {
+		bootMode = "Uefi"
+	}
+	store.SetReadOnlyValue("BootMode", func() string { return bootMode })
+	store.SetReadOnlyValue("SecureBoot", func() string {
+		if m.GetSecureBoot().Enable {
+			return "Enabled"
+		}
+		return "Disabled"
+	})
+	m.SetBootHook(func() { store.Apply() })
+	log.Printf("BIOS attributes: %s", cfg.BiosFile())
+	return store
 }
 
 // startSerial sets up the serial console multiplexer (process management
