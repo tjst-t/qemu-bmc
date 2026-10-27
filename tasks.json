@@ -1081,11 +1081,11 @@
       "labels": [],
       "body": "## なぜ\n`ipmitool -I lanplus sol activate` で VM のシリアルが使えるようにする。Ironic の console（`ipmitool-socat`）や MAAS などが使う。Ironic の node validate で console が非対応と出ていた。\n\n## 仕様\n- IPMI v2.0 の SOL（payload type 1）を RMCP+ のセッションの上に実装する。\n  - Activate Payload（NetFn App 0x48）・Deactivate Payload（0x49）・Get Payload Activation Status（0x4A）・Get Payload Instance Info（0x4B）・Get Channel Payload Support（0x4E）・Get Channel Payload Version（0x4F）・Set/Get User Payload Access（0x4C/0x4D）\n  - Get/Set SOL Configuration Parameters（NetFn Transport 0x21/0x22）：Set In Progress・SOL Enable・SOL Authentication・Character Accumulate Interval・SOL Retry・Non-Volatile/Volatile Bit Rate・SOL Payload Channel・SOL Payload Port Number（623）\n  - SOL のパケット（シーケンス番号・ACK/NACK・accepted character count・再送、break・Deassert/Assert は受けて無視でよい）。暗号化・完全性（cipher suite 3 と 17）に対応。\n  - 同時に1つのセッションだけ（2つ目は Activate で「すでに使用中」の completion code 0x80）。ipmitool の `sol deactivate` と、`~.` で抜けるのが効く。\n- VM 側は前のタスク（serial-mux）の内部の購読の API を使う（SOL を開いても他の TCP の利用者は使い続けられる）。\n- Redfish の Managers/1 に SerialConsole（ServiceEnabled=true、MaxConcurrentSessions、ConnectTypesSupported=[\"IPMI\"]、版に合わせて IPMI の節）。ComputerSystem の SerialConsole（v1_13 以降の形）も出す。\n- Redfish-Service-Validator で失敗0件を保つ。\n\n## 確かめ方\n- 単体試験：SOL のパケットの組み立て・ACK・再送、Activate の重複。\n- コンテナ試験：Debian のゲストで `ipmitool -I lanplus -C 3` と `-C 17` の `sol activate` を expect などで動かし、root でログインしてコマンドの出力を読む、`sol deactivate` で切れる。\n- Ironic の通し試験（tests/ironic/run.sh）に、ipmi ドライバで `--console-interface ipmitool-socat` を付けて `baremetal node console enable` → console が on になる確認を足す（つないだ先で出力が読めれば尚よい）。\n- README（英語と日本語）・CLAUDE.md。",
       "doneWhen": "go test -race ./... と go vet が通り、コンテナ試験で ipmitool の sol activate（cipher suite 3 と 17）でゲストにログインしてコマンドの出力を読めて、Ironic の通し試験の console enable が通る",
-      "resolution": "Factory が取り込みました（factory/ipmi-sol）",
+      "resolution": "取り込み済み",
       "refs": [],
       "threads": [],
       "createdAt": "2026-10-25T10:54:29.647Z",
-      "updatedAt": "2026-10-25T14:28:40.448Z",
+      "updatedAt": "2026-10-27T09:33:41.367Z",
       "closedAt": "2026-10-25T14:28:40.448Z",
       "extra": {}
     },
