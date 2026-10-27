@@ -670,11 +670,11 @@
       "labels": [],
       "body": "## なぜ\nsushy（Ironic・Metal3）は Systems/1 の Links/ManagedBy から Manager（そこから VirtualMedia）を、Links/Chassis から Chassis をたどる。いまは無いので system.managers・system.chassis が MissingAttributeError になる（2026-10-22 のサーベイ、Backlog #29）。\n\n## やること（internal/redfish）\n- Systems/1：`Links: {ManagedBy: [{@odata.id: /redfish/v1/Managers/1}], Chassis: [{@odata.id: /redfish/v1/Chassis/1}]}`、`Status: {State: \"Enabled\", Health: \"OK\"}`\n- Managers/1：`ManagerType: \"BMC\"`、`FirmwareVersion`（qemu-bmc の version。main.version を NewServer か setter で渡す）、`Status`、`Links: {ManagerForServers: [Systems/1], ManagerInChassis: Chassis/1}`\n- Chassis/1：`PowerState`（Systems/1 と同じ値。途中の状態 PoweringOff/PoweringOn もそのまま）、`Status`、`Links: {ComputerSystems: [Systems/1], ManagedBy: [Managers/1]}`\n- VirtualMedia/CD1：Image が無いとき `ImageName` を空文字で返さず省く（Redfish-Service-Validator の警告。Image は空でも残してよいか validator で確かめる）\n- 型は types.go。既存の値・ETag の計算は変えない\n- README（英語・日本語）と CLAUDE.md のエンドポイント表に Links・Status を書く\n\n## 確かめ方\nGo の単体テストで各リソースの Links・Status・PowerState を確かめる。",
       "doneWhen": "go test ./... -race が通り、Systems/1・Managers/1・Chassis/1 の応答に上の Links・Status・ManagerType・FirmwareVersion・Chassis の PowerState があることを単体テストで確かめている",
-      "resolution": "Factory が取り込みました（factory/redfish-systems-managers-chassis-links-s）",
+      "resolution": "取り込み済み",
       "refs": [],
       "threads": [],
       "createdAt": "2026-10-22T00:37:05.903Z",
-      "updatedAt": "2026-10-22T00:39:54.634Z",
+      "updatedAt": "2026-10-27T09:32:49.776Z",
       "closedAt": "2026-10-22T00:39:54.634Z",
       "extra": {}
     },
