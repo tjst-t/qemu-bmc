@@ -238,11 +238,11 @@
       "labels": [],
       "body": "VM_MEMORY と VM_CPUS（またはQMP の query-memory-size-summary・query-cpus-fast）から、MemorySummary.TotalSystemMemoryGiB と ProcessorSummary.Count を返す。gofish で読めることを確かめる。",
       "doneWhen": "Systems/1 が MemorySummary.TotalSystemMemoryGiB と ProcessorSummary.Count を返し、VM の設定値と一致する。ユニットテストがある",
-      "resolution": "Factory が取り込みました（factory/systems-1-memorysummary-processorsummary）",
+      "resolution": "取り込み済み",
       "refs": [],
       "threads": [],
       "createdAt": "2026-10-20T14:43:41.139Z",
-      "updatedAt": "2026-10-20T20:30:48.563Z",
+      "updatedAt": "2026-10-27T09:32:07.714Z",
       "closedAt": "2026-10-20T20:30:48.563Z",
       "extra": {}
     },
