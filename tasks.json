@@ -693,11 +693,11 @@
       "labels": [],
       "body": "## なぜ\nRedfish 2021.1 以降は VirtualMedia を ComputerSystem の下に置くのが推奨（Managers の下は deprecated と Redfish-Service-Validator が警告）。Ironic の redfish-virtual-media は、まず system.virtual_media（Systems/1/VirtualMedia）を探し、無ければ Manager の VirtualMedia を使う。Backlog #29 のサーベイ参照。\n\n## やること\n- `/redfish/v1/Systems/1/VirtualMedia`（コレクション）、`/redfish/v1/Systems/1/VirtualMedia/CD1`（GET）、その下の `Actions/VirtualMedia.InsertMedia`・`VirtualMedia.EjectMedia`（POST）を足す。中身は Managers/1/VirtualMedia/CD1 と同じ1つの CD ドライブ（状態を共有）。@odata.id と Actions の target は、どちらの URI で読んだかに合わせる\n- Systems/1 に `VirtualMedia: {@odata.id: /redfish/v1/Systems/1/VirtualMedia}` を足す。Managers/1 の VirtualMedia はそのまま残す（gofish・bmclib・既存の利用者のため）\n- 末尾のスラッシュ付きのルートも、ほかと同じように登録する\n- README（英語・日本語）と CLAUDE.md のエンドポイント表と VirtualMedia の説明に書く\n- tests/test_redfish.sh か統合テストに、Systems 側から差して Managers 側で Inserted が見える試験を1つ足すとよい（足したら README・CLAUDE.md の試験の数を直す）",
       "doneWhen": "go test ./... -race が通り、Systems/1/VirtualMedia/CD1 で InsertMedia すると Managers/1/VirtualMedia/CD1 の GET でも Inserted: true になる（逆も）ことを単体テストで確かめている",
-      "resolution": "Factory が取り込みました（factory/redfish-virtualmedia-systems-1-virtualme）",
+      "resolution": "取り込み済み",
       "refs": [],
       "threads": [],
       "createdAt": "2026-10-22T00:37:05.903Z",
-      "updatedAt": "2026-10-22T00:45:13.854Z",
+      "updatedAt": "2026-10-27T09:32:57.183Z",
       "closedAt": "2026-10-22T00:45:13.854Z",
       "extra": {}
     },
