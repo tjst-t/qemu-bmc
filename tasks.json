@@ -924,7 +924,7 @@
       "number": 42,
       "kind": "story",
       "title": "v0.10.0：SMBIOS・Ironic の通し試験・故障の注入・EventService・シリアルコンソール（SOL）・Bios",
-      "status": "in-progress",
+      "status": "done",
       "parent": null,
       "dependsOn": [],
       "milestone": null,
@@ -934,7 +934,7 @@
       ],
       "body": "v0.9.0 のあと、本物の Ironic で展開を確かめて見えた足りないところと、管理ツールの試験に効く機能をまとめて入れる。順番は次のとおり（前のタスクが終わってから次へ。どれも Redfish・IPMI のコードと、コンテナを使う試験に触るので、並べて流さない）。\n\n1. VM の SMBIOS と Redfish の Manufacturer・Model・SerialNumber を揃える\n2. Ironic で展開する通し試験をスクリプトにする（Redfish・IPMI の両ドライバ）\n3. 故障の注入（BMC の応答なし・遅延・エラー、電源操作の失敗など）\n4. Redfish EventService（購読と SSE。電源状態などの変化を通知）\n5. シリアルの多重化（複数の利用者と、最近の出力のバッファ）\n6. IPMI SOL と Redfish の SerialConsole\n7. Redfish の Bios（属性・Settings・ResetBios）\n\nBacklog #4 の SOL と Bios はここへ移す。",
       "doneWhen": "7つのタスクが全部 done で、Ironic の通し試験（Redfish と IPMI の両ドライバ）・go test -race・コンテナの試験・Redfish-Service-Validator（失敗0件）が通る",
-      "resolution": null,
+      "resolution": "#43〜#49 を main に入れた（049cd93）。Ironic の通し試験 4 つの流れ（redfish-vmedia・redfish-bios・redfish-https・ipmi-pxe）、コンテナ試験 142 件、go test -race、Redfish-Service-Validator（失敗 0 件）、CI が通った。通し試験で見つかった、QEMU が QMP に答えないと BMC 全体が止まる不具合を直した（QMP のコマンドに 15 秒の上限）。",
       "refs": [],
       "threads": [
         {
@@ -943,8 +943,8 @@
         }
       ],
       "createdAt": "2026-10-25T10:52:46.486Z",
-      "updatedAt": "2026-10-27T09:36:55.680Z",
-      "closedAt": null,
+      "updatedAt": "2026-10-27T09:45:54.255Z",
+      "closedAt": "2026-10-27T09:45:54.255Z",
       "extra": {}
     },
     {
