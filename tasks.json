@@ -332,11 +332,11 @@
       ],
       "body": "## 症状\nVM_NETWORKS=eth1 で起動すると、QEMU の -netdev tap が開けず、qemu-bmc は「waiting for QMP: QMP connection timed out after 30s」で終了する。QEMU 自身のエラーはログに出ない。v0.6.0 のイメージでも同じ（新しい変更による退行ではない）。`--device /dev/net/tun` を足すと起動する。\n\n## 直すこと\n- README の docker run 例・docker-compose.yml・containerlab/example.yml に `/dev/net/tun` を渡す設定を入れる（containerlab では devices か privileged）\n- entrypoint で VM_NETWORKS があるのに /dev/net/tun が無ければ、分かるエラーを出して止める（または mknod で作る）\n- QEMU の標準エラーを qemu-bmc のログに出す（原因が分からないため）\n\n2026-10-20、Systems/1 の MAC の確認中に発見。",
       "doneWhen": "/dev/net/tun を渡さずに VM_NETWORKS を使うと原因が分かるエラーが出る。README・compose・containerlab の例のとおりに起動すると NIC 付きで VM が起動する",
-      "resolution": "Factory が取り込みました（factory/vm-networks-dev-net-tun-qemu-readme-dock）",
+      "resolution": "取り込み済み",
       "refs": [],
       "threads": [],
       "createdAt": "2026-10-20T21:07:53.819Z",
-      "updatedAt": "2026-10-21T06:32:08.518Z",
+      "updatedAt": "2026-10-27T09:32:23.308Z",
       "closedAt": "2026-10-21T06:32:08.518Z",
       "extra": {}
     },
