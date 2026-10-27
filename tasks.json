@@ -122,11 +122,11 @@
       "labels": [],
       "body": "いまは .github/workflows/release.yml だけ。push と PR で、noVNC の取得 → go vet → go test -race を回す workflow を足す。可能ならコンテナの統合テスト（make container-test）も回す（KVM が無ければ TCG）。",
       "doneWhen": "main への push と PR で workflow が走り、go vet と go test -race が緑になる",
-      "resolution": "Factory が取り込みました（factory/ci-github-actions）",
+      "resolution": "取り込み済み",
       "refs": [],
       "threads": [],
       "createdAt": "2026-10-20T14:43:40.225Z",
-      "updatedAt": "2026-10-20T20:04:43.763Z",
+      "updatedAt": "2026-10-27T09:31:48.480Z",
       "closedAt": "2026-10-20T20:04:43.763Z",
       "extra": {}
     },
