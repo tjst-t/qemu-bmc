@@ -101,11 +101,11 @@
       "labels": [],
       "body": "App 0x54 が未実装で、ipmitool lanplus を使うたびに「Get Channel Cipher Suites failed」の警告が出る。対応している cipher suite 3 だけを返す。",
       "doneWhen": "ipmitool -I lanplus ... chassis status を実行して警告が出ない。ipmitool channel getciphers ipmi 1 が suite 3 を返す。ユニットテストがある",
-      "resolution": "Factory が取り込みました（factory/ipmi-get-channel-cipher-suites）",
+      "resolution": "取り込み済み",
       "refs": [],
       "threads": [],
       "createdAt": "2026-10-20T14:43:40.225Z",
-      "updatedAt": "2026-10-20T20:04:41.118Z",
+      "updatedAt": "2026-10-27T09:31:42.921Z",
       "closedAt": "2026-10-20T20:04:41.118Z",
       "extra": {}
     },
