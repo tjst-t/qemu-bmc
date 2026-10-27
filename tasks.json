@@ -168,8 +168,7 @@
       "milestone": null,
       "priority": "high",
       "labels": [
-        "redfish",
-        "sakutei"
+        "redfish"
       ],
       "body": "## なぜ\nRedfish で機械を管理するツール（例：sakutei）が最初に観測したい値が Systems/1 の UUID・MAC・メモリ・CPU。Ironic の Redfish 相互運用プロファイルでも推奨項目。containerlab でノードを並べたとき、UUID と MAC がノードごとに固定・一意であることも要る。\n\n## 方針\n- UUID と MAC は環境変数で固定でき、未指定なら決まった規則で導出する（再起動で変わらない）。\n- simontesar/qemu-bmc のフォークに似た変更（SYSTEM_UUID から MAC を決める）があるが、フォークにライセンスが無いため**コードは使わず独自に実装する**。\n\n## 確かめ方\ngofish か curl で Systems/1 を読み、UUID・MemorySummary・ProcessorSummary・EthernetInterfaces を確認。QEMU 側（-uuid、-device の mac）とゲストから見える値が一致すること。",
       "doneWhen": "Systems/1 が UUID・MemorySummary.TotalSystemMemoryGiB・ProcessorSummary.Count・EthernetInterfaces（MAC 付き）を返し、ゲストの dmidecode の UUID と ip link の MAC が一致する。子タスクが全部 done",
@@ -177,7 +176,7 @@
       "refs": [],
       "threads": [],
       "createdAt": "2026-10-20T14:43:13.094Z",
-      "updatedAt": "2026-10-27T09:34:40.939Z",
+      "updatedAt": "2026-10-27T09:39:01.866Z",
       "closedAt": "2026-10-21T11:06:19.395Z",
       "extra": {}
     },
