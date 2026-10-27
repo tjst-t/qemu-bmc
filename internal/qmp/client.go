@@ -7,7 +7,16 @@ import (
 	"fmt"
 	"net"
 	"sync"
+	"time"
 )
+
+// CommandTimeout bounds how long a QMP command (writing it and reading its
+// response) may take. A QEMU that stops answering QMP would otherwise block
+// every caller for good: power actions, and the power state that Redfish
+// and IPMI report. When it expires the connection is closed, so later
+// commands fail with ErrNotConnected (a forced power off then kills QEMU)
+// until Connect is called again.
+var CommandTimeout = 15 * time.Second
 
 // ErrNotConnected is returned when a command is issued on a disconnected client.
 var ErrNotConnected = errors.New("QMP client not connected")
@@ -18,6 +27,8 @@ type qmpClient struct {
 	conn       net.Conn
 	scanner    *bufio.Scanner
 	connected  bool
+	dropped    bool      // the connection was closed after a failed command
+	retryAfter time.Time // no reconnect attempt before this
 	mu         sync.Mutex
 }
 
@@ -42,6 +53,12 @@ func NewDisconnectedClient(socketPath string) Client {
 func (c *qmpClient) Connect() error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	return c.connectLocked()
+}
+
+// connectLocked is Connect. Caller must hold c.mu.
+func (c *qmpClient) connectLocked() error {
+	c.dropped = false
 
 	// Close existing connection if any
 	if c.conn != nil {
@@ -51,13 +68,14 @@ func (c *qmpClient) Connect() error {
 		c.connected = false
 	}
 
-	conn, err := net.Dial("unix", c.socketPath)
+	conn, err := net.DialTimeout("unix", c.socketPath, CommandTimeout)
 	if err != nil {
 		return fmt.Errorf("connecting to QMP socket: %w", err)
 	}
 
 	c.conn = conn
 	c.scanner = bufio.NewScanner(conn)
+	conn.SetDeadline(time.Now().Add(CommandTimeout))
 
 	// Read QMP greeting
 	if !c.scanner.Scan() {
@@ -83,11 +101,25 @@ func (c *qmpClient) Connect() error {
 		return fmt.Errorf("QMP capabilities negotiation: %w", err)
 	}
 
+	conn.SetDeadline(time.Time{})
 	c.connected = true
 	return nil
 }
 
+// checkConnected fails with ErrNotConnected unless the client is connected.
+// A connection closed after a failed command is re-established first, at
+// most once per 2×CommandTimeout (in between, commands fail at once instead
+// of waiting on a QEMU that does not answer), so that a QEMU that answers
+// again is used again. Caller
+// must hold c.mu.
 func (c *qmpClient) checkConnected() error {
+	if !c.connected && c.dropped && !time.Now().Before(c.retryAfter) {
+		if err := c.connectLocked(); err != nil {
+			c.dropped = true
+			c.retryAfter = time.Now().Add(2 * CommandTimeout)
+			return fmt.Errorf("%w (reconnecting: %v)", ErrNotConnected, err)
+		}
+	}
 	if !c.connected {
 		return ErrNotConnected
 	}
@@ -96,43 +128,78 @@ func (c *qmpClient) checkConnected() error {
 
 // executeLocked sends a command and reads the response. Caller must hold c.mu.
 func (c *qmpClient) executeLocked(command string, arguments interface{}) error {
-	cmd := qmpCommand{
-		Execute:   command,
-		Arguments: arguments,
-	}
-
-	data, err := json.Marshal(cmd)
+	raw, err := c.roundTripLocked(command, arguments)
 	if err != nil {
-		return fmt.Errorf("marshaling command: %w", err)
+		return err
 	}
+	var resp qmpResponse
+	if err := json.Unmarshal(raw, &resp); err != nil {
+		return fmt.Errorf("parsing response: %w", err)
+	}
+	if resp.Error != nil {
+		return fmt.Errorf("QMP error: %s: %s", resp.Error.Class, resp.Error.Desc)
+	}
+	return nil
+}
 
+// roundTripLocked sends a command and returns its raw response, skipping
+// async events, within CommandTimeout. On an I/O error or timeout the
+// connection is closed (the stream is no longer in step with QEMU). Caller
+// must hold c.mu.
+func (c *qmpClient) roundTripLocked(command string, arguments interface{}) (json.RawMessage, error) {
+	data, err := json.Marshal(qmpCommand{Execute: command, Arguments: arguments})
+	if err != nil {
+		return nil, fmt.Errorf("marshaling command: %w", err)
+	}
 	data = append(data, '\n')
-	if _, err := c.conn.Write(data); err != nil {
-		return fmt.Errorf("writing command: %w", err)
-	}
 
-	// Read response, skipping async events
+	c.conn.SetDeadline(time.Now().Add(CommandTimeout))
+	raw, err := c.exchangeLocked(data)
+	if err != nil {
+		c.dropLocked()
+		return nil, fmt.Errorf("QMP %s: %w", command, err)
+	}
+	c.conn.SetDeadline(time.Time{})
+	return raw, nil
+}
+
+func (c *qmpClient) exchangeLocked(data []byte) (json.RawMessage, error) {
+	if _, err := c.conn.Write(data); err != nil {
+		return nil, fmt.Errorf("writing command: %w", err)
+	}
 	for {
 		if !c.scanner.Scan() {
-			return fmt.Errorf("reading response: connection closed")
+			if err := c.scanner.Err(); err != nil {
+				return nil, fmt.Errorf("reading response: %w", err)
+			}
+			return nil, fmt.Errorf("reading response: connection closed")
 		}
+		raw := make([]byte, len(c.scanner.Bytes()))
+		copy(raw, c.scanner.Bytes())
 
 		var resp qmpResponse
-		if err := json.Unmarshal(c.scanner.Bytes(), &resp); err != nil {
-			return fmt.Errorf("parsing response: %w", err)
+		if err := json.Unmarshal(raw, &resp); err != nil {
+			return nil, fmt.Errorf("parsing response: %w", err)
 		}
-
 		// Skip async events (they have "event" field, not "return"/"error")
 		if resp.Event != "" {
 			continue
 		}
-
-		if resp.Error != nil {
-			return fmt.Errorf("QMP error: %s: %s", resp.Error.Class, resp.Error.Desc)
-		}
-
-		return nil
+		return json.RawMessage(raw), nil
 	}
+}
+
+// dropLocked closes the connection after a failed exchange. Caller must
+// hold c.mu.
+func (c *qmpClient) dropLocked() {
+	if c.conn != nil {
+		c.conn.Close()
+	}
+	c.conn = nil
+	c.scanner = nil
+	c.connected = false
+	c.dropped = true
+	c.retryAfter = time.Now().Add(2 * CommandTimeout)
 }
 
 func (c *qmpClient) execute(command string, arguments interface{}) error {
@@ -153,43 +220,7 @@ func (c *qmpClient) executeWithResponse(command string, arguments interface{}) (
 	if err := c.checkConnected(); err != nil {
 		return nil, err
 	}
-
-	cmd := qmpCommand{
-		Execute:   command,
-		Arguments: arguments,
-	}
-
-	data, err := json.Marshal(cmd)
-	if err != nil {
-		return nil, fmt.Errorf("marshaling command: %w", err)
-	}
-
-	data = append(data, '\n')
-	if _, err := c.conn.Write(data); err != nil {
-		return nil, fmt.Errorf("writing command: %w", err)
-	}
-
-	// Read response, skipping async events
-	for {
-		if !c.scanner.Scan() {
-			return nil, fmt.Errorf("reading response: connection closed")
-		}
-
-		var resp qmpResponse
-		rawBytes := make([]byte, len(c.scanner.Bytes()))
-		copy(rawBytes, c.scanner.Bytes())
-
-		if err := json.Unmarshal(rawBytes, &resp); err != nil {
-			return nil, fmt.Errorf("parsing response: %w", err)
-		}
-
-		// Skip async events
-		if resp.Event != "" {
-			continue
-		}
-
-		return json.RawMessage(rawBytes), nil
-	}
+	return c.roundTripLocked(command, arguments)
 }
 
 func (c *qmpClient) QueryStatus() (Status, error) {
@@ -271,6 +302,7 @@ func (c *qmpClient) Close() error {
 	defer c.mu.Unlock()
 
 	c.connected = false
+	c.dropped = false
 	if c.conn != nil {
 		return c.conn.Close()
 	}

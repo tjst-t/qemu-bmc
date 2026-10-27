@@ -646,7 +646,15 @@ dump_logs() {
 cleanup() {
     docker rm -f -v "$C_NODE" "$C_CLI" "$C_DNSMASQ" "$C_HTTPD" "$C_IRONIC" >/dev/null 2>&1 || true
     docker volume rm "$VOLUME" >/dev/null 2>&1 || true
-    docker network rm "$NET_BMC" "$NET_PROV" >/dev/null 2>&1 || true
+    local net ep
+    for net in "$NET_BMC" "$NET_PROV"; do
+        # A network can keep stale endpoints of containers that are already
+        # gone (e.g. after the Docker daemon restarted); drop them first.
+        for ep in $(docker network inspect -f '{{range .Containers}}{{.Name}} {{end}}' "$net" 2>/dev/null); do
+            docker network disconnect -f "$net" "$ep" >/dev/null 2>&1 || true
+        done
+        docker network rm "$net" >/dev/null 2>&1 || true
+    done
 }
 
 on_exit() {
