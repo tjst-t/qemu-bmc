@@ -582,11 +582,11 @@
       "labels": [],
       "body": "親ストーリー #23 の後半。前のタスク（パスの ISO を差せる・保持できる）の上に作る。\n\n- InsertMedia の Image が http:// か https:// なら、qemu-bmc（Go の net/http）が保存先へダウンロードしてから、そのファイルを差す。保存先は新しい環境変数 VMEDIA_DIR（既定: /vm が書けるなら /vm/vmedia、無理なら /tmp/vmedia）。前に落としたファイルは差し替え・Eject で消す\n- https は自己署名のサーバもあるので、証明書の検証を飛ばす設定（VMEDIA_INSECURE_TLS、既定 true）を用意する。InsertMedia の UserName/Password が来たら Basic 認証に使う\n- InsertMedia はダウンロードを待たずに 204 を返す。GET は Image に URL、Inserted は true を返す（ダウンロード中も）。ダウンロード中に電源オン・リセット（Redfish と IPMI の両方）が来たら、終わるまで待ってから QEMU を起こす（上限 VMEDIA_TIMEOUT、既定 10分）。失敗したら中身を外し（Inserted false）、理由をログに出す\n- 電源オン中にダウンロードが終わったら、QMP で差す\n- 新しい環境変数は config と README（英語と日本語）の表に足す\n- 単体テストは httptest のサーバで（成功・404・途中の差し替え・電源オンが待つこと）",
       "doneWhen": "go test ./... と go vet が通る。make docker-build したイメージで、ホストの HTTP サーバから配った ISO を InsertMedia → Cd Once → On で ISO から起動する（BIOS と UEFI）",
-      "resolution": "Factory が取り込みました（factory/virtualmedia-http-s-url-qemu-bmc）",
+      "resolution": "取り込み済み",
       "refs": [],
       "threads": [],
       "createdAt": "2026-10-21T14:51:55.062Z",
-      "updatedAt": "2026-10-21T15:59:08.572Z",
+      "updatedAt": "2026-10-27T09:32:36.974Z",
       "closedAt": "2026-10-21T15:59:08.572Z",
       "extra": {}
     },
