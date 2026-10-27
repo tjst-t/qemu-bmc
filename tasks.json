@@ -1104,11 +1104,11 @@
       "labels": [],
       "body": "## なぜ\nIronic が毎回「BIOS settings are not supported」と警告を出す（Systems/1 に Bios が無い）。Ironic の bios インターフェース（apply_configuration・factory_reset）と Metal3 の firmware settings を試せるようにする。\n\n## 仕様\n- `Systems/1` に `Bios` の Link。`/redfish/v1/Systems/1/Bios`（Bios v1_x）：AttributeRegistry、Attributes、`@Redfish.Settings`（SettingsObject=/redfish/v1/Systems/1/Bios/Settings、SupportedApplyTimes [OnReset]）、Actions `#Bios.ResetBios`（と `#Bios.ChangePassword` は出さなくてよい）。\n- `/redfish/v1/Systems/1/Bios/Settings`：GET で保留中の属性、PATCH で属性を保留にする（知らない属性・型違い・許されない値は 400 と Redfish のメッセージ）。保留は次に機械が起動し直したとき（電源オフ→オン、Reset の各種、QEMU が落ちて起こされたとき）に Attributes に反映し、保留は空になる。ResetBios は既定値に戻す（これも次の起動で）。\n- 属性レジストリ：`/redfish/v1/Registries`（ServiceRoot から）と `/redfish/v1/Registries/BiosAttributeRegistry`（MessageRegistryFile）と、その中身の AttributeRegistry（JSON で配る。Location の Uri は qemu-bmc の中のパス）。sushy の `get_attribute_registry` で読めること。\n- 属性（初期の一覧。一般的なサーバの BIOS にあるもの。名前は CamelCase）：\n  - `BootMode`（Uefi/Bios、ReadOnly。実際の VM_BOOT_MODE を映す）\n  - `SecureBoot`（Enabled/Disabled、ReadOnly。SecureBoot の状態を映す）\n  - `ProcVirtualization`（Enabled/Disabled、既定 Enabled）\n  - `ProcHyperThreading`（Enabled/Disabled、既定 Enabled）\n  - `SriovGlobalEnable`（Enabled/Disabled、既定 Disabled）\n  - `PxeDev1EnDis`（Enabled/Disabled、既定 Enabled）\n  - `BootRetry`（Enabled/Disabled）\n  - `PowerProfile`（MaxPerformance/Balanced/PowerSaving）\n  - `NumLock`（On/Off）\n  - `SerialConsoleRedirection`（Enabled/Disabled）、`AssetTag`（String、最大 64）\n  - 値は VM の動きに影響しない（BootMode と SecureBoot は映すだけ）。README に「見せるだけ」と書く。\n- 属性の値はファイルに残す（電源オフ・コンテナの再起動を越えて覚える。VMEDIA_DIR と同じ場所。プロセス管理モード・レガシーモードの両方）。\n- 環境変数 `BIOS_ATTRIBUTES`（JSON の object）で既定値を上書きできる。\n- Redfish-Service-Validator で失敗0件を保つ。\n\n## 確かめ方\n- 単体試験：PATCH の検証、保留と反映、ResetBios、レジストリ、ファイルへの保存。\n- コンテナ試験：sushy（rfpy のような python コンテナ）で `system.bios.attributes`・`set_attributes`・`reset_bios`・`get_attribute_registry` を使い、電源を入れ直すと反映する。\n- Ironic の通し試験に `baremetal node bios setting list` と、manual cleaning の `bios.apply_configuration`（ProcVirtualization を Disabled に）→ 反映を確かめる流れを足し、Ironic のログに BIOS の警告が出なくなる。\n- README（英語と日本語）・CLAUDE.md。",
       "doneWhen": "go test -race ./... と go vet が通り、sushy で Bios の属性の読み・変更・ResetBios・レジストリが動き、電源の入れ直しで反映され、Ironic の通し試験の bios.apply_configuration が通り、Redfish-Service-Validator が失敗0件",
-      "resolution": "Factory が取り込みました（factory/redfish-bios）",
+      "resolution": "取り込み済み",
       "refs": [],
       "threads": [],
       "createdAt": "2026-10-25T10:54:29.647Z",
-      "updatedAt": "2026-10-26T07:05:00.990Z",
+      "updatedAt": "2026-10-27T09:33:50.298Z",
       "closedAt": "2026-10-26T07:05:00.990Z",
       "extra": {}
     },
