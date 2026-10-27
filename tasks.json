@@ -38,11 +38,11 @@
       "labels": [],
       "body": "リポジトリ直下に Apache License 2.0 の LICENSE を置く。README（英語・日本語の両方）の「License: TBD」を Apache-2.0 に直す。noVNC（MPL-2.0）と pako（MIT）を同梱しているので、NOTICE かREADME に第三者のライセンスを書く。",
       "doneWhen": "LICENSE が Apache-2.0 の全文で、README の英日とも TBD が無く、同梱物のライセンスが記載されている",
-      "resolution": "Factory が取り込みました（factory/apache-2-0-license-readme）",
+      "resolution": "取り込み済み",
       "refs": [],
       "threads": [],
       "createdAt": "2026-10-20T14:43:40.225Z",
-      "updatedAt": "2026-10-20T20:01:47.046Z",
+      "updatedAt": "2026-10-27T09:31:29.054Z",
       "closedAt": "2026-10-20T20:01:47.046Z",
       "extra": {}
     },
