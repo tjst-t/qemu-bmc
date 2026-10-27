@@ -533,11 +533,11 @@
       "labels": [],
       "body": "親ストーリー #23 の前半。対象はコンテナ内のパス（/ で始まる、または file://）の ISO だけ。URL のダウンロードは次のタスク。\n\n- プロセス管理モード: QEMU の引数を組むところ（internal/qemu の args/process、cmd/qemu-bmc/main.go）で、CD ドライブが無ければ空の CD ドライブを足す。VM_CDROM（-cdrom）があるならその装置をそのまま使い、中身を最初の挿入状態として扱う\n- machine にメディアの状態（Image、Inserted）を持たせる。InsertMedia/EjectMedia は状態を更新し、QEMU が動いていれば QMP blockdev-change-medium / blockdev-remove-medium で差し替える。QEMU を起動するときは保持している中身を付ける（引数で付けても、起動後に QMP で差してもよい）\n- 装置名を ide0-cd0 と決め打ちしない。QMP query-block で removable な CD を探す（q35 の -cdrom は ide2-cd0）。qmp パッケージに query-block が無ければ足す\n- レガシーモードは QMP で差すだけ（装置名は同じく query-block）\n- Redfish: InsertMedia・EjectMedia は成功で 204 No Content。Image が空なら 400。存在しないファイルなら 400。GET VirtualMedia/CD1 に Image・ImageName（ファイル名）・Inserted・ConnectedVia（URI/NotConnected）・WriteProtected: true・MediaTypes を返す。状態は redfish.Server の currentMedia でなく machine から読む\n- 起動先 Cd（Redfish BootSourceOverrideTarget Cd・IPMI bootdev cdrom）で、差した ISO から起動すること。UEFI（OVMF）で -boot d が効かないなら bootindex など効く方法にする\n- 単体テストを足す（machine・qemu の引数・redfish ハンドラ）。README の VirtualMedia の説明を直す（英語と日本語の両方）",
       "doneWhen": "go test ./... と go vet が通る。make docker-build したイメージで、/iso にバインドした ISO を電源オフ中に InsertMedia → Cd Once → On で ISO から起動し（BIOS）、EjectMedia で Inserted が false になる",
-      "resolution": "Factory が取り込みました（factory/virtualmedia-cd）",
+      "resolution": "取り込み済み",
       "refs": [],
       "threads": [],
       "createdAt": "2026-10-21T14:51:55.062Z",
-      "updatedAt": "2026-10-21T15:09:46.391Z",
+      "updatedAt": "2026-10-27T09:32:29.402Z",
       "closedAt": "2026-10-21T15:09:46.391Z",
       "extra": {}
     },
