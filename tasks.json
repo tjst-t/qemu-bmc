@@ -716,11 +716,11 @@
       "labels": [],
       "body": "## なぜ\nIronic の inspection（redfish）は system.processors.summary（CPU 数・アーキテクチャ）と、system.simple_storage.disks_sizes_bytes か system.storage.drives_sizes_bytes（ルートディスクの大きさ、local_gb）を読む。いまはどれも無いので sushy が MissingAttributeError になる。Backlog #29 参照。\n\n## やること\n- `/redfish/v1/Systems/1/Processors`（コレクション）と `/Processors/CPU1`：`ProcessorType: \"CPU\"`、`ProcessorArchitecture: \"x86\"`、`InstructionSet: \"x86-64\"`、`TotalCores` と `TotalThreads` は VM の CPU 数（SystemInfo.CPUs）、`Status`。CPU 数が分からない（0）ときはメンバーを空にする。Systems/1 に `Processors` のリンク\n- ディスク：QEMU の引数（プロセス管理モード）からディスクのファイル（`-drive file=...` の if=virtio 等。media=cdrom と pflash と qemu-bmc が足す CD は除く。`-hda` 等もあれば）を探し、起動時に `qemu-img info --output=json` で virtual-size を読む（internal/qemu に関数を足す。qemu-img が無い・失敗したら容量なしで載せるか省く）。レガシーモードでは分からないので Storage は空\n- `/redfish/v1/Systems/1/Storage`（コレクション）→ `/Storage/1`（`Drives` のリンク、`StorageControllers` は省いてよい）→ `/Storage/1/Drives/Disk{n}`（`CapacityBytes`、`MediaType: \"HDD\"`、`Protocol`、`Name`、`Status`）\n- `/redfish/v1/Systems/1/SimpleStorage`（コレクション）→ `/SimpleStorage/1`（`Devices: [{Name, CapacityBytes, Status}]`）。SimpleStorage は deprecated だが Ironic が先に読むので出す\n- Systems/1 に `Storage` と `SimpleStorage` のリンク\n- README（英語・日本語）と CLAUDE.md に書く\n\n## 確かめ方\n単体テスト（引数からディスクを見つける・CD/pflash を除く・容量の読み取りはモックできる形に）。可能なら qemu-bmc:test のコンテナで qemu-img info が実際に動くこと。",
       "doneWhen": "go test ./... -race が通り、引数からのディスク検出と Processors・Storage・SimpleStorage の応答を単体テストで確かめている",
-      "resolution": "Factory が取り込みました（factory/redfish-systems-1-processors-storage-sim）",
+      "resolution": "取り込み済み",
       "refs": [],
       "threads": [],
       "createdAt": "2026-10-22T00:37:05.903Z",
-      "updatedAt": "2026-10-22T01:04:28.420Z",
+      "updatedAt": "2026-10-27T09:33:05.073Z",
       "closedAt": "2026-10-22T01:04:28.420Z",
       "extra": {}
     },
