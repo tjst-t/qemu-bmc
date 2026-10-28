@@ -1147,6 +1147,27 @@
       "updatedAt": "2026-10-28T02:38:34.870Z",
       "closedAt": null,
       "extra": {}
+    },
+    {
+      "id": "ipmi-over-lan",
+      "number": 52,
+      "kind": "task",
+      "title": "IPMI-over-LAN を環境変数で切れるようにする",
+      "status": "backlog",
+      "parent": null,
+      "dependsOn": [],
+      "milestone": null,
+      "priority": "low",
+      "labels": [],
+      "body": "## なぜ\n本番の BMC の守り方（IPMI-over-LAN を切り、Redfish だけにする）を試せるようにする。\n\n## 中身\n- 環境変数（例 `IPMI_LAN_ENABLED`、既定 true＝いまのまま）で、UDP 623 の IPMI-over-LAN を待ち受けないようにする\n- 切ったときも VM 側（in-band）の IPMI と Redfish は動く。SOL も使えなくなることを README に書く\n- Redfish の Managers/1/NetworkProtocol に IPMI の ProtocolEnabled を出し、設定と合わせる（PATCH で切り替えられるかは検討）\n\n## 確かめ方\n単体試験と、コンテナ試験で切ったときに ipmitool -I lanplus がつながらず、Redfish は動くこと。",
+      "doneWhen": "既定ではいまと同じで、切る設定のときは IPMI-over-LAN がつながらず Redfish と in-band IPMI は動くことをコンテナ試験で確かめていて、go test -race が通る",
+      "resolution": null,
+      "refs": [],
+      "threads": [],
+      "createdAt": "2026-10-28T02:38:40.122Z",
+      "updatedAt": "2026-10-28T02:38:40.122Z",
+      "closedAt": null,
+      "extra": {}
     }
   ]
 }
