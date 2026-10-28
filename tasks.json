@@ -1168,6 +1168,27 @@
       "updatedAt": "2026-10-28T02:38:40.122Z",
       "closedAt": null,
       "extra": {}
+    },
+    {
+      "id": "bmc-syslog",
+      "number": 53,
+      "kind": "task",
+      "title": "BMC のログを syslog で外へ送る設定",
+      "status": "backlog",
+      "parent": null,
+      "dependsOn": [],
+      "milestone": null,
+      "priority": "low",
+      "labels": [],
+      "body": "## なぜ\n本番の BMC の守り方（BMC のログを外の syslog サーバへ送る）を試せるようにする。\n\n## 中身\n- 環境変数（例 `SYSLOG_ADDR`＝送り先の host:port、`SYSLOG_PROTO`＝udp/tcp、既定は空＝送らない）\n- qemu-bmc のログ（電源操作・ログイン・故障の注入など）を RFC 5424 の形で送る。送れなくても qemu-bmc は止まらない\n- 送るときもコンテナの標準出力へのログはいまのまま\n- Redfish の Managers/1/NetworkProtocol などで設定を見せるかは検討\n\n## 確かめ方\n単体試験と、コンテナ試験で受け手の syslog（小さな UDP サーバ）にログが届くこと。",
+      "doneWhen": "送り先を設定すると外の syslog にログが届き、設定しないときはいまと同じで、go test -race とコンテナ試験が通る",
+      "resolution": null,
+      "refs": [],
+      "threads": [],
+      "createdAt": "2026-10-28T02:38:44.301Z",
+      "updatedAt": "2026-10-28T02:38:44.301Z",
+      "closedAt": null,
+      "extra": {}
     }
   ]
 }
