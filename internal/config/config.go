@@ -49,6 +49,10 @@ type Config struct {
 	// new SERIAL_ADDR connection gets it first
 	SerialBufferBytes int
 	SerialReplay      bool
+	// A serial console reader (SERIAL_ADDR client, IPMI SOL) that falls
+	// more than SerialQueueBytes (SERIAL_QUEUE_BYTES) of output behind is
+	// disconnected
+	SerialQueueBytes int
 
 	// GracefulTimeout bounds how long GracefulShutdown/GracefulRestart
 	// report PoweringOff before going back to On (GRACEFUL_TIMEOUT, seconds)
@@ -115,6 +119,7 @@ func Load() *Config {
 
 		SerialBufferBytes: getSizeEnv("SERIAL_BUFFER_BYTES", 256*1024),
 		SerialReplay:      getBoolEnv("SERIAL_REPLAY", false),
+		SerialQueueBytes:  getQueueBytes(),
 
 		GracefulTimeout: getSecondsEnv("GRACEFUL_TIMEOUT", 120*time.Second),
 
@@ -195,6 +200,16 @@ func getSecondsEnv(key string, defaultValue time.Duration) time.Duration {
 		return defaultValue
 	}
 	return time.Duration(n) * time.Second
+}
+
+// getQueueBytes returns SERIAL_QUEUE_BYTES; 0 (or invalid) is the
+// default, 4 MiB.
+func getQueueBytes() int {
+	const def = 4 * 1024 * 1024
+	if n := getSizeEnv("SERIAL_QUEUE_BYTES", def); n > 0 {
+		return n
+	}
+	return def
 }
 
 // getSizeEnv returns key as a non-negative number of bytes, or

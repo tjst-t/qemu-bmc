@@ -20,9 +20,9 @@ import (
 // (SERIAL_BUFFER_BYTES).
 const DefaultBufferBytes = 256 * 1024
 
-// subscriptionQueue is how many output chunks a subscriber may fall behind
-// before it is dropped.
-const subscriptionQueue = 256
+// DefaultQueueBytes is the default for how much output a subscriber may
+// fall behind before it is dropped (SERIAL_QUEUE_BYTES).
+const DefaultQueueBytes = 4 * 1024 * 1024
 
 // ErrNotConnected is returned by Write when no VM is connected (QEMU is not
 // running).
@@ -42,11 +42,23 @@ type Console interface {
 }
 
 // Subscription receives the VM output.
+//
+// What the VM writes is queued per subscription and handed to the reader
+// by a goroutine of its own, joining what queued up meanwhile into one
+// chunk. How far a subscriber may fall behind is counted in bytes, not
+// in writes: a guest that writes a byte at a time does not get a slow
+// reader dropped any sooner than one writing in large blocks.
 type Subscription struct {
 	mux  *Mux
 	ch   chan []byte
 	done chan struct{}
 	once sync.Once
+
+	qmu     sync.Mutex
+	pending []queuedOutput // queued output, oldest first
+	queued  int            // bytes queued, including the chunk being handed over
+	writes  int            // VM writes queued, including the chunk being handed over
+	wake    chan struct{}  // pending is not empty
 }
 
 // Output delivers the VM output in chunks. It is closed when the
@@ -65,12 +77,82 @@ func (s *Subscription) Close() {
 	s.mux.unsubscribe(s)
 }
 
-// end closes the channels once; the caller holds mux.mu.
+// queuedOutput is output queued for a subscriber; the replay is not counted
+// against the limit.
+type queuedOutput struct {
+	b       []byte
+	counted bool
+}
+
+// end ends the subscription once; Output is closed by the pump. The
+// caller holds mux.mu.
 func (s *Subscription) end() {
-	s.once.Do(func() {
-		close(s.done)
-		close(s.ch)
-	})
+	s.once.Do(func() { close(s.done) })
+}
+
+// enqueue queues p, unless it would bring the queue over limit (> 0)
+// bytes; then it returns false and the queue size.
+func (s *Subscription) enqueue(p []byte, limit int, counted bool) (ok bool, queued, writes int) {
+	s.qmu.Lock()
+	defer s.qmu.Unlock()
+	if counted && limit > 0 && s.queued+len(p) > limit {
+		return false, s.queued, s.writes
+	}
+	s.pending = append(s.pending, queuedOutput{p, counted})
+	if counted {
+		s.queued += len(p)
+		s.writes++
+	}
+	select {
+	case s.wake <- struct{}{}:
+	default:
+	}
+	return true, s.queued, s.writes
+}
+
+// pump hands the queued output to the reader, joined into one chunk per
+// handover, until the subscription ends; then it closes Output. What is
+// still queued then is dropped.
+func (s *Subscription) pump() {
+	defer close(s.ch)
+	for {
+		select {
+		case <-s.wake:
+		case <-s.done:
+			return
+		}
+		s.qmu.Lock()
+		pending := s.pending
+		s.pending = nil
+		s.qmu.Unlock()
+		if len(pending) == 0 {
+			continue
+		}
+		n, countedBytes, countedWrites := 0, 0, 0
+		for _, q := range pending {
+			n += len(q.b)
+			if q.counted {
+				countedBytes += len(q.b)
+				countedWrites++
+			}
+		}
+		chunk := pending[0].b
+		if len(pending) > 1 {
+			chunk = make([]byte, 0, n)
+			for _, q := range pending {
+				chunk = append(chunk, q.b...)
+			}
+		}
+		select {
+		case s.ch <- chunk:
+		case <-s.done:
+			return
+		}
+		s.qmu.Lock()
+		s.queued -= countedBytes
+		s.writes -= countedWrites
+		s.qmu.Unlock()
+	}
 }
 
 // Mux multiplexes the VM serial console. The zero value is not usable; use
@@ -79,6 +161,7 @@ type Mux struct {
 	mu     sync.Mutex
 	recent *ring
 	subs   map[*Subscription]struct{}
+	limit  int                // bytes a subscriber may fall behind before it is dropped
 	vm     io.ReadWriteCloser // current VM connection, nil if none
 
 	writeMu sync.Mutex // serializes input so writes do not interleave
@@ -88,20 +171,40 @@ var _ Console = (*Mux)(nil)
 
 // NewMux returns a Mux keeping the last bufferBytes of output (none if 0).
 func NewMux(bufferBytes int) *Mux {
-	return &Mux{recent: newRing(bufferBytes), subs: map[*Subscription]struct{}{}}
+	return &Mux{recent: newRing(bufferBytes), subs: map[*Subscription]struct{}{}, limit: DefaultQueueBytes}
+}
+
+// SetQueueBytes sets how many bytes of output a subscriber may fall behind
+// before it is dropped (DefaultQueueBytes if n <= 0). The recent output
+// sent on Subscribe with replay is not counted.
+func (m *Mux) SetQueueBytes(n int) {
+	if n <= 0 {
+		n = DefaultQueueBytes
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.limit = n
+}
+
+// QueueBytes returns the limit set by SetQueueBytes.
+func (m *Mux) QueueBytes() int {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.limit
 }
 
 // Subscribe implements Console.
 func (m *Mux) Subscribe(replay bool) *Subscription {
-	s := &Subscription{mux: m, ch: make(chan []byte, subscriptionQueue+1), done: make(chan struct{})}
+	s := &Subscription{mux: m, ch: make(chan []byte), done: make(chan struct{}), wake: make(chan struct{}, 1)}
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if replay {
 		if b := m.recent.Bytes(); len(b) > 0 {
-			s.ch <- b
+			s.enqueue(b, 0, false)
 		}
 	}
 	m.subs[s] = struct{}{}
+	go s.pump()
 	return s
 }
 
@@ -145,18 +248,16 @@ func (m *Mux) Connected() bool {
 }
 
 // publish buffers p and queues it to every subscriber, dropping those
-// whose queue is full so that one slow subscriber does not hold up the
-// others (or the VM).
+// that would fall more than the queue limit behind so that one slow
+// subscriber does not hold up the others (or the VM).
 func (m *Mux) publish(p []byte) {
 	chunk := append([]byte(nil), p...)
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.recent.Write(chunk)
 	for s := range m.subs {
-		select {
-		case s.ch <- chunk:
-		default:
-			log.Printf("serial: dropping a subscriber that does not keep up")
+		if ok, queued, writes := s.enqueue(chunk, m.limit, true); !ok {
+			log.Printf("serial: dropping a subscriber that does not keep up (%d bytes in %d writes queued, %d more would exceed SERIAL_QUEUE_BYTES=%d)", queued, writes, len(chunk), m.limit)
 			m.unsubscribe(s)
 		}
 	}

@@ -360,7 +360,7 @@ ipmitool -I lanplus -H localhost -U admin -P password chassis bootdev pxe
 
 ### Serial console
 
-In process management mode the guest serial console (`ttyS0`) is served as raw TCP on `SERIAL_ADDR` (default `localhost:9002`, inside the container). Up to 8 clients can be connected at the same time: what the VM writes goes to all of them and what any of them types goes to the VM. A client that does not keep up is disconnected so that it does not hold up the others. Connections stay open when QEMU is powered off, restarted or reset; they get the output of the next boot.
+In process management mode the guest serial console (`ttyS0`) is served as raw TCP on `SERIAL_ADDR` (default `localhost:9002`, inside the container). Up to 8 clients can be connected at the same time: what the VM writes goes to all of them and what any of them types goes to the VM. A client that falls more than `SERIAL_QUEUE_BYTES` (4 MiB) of output behind is disconnected so that it does not hold up the others; the log says how many bytes in how many writes were queued. The limit is in bytes, so a guest writing a few bytes at a time (as early in a boot) does not get a reader disconnected sooner. Connections stay open when QEMU is powered off, restarted or reset; they get the output of the next boot.
 
 ```bash
 # Two terminals at once (e.g. a person and a logger)
@@ -628,6 +628,7 @@ Another power action (Redfish or IPMI) during `PoweringOff` / `PoweringOn` ends 
 | `SERIAL_ADDR` | `localhost:9002` | Process management mode only: qemu-bmc serves the guest serial console as raw TCP on this address, up to 8 connections at once (see [Serial console](#serial-console)). Legacy mode: not used. The default port 9002 collides with the `VM_IPMI_ADDR` example — use another port (e.g. `localhost:9003`) when enabling both |
 | `SERIAL_BUFFER_BYTES` | `262144` (256 KiB) | Recent serial output kept (Redfish SerialConsole log, `SERIAL_REPLAY`); `0` = none |
 | `SERIAL_REPLAY` | `false` | Send the kept output to a new `SERIAL_ADDR` connection first |
+| `SERIAL_QUEUE_BYTES` | `4194304` (4 MiB) | How much output a serial console reader (`SERIAL_ADDR` connection, IPMI SOL) may fall behind before it is disconnected; the replayed output is not counted. `0` = default |
 | `TLS_CERT` | (auto-generated) | TLS certificate path; if unset, a self-signed ECDSA cert is generated automatically |
 | `TLS_KEY` | (auto-generated) | TLS key path; if unset, generated together with `TLS_CERT` |
 | `VM_BOOT_MODE` | `bios` | Firmware the container starts QEMU with (`bios` or `uefi`, chosen by `entrypoint.sh`). In process management mode it is also the initial Redfish `BootSourceOverrideMode` (`Legacy` / `UEFI`) and IPMI boot flags EFI bit |
@@ -1095,7 +1096,7 @@ ipmitool -I lanplus -H localhost -U admin -P password chassis bootdev pxe
 
 ### シリアルコンソール
 
-プロセス管理モードでは、ゲストのシリアルコンソール（`ttyS0`）を `SERIAL_ADDR`（既定 `localhost:9002`、コンテナの中）の素の TCP で出す。同時に 8 つまでつなげる。VM の出力は全部の接続へ送り、どの接続から打った入力も VM へ送る。追いつかない接続は、ほかを止めないように切る。QEMU を電源オフ・起動し直し・リセットしても接続は切れず、次の起動の出力がそのまま届く。
+プロセス管理モードでは、ゲストのシリアルコンソール（`ttyS0`）を `SERIAL_ADDR`（既定 `localhost:9002`、コンテナの中）の素の TCP で出す。同時に 8 つまでつなげる。VM の出力は全部の接続へ送り、どの接続から打った入力も VM へ送る。出力が `SERIAL_QUEUE_BYTES`（4 MiB）より多くたまった（追いつかない）接続は、ほかを止めないように切り、たまっていたバイト数と書き込みの回数をログに出す。上限はバイト数なので、起動の初めのように数バイトずつの書き込みが続いても早く切られることはない。QEMU を電源オフ・起動し直し・リセットしても接続は切れず、次の起動の出力がそのまま届く。
 
 ```bash
 # 2つの端末から同時に（人とログ取りなど）
@@ -1363,6 +1364,7 @@ curl -H "$T" -X DELETE http://localhost:8623/faults      # 全部消す
 | `SERIAL_ADDR` | `localhost:9002` | プロセス管理モードのみ: qemu-bmc がゲストのシリアルコンソールをこのアドレスの素の TCP で出す。同時に 8 接続まで（[シリアルコンソール](#シリアルコンソール)）。レガシーモードでは使わない。既定ポート 9002 は `VM_IPMI_ADDR` の例と重なるため、両方使う場合は別ポート（例: `localhost:9003`）を指定 |
 | `SERIAL_BUFFER_BYTES` | `262144`（256 KiB） | 覚えておく最近のシリアルの出力（Redfish の SerialConsole のログ、`SERIAL_REPLAY`）。`0` で覚えない |
 | `SERIAL_REPLAY` | `false` | `SERIAL_ADDR` の新しい接続に、覚えている出力をまず送る |
+| `SERIAL_QUEUE_BYTES` | `4194304`（4 MiB） | シリアルコンソールの読み手（`SERIAL_ADDR` の接続・IPMI SOL）に、まだ渡せていない出力がこれより多くたまったら切る。リプレイの分は数えない。`0` で既定 |
 | `TLS_CERT` | (自動生成) | TLS 証明書パス。未設定時は ECDSA 自己署名証明書を動的生成 |
 | `TLS_KEY` | (自動生成) | TLS 鍵パス。未設定時は `TLS_CERT` と同時に生成 |
 | `VM_BOOT_MODE` | `bios` | コンテナが QEMU を起動するファームウェア (`bios` または `uefi`、`entrypoint.sh` が選ぶ)。プロセス管理モードでは Redfish `BootSourceOverrideMode` (`Legacy` / `UEFI`) と IPMI ブートフラグの EFI ビットの初期値にもなる |

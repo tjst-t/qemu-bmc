@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"io"
+	"log"
 	"net"
 	"os"
 	"path/filepath"
@@ -142,6 +143,7 @@ func TestMux_ReplaySendsRecentOutputFirst(t *testing.T) {
 
 func TestMux_SlowSubscriberIsDropped(t *testing.T) {
 	m := NewMux(16)
+	m.SetQueueBytes(64)
 	q := connectQEMU(t, m, startQEMUSocket(t, m))
 
 	slow := m.Subscribe(false) // never read
@@ -149,7 +151,7 @@ func TestMux_SlowSubscriberIsDropped(t *testing.T) {
 	defer fast.Close()
 
 	// Each write is read as its own chunk since fast waits for it
-	for i := 0; i <= subscriptionQueue+1; i++ {
+	for i := 0; i < 70; i++ {
 		q.conn.Write([]byte{'x'})
 		recvUntil(t, fast, "x")
 	}
@@ -339,4 +341,120 @@ func TestServer_InputWithoutVMIsDiscarded(t *testing.T) {
 	q := connectQEMU(t, m, startQEMUSocket(t, m))
 	q.conn.Write([]byte("booting"))
 	readUntil(t, c, "booting")
+}
+
+// readAll reads n bytes from sub, in whatever chunks they come.
+func readAll(t *testing.T, sub *Subscription, n int) []byte {
+	t.Helper()
+	var got bytes.Buffer
+	timeout := time.After(5 * time.Second)
+	for got.Len() < n {
+		select {
+		case b, ok := <-sub.Output():
+			if !ok {
+				t.Fatalf("subscription ended after %d of %d bytes", got.Len(), n)
+			}
+			got.Write(b)
+		case <-timeout:
+			t.Fatalf("timed out after %d of %d bytes", got.Len(), n)
+		}
+	}
+	return got.Bytes()
+}
+
+func assertNotDropped(t *testing.T, sub *Subscription) {
+	t.Helper()
+	select {
+	case <-sub.Done():
+		t.Fatal("subscriber was dropped")
+	case <-time.After(50 * time.Millisecond):
+	}
+}
+
+// Many small writes (as at the start of a boot) do not get a slow reader
+// dropped: the limit is in bytes, not in writes.
+func TestMux_ManySmallWritesWithinQueueBytes(t *testing.T) {
+	const limit = 16 * 1024
+	m := NewMux(1024)
+	m.SetQueueBytes(limit)
+	slow := m.Subscribe(false)
+	defer slow.Close()
+
+	var want []byte
+	for i := 0; i < limit; i++ { // 16384 one-byte writes, nothing read
+		b := []byte{byte('a' + i%26)}
+		want = append(want, b...)
+		m.publish(b)
+	}
+	assertNotDropped(t, slow)
+	assert.Equal(t, 1, m.Subscribers())
+
+	// All of it arrives, in order, joined into a few chunks
+	assert.Equal(t, want, readAll(t, slow, len(want)))
+
+	// Having caught up, it may fall behind as far again
+	for i := 0; i < limit; i++ {
+		m.publish([]byte{'z'})
+	}
+	assertNotDropped(t, slow)
+	assert.Equal(t, bytes.Repeat([]byte{'z'}, limit), readAll(t, slow, limit))
+}
+
+func TestMux_DroppedPastQueueBytesWithLog(t *testing.T) {
+	var logs bytes.Buffer
+	log.SetOutput(&logs)
+	defer log.SetOutput(os.Stderr)
+
+	m := NewMux(1024)
+	m.SetQueueBytes(1000)
+	slow := m.Subscribe(false)
+	other := m.Subscribe(false)
+	defer other.Close()
+	go func() {
+		for range other.Output() {
+		}
+	}()
+
+	for i := 0; i < 100; i++ {
+		m.publish([]byte("0123456789")) // 1000 bytes in 100 writes
+	}
+	assertNotDropped(t, slow)
+	m.publish([]byte("x"))
+	select {
+	case <-slow.Done():
+	case <-time.After(2 * time.Second):
+		t.Fatal("slow subscriber was not dropped")
+	}
+	assert.Equal(t, 1, m.Subscribers())
+	assert.Contains(t, logs.String(), "1000 bytes in 100 writes queued")
+	assert.Contains(t, logs.String(), "SERIAL_QUEUE_BYTES=1000")
+	_, ok := <-slow.Output()
+	for ok { // Output is closed too
+		_, ok = <-slow.Output()
+	}
+}
+
+// The recent output sent with replay does not count against the limit.
+func TestMux_ReplayNotCountedAgainstQueueBytes(t *testing.T) {
+	m := NewMux(8192)
+	m.SetQueueBytes(4096)
+	m.publish(bytes.Repeat([]byte{'r'}, 8192))
+
+	sub := m.Subscribe(true)
+	defer sub.Close()
+	for i := 0; i < 4096; i++ {
+		m.publish([]byte{'n'})
+	}
+	assertNotDropped(t, sub)
+	got := readAll(t, sub, 8192+4096)
+	assert.Equal(t, append(bytes.Repeat([]byte{'r'}, 8192), bytes.Repeat([]byte{'n'}, 4096)...), got)
+}
+
+func TestMux_SetQueueBytesDefault(t *testing.T) {
+	m := NewMux(0)
+	assert.Equal(t, DefaultQueueBytes, m.QueueBytes())
+	m.SetQueueBytes(0)
+	assert.Equal(t, DefaultQueueBytes, m.QueueBytes())
+	m.SetQueueBytes(123)
+	assert.Equal(t, 123, m.QueueBytes())
 }

@@ -110,6 +110,7 @@ make ironic-test                       # or IRONIC_FLOWS=redfish-vmedia (redfish
 | `IPMI_PORT` | `623` | IPMI UDP port |
 | `SERIAL_ADDR` | `localhost:9002` | Process management mode only: qemu-bmc serves the guest serial console as raw TCP here (`serial.Server`, max 8 connections), see Serial Console below. Legacy mode: not used. Port 9002 collides with the `VM_IPMI_ADDR` example — use another port when enabling both |
 | `SERIAL_BUFFER_BYTES` | `262144` | Recent serial output kept (ring buffer; Redfish SerialConsole log, replay); `0` = none |
+| `SERIAL_QUEUE_BYTES` | `4194304` | Bytes of output a serial reader may fall behind before it is dropped (counted in bytes, not writes; replay not counted); `0` = default |
 | `SERIAL_REPLAY` | `false` | New `SERIAL_ADDR` connections get the buffered output first |
 | `TLS_CERT` | (auto-generated) | TLS certificate path; if unset, a self-signed ECDSA cert is generated automatically |
 | `TLS_KEY` | (auto-generated) | TLS key path; if unset, generated together with `TLS_CERT` |

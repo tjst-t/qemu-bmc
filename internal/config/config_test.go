@@ -12,7 +12,7 @@ import (
 
 func TestLoad_Defaults(t *testing.T) {
 	// Clear any env vars that might be set
-	for _, key := range []string{"QMP_SOCK", "IPMI_USER", "IPMI_PASS", "REDFISH_PORT", "IPMI_PORT", "SERIAL_ADDR", "TLS_CERT", "TLS_KEY", "VM_BOOT_MODE", "VM_IPMI_ADDR", "QEMU_BINARY", "POWER_ON_AT_START", "SYSTEM_UUID", "SYSTEM_UUID_FILE", "VM_MACS", "GRACEFUL_TIMEOUT", "VMEDIA_DIR", "VMEDIA_INSECURE_TLS", "VMEDIA_TIMEOUT", "VM_SECURE_BOOT", "VM_MANUFACTURER", "VM_MODEL", "VM_SERIAL_NUMBER", "VM_SKU", "SERIAL_BUFFER_BYTES", "SERIAL_REPLAY"} {
+	for _, key := range []string{"QMP_SOCK", "IPMI_USER", "IPMI_PASS", "REDFISH_PORT", "IPMI_PORT", "SERIAL_ADDR", "TLS_CERT", "TLS_KEY", "VM_BOOT_MODE", "VM_IPMI_ADDR", "QEMU_BINARY", "POWER_ON_AT_START", "SYSTEM_UUID", "SYSTEM_UUID_FILE", "VM_MACS", "GRACEFUL_TIMEOUT", "VMEDIA_DIR", "VMEDIA_INSECURE_TLS", "VMEDIA_TIMEOUT", "VM_SECURE_BOOT", "VM_MANUFACTURER", "VM_MODEL", "VM_SERIAL_NUMBER", "VM_SKU", "SERIAL_BUFFER_BYTES", "SERIAL_REPLAY", "SERIAL_QUEUE_BYTES"} {
 		os.Unsetenv(key)
 	}
 
@@ -25,6 +25,7 @@ func TestLoad_Defaults(t *testing.T) {
 	assert.Equal(t, "localhost:9002", cfg.SerialAddr)
 	assert.Equal(t, "/var/run/qemu/serial.sock", cfg.SerialSocket)
 	assert.Equal(t, 256*1024, cfg.SerialBufferBytes)
+	assert.Equal(t, 4*1024*1024, cfg.SerialQueueBytes)
 	assert.False(t, cfg.SerialReplay)
 	assert.Equal(t, "", cfg.TLSCert)
 	assert.Equal(t, "", cfg.TLSKey)
@@ -74,6 +75,13 @@ func TestLoad_Serial(t *testing.T) {
 	assert.Equal(t, 256*1024, Load().SerialBufferBytes)
 	t.Setenv("SERIAL_BUFFER_BYTES", "big")
 	assert.Equal(t, 256*1024, Load().SerialBufferBytes)
+
+	t.Setenv("SERIAL_QUEUE_BYTES", "65536")
+	assert.Equal(t, 65536, Load().SerialQueueBytes)
+	t.Setenv("SERIAL_QUEUE_BYTES", "0")
+	assert.Equal(t, 4*1024*1024, Load().SerialQueueBytes)
+	t.Setenv("SERIAL_QUEUE_BYTES", "-5")
+	assert.Equal(t, 4*1024*1024, Load().SerialQueueBytes)
 }
 
 func TestLoad_VMedia(t *testing.T) {

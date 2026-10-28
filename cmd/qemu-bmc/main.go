@@ -411,6 +411,7 @@ func setBootHook(m *machine.Machine, biosStore *bios.Store, fw *firmware.Store) 
 // to serial.DefaultMaxConns) on SERIAL_ADDR.
 func startSerial(cfg *config.Config) *serial.Mux {
 	console := serial.NewMux(cfg.SerialBufferBytes)
+	console.SetQueueBytes(cfg.SerialQueueBytes)
 	if err := os.MkdirAll(filepath.Dir(cfg.SerialSocket), 0o755); err != nil {
 		log.Fatalf("Serial console: %v", err)
 	}
@@ -431,7 +432,7 @@ func startSerial(cfg *config.Config) *serial.Mux {
 		}
 		srv := serial.NewServer(console, serial.DefaultMaxConns, cfg.SerialReplay)
 		go func() {
-			log.Printf("Starting serial console on %s (buffer %d bytes, replay %t)", cfg.SerialAddr, cfg.SerialBufferBytes, cfg.SerialReplay)
+			log.Printf("Starting serial console on %s (buffer %d bytes, replay %t, reader queue %d bytes)", cfg.SerialAddr, cfg.SerialBufferBytes, cfg.SerialReplay, cfg.SerialQueueBytes)
 			if err := srv.Serve(tcp); err != nil {
 				log.Fatalf("Serial console server error: %v", err)
 			}
