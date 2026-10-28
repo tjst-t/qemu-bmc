@@ -1195,7 +1195,7 @@
       "number": 54,
       "kind": "task",
       "title": "Redfish UpdateService（模擬のファームウェア更新：FirmwareInventory・SimpleUpdate・multipart push・Task）",
-      "status": "ready",
+      "status": "in-progress",
       "parent": null,
       "dependsOn": [],
       "milestone": null,
@@ -1207,7 +1207,7 @@
       "refs": [],
       "threads": [],
       "createdAt": "2026-10-28T04:16:45.889Z",
-      "updatedAt": "2026-10-28T04:16:45.889Z",
+      "updatedAt": "2026-10-28T04:16:56.907Z",
       "closedAt": null,
       "extra": {}
     }
