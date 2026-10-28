@@ -140,7 +140,7 @@ func TestEventService_Get(t *testing.T) {
 	assert.Equal(t, 3.0, es["DeliveryRetryAttempts"])
 	assert.Equal(t, 5.0, es["DeliveryRetryIntervalSeconds"])
 	assert.Equal(t, []interface{}{"Event"}, es["EventFormatTypes"])
-	assert.Equal(t, []interface{}{"ResourceEvent", "Base"}, es["RegistryPrefixes"])
+	assert.Equal(t, []interface{}{"ResourceEvent", "Base", "TaskEvent"}, es["RegistryPrefixes"])
 	assert.Contains(t, es["ResourceTypes"], "ComputerSystem")
 	assert.Equal(t, ssePath, es["ServerSentEventUri"])
 	assert.Equal(t, map[string]interface{}{"@odata.id": subscriptionsPath}, es["Subscriptions"])

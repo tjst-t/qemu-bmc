@@ -70,6 +70,14 @@ type Config struct {
 	// defaults of the Redfish Bios attributes (saved to BiosFile)
 	BiosAttributes string
 
+	// Simulated firmware: the initial BMC (BMC_FIRMWARE_VERSION, "" = the
+	// qemu-bmc version) and BIOS (BIOS_FIRMWARE_VERSION) versions; versions
+	// installed by updates are saved to FirmwareFile and win. An update
+	// runs for FirmwareUpdateDuration (FIRMWARE_UPDATE_SECONDS).
+	BMCFirmwareVersion     string
+	BIOSFirmwareVersion    string
+	FirmwareUpdateDuration time.Duration
+
 	// Fault injection: the fault API listens on FaultAPIAddr
 	// (FAULT_API_ADDR, disabled if empty) and needs the bearer token
 	// FaultAPIToken (FAULT_API_TOKEN) if set; Faults (FAULTS) is a JSON
@@ -116,6 +124,10 @@ func Load() *Config {
 
 		BiosAttributes: getEnv("BIOS_ATTRIBUTES", ""),
 
+		BMCFirmwareVersion:     getEnv("BMC_FIRMWARE_VERSION", ""),
+		BIOSFirmwareVersion:    getEnv("BIOS_FIRMWARE_VERSION", "QBMC-BIOS-1.0.0"),
+		FirmwareUpdateDuration: getSecondsEnv("FIRMWARE_UPDATE_SECONDS", 10*time.Second),
+
 		EventInsecureTLS: getBoolEnv("EVENT_INSECURE_TLS", true),
 
 		FaultAPIAddr:  getEnv("FAULT_API_ADDR", ""),
@@ -132,6 +144,12 @@ func Load() *Config {
 // VirtualMedia downloads.
 func (c *Config) BiosFile() string {
 	return filepath.Join(c.VMediaDir, "bios-settings.json")
+}
+
+// FirmwareFile is where the firmware versions installed by updates are
+// saved: next to the Bios attributes.
+func (c *Config) FirmwareFile() string {
+	return filepath.Join(c.VMediaDir, "firmware.json")
 }
 
 // defaultVMediaDir returns <base>/vmedia if base is a writable directory,

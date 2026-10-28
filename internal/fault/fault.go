@@ -31,6 +31,9 @@ const (
 	PowerActionIgnored Kind = "power-action-ignored"
 	GracefulIgnored    Kind = "graceful-ignored"
 	BMCUnavailable     Kind = "bmc-unavailable"
+
+	FirmwareImageRejected Kind = "firmware-image-rejected"
+	FirmwareUpdateFail    Kind = "firmware-update-fail"
 )
 
 // kindTargets maps each kind to its target: what the fault acts on.
@@ -46,7 +49,14 @@ var kindTargets = map[Kind]string{
 	PowerActionIgnored: "power",
 	GracefulIgnored:    "power",
 	BMCUnavailable:     "bmc",
+	// firmware-*: the target may instead name the firmware component
+	// (BMC or BIOS) the fault is limited to
+	FirmwareImageRejected: "firmware",
+	FirmwareUpdateFail:    "firmware",
 }
+
+// Firmware components a firmware-* fault can be limited to with target
+var firmwareTargets = []string{"BMC", "BIOS"}
 
 const (
 	// DefaultHangSeconds is how long a redfish-hang keeps a connection
@@ -55,6 +65,9 @@ const (
 	// DefaultCompletionCode is the IPMI completion code of ipmi-error and
 	// power-action-fail when completionCode is not given (unspecified error).
 	DefaultCompletionCode = 0xFF
+	// DefaultAtPercent is where firmware-update-fail fails the update when
+	// atPercent is not given.
+	DefaultAtPercent = 50
 )
 
 // Byte is a one-byte value given in JSON as a number or a string such as
@@ -108,6 +121,9 @@ type Fault struct {
 	// Nmi); any if empty
 	Action string `json:"action,omitempty"`
 
+	// firmware-update-fail: PercentComplete at which the update task fails
+	AtPercent *int `json:"atPercent,omitempty"`
+
 	// Count is how many times the fault applies before it is removed
 	// (unlimited if unset); DurationSeconds how long it lasts (unlimited
 	// if unset)
@@ -125,10 +141,18 @@ func (f *Fault) validate() error {
 	if !ok {
 		return fmt.Errorf("unknown kind %q", f.Kind)
 	}
-	if f.Target != "" && f.Target != target {
+	switch {
+	case target == "firmware" && f.Target != "" && f.Target != target:
+		t := strings.ToUpper(f.Target)
+		if !contains(firmwareTargets, t) {
+			return fmt.Errorf("target of %s is %q, BMC or BIOS, not %q", f.Kind, target, f.Target)
+		}
+		f.Target = t
+	case f.Target != "" && f.Target != target:
 		return fmt.Errorf("target of %s is %q, not %q", f.Kind, target, f.Target)
+	default:
+		f.Target = target
 	}
-	f.Target = target
 	if f.Count != nil && *f.Count <= 0 {
 		return fmt.Errorf("count must be positive")
 	}
@@ -165,8 +189,25 @@ func (f *Fault) validate() error {
 			cc := Byte(DefaultCompletionCode)
 			f.CompletionCode = &cc
 		}
+	case FirmwareUpdateFail:
+		if f.AtPercent == nil {
+			p := DefaultAtPercent
+			f.AtPercent = &p
+		}
+		if *f.AtPercent < 0 || *f.AtPercent > 100 {
+			return fmt.Errorf("atPercent must be 0-100")
+		}
 	}
 	return nil
+}
+
+func contains(list []string, s string) bool {
+	for _, v := range list {
+		if v == s {
+			return true
+		}
+	}
+	return false
 }
 
 // Parse decodes a JSON array of faults (FAULTS).

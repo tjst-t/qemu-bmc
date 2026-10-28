@@ -21,6 +21,8 @@ type ServiceRoot struct {
 	SessionService ODataID          `json:"SessionService"`
 	EventService   ODataID          `json:"EventService"`
 	Registries     ODataID          `json:"Registries"`
+	UpdateService  *ODataID         `json:"UpdateService,omitempty"`
+	Tasks          ODataID          `json:"Tasks"`
 	Links          ServiceRootLinks `json:"Links"`
 }
 
@@ -51,6 +53,7 @@ type ComputerSystem struct {
 	Model        string                `json:"Model,omitempty"`
 	SerialNumber string                `json:"SerialNumber,omitempty"`
 	SKU          string                `json:"SKU,omitempty"`
+	BiosVersion  string                `json:"BiosVersion,omitempty"`
 	PowerState   string                `json:"PowerState"`
 	Boot         BootSource            `json:"Boot"`
 	Actions      ComputerSystemActions `json:"Actions"`

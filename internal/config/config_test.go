@@ -99,6 +99,26 @@ func TestLoad_Bios(t *testing.T) {
 	assert.Equal(t, "/data/vm/bios-settings.json", cfg.BiosFile())
 }
 
+func TestLoad_Firmware(t *testing.T) {
+	for _, key := range []string{"BMC_FIRMWARE_VERSION", "BIOS_FIRMWARE_VERSION", "FIRMWARE_UPDATE_SECONDS"} {
+		t.Setenv(key, "")
+	}
+	cfg := Load()
+	assert.Equal(t, "", cfg.BMCFirmwareVersion)
+	assert.Equal(t, "QBMC-BIOS-1.0.0", cfg.BIOSFirmwareVersion)
+	assert.Equal(t, 10*time.Second, cfg.FirmwareUpdateDuration)
+
+	t.Setenv("VMEDIA_DIR", "/data/vm")
+	t.Setenv("BMC_FIRMWARE_VERSION", "5.0")
+	t.Setenv("BIOS_FIRMWARE_VERSION", "B-2")
+	t.Setenv("FIRMWARE_UPDATE_SECONDS", "3")
+	cfg = Load()
+	assert.Equal(t, "5.0", cfg.BMCFirmwareVersion)
+	assert.Equal(t, "B-2", cfg.BIOSFirmwareVersion)
+	assert.Equal(t, 3*time.Second, cfg.FirmwareUpdateDuration)
+	assert.Equal(t, "/data/vm/firmware.json", cfg.FirmwareFile())
+}
+
 func TestDefaultVMediaDir(t *testing.T) {
 	dir := t.TempDir()
 	assert.Equal(t, filepath.Join(dir, "vmedia"), defaultVMediaDir(dir))

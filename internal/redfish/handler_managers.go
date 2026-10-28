@@ -8,6 +8,7 @@ import (
 	"path"
 	"strings"
 
+	"github.com/tjst-t/qemu-bmc/internal/firmware"
 	"github.com/tjst-t/qemu-bmc/internal/machine"
 )
 
@@ -41,6 +42,9 @@ func (s *Server) handleGetManager(w http.ResponseWriter, r *http.Request) {
 			ManagerForServers: []ODataID{{ODataID: systemPath}},
 			ManagerInChassis:  ODataID{ODataID: chassisPath},
 		},
+	}
+	if s.fw != nil {
+		mgr.FirmwareVersion = s.fw.Version(firmware.TargetBMC)
 	}
 	if s.solPort != 0 {
 		mgr.SerialConsole = &ManagerSerialConsole{

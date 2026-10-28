@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 
+	"github.com/tjst-t/qemu-bmc/internal/firmware"
 	"github.com/tjst-t/qemu-bmc/internal/machine"
 	"github.com/tjst-t/qemu-bmc/internal/qmp"
 )
@@ -61,6 +62,7 @@ func (s *Server) handleGetSystem(w http.ResponseWriter, r *http.Request) {
 		Model:        s.systemInfo.Model,
 		SerialNumber: s.systemInfo.SerialNumber,
 		SKU:          s.systemInfo.SKU,
+		BiosVersion:  s.firmwareVersion(firmware.TargetBIOS),
 		Boot: BootSource{
 			BootSourceOverrideEnabled: boot.Enabled,
 			BootSourceOverrideTarget:  boot.Target,

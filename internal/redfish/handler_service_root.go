@@ -23,7 +23,11 @@ func (s *Server) handleServiceRoot(w http.ResponseWriter, r *http.Request) {
 		SessionService: ODataID{ODataID: "/redfish/v1/SessionService"},
 		EventService:   ODataID{ODataID: eventServicePath},
 		Registries:     ODataID{ODataID: registriesPath},
+		Tasks:          ODataID{ODataID: taskServicePath},
 		Links:          ServiceRootLinks{Sessions: ODataID{ODataID: sessionsPath}},
+	}
+	if s.fw != nil {
+		root.UpdateService = &ODataID{ODataID: updateServicePath}
 	}
 
 	w.Header().Set("Content-Type", "application/json")

@@ -35,6 +35,7 @@ A Go single binary that controls QEMU VMs via both Redfish API (HTTPS) and IPMI 
 - **Shared serial console** - Several clients on `SERIAL_ADDR` at once (output to all, input from any), recent output kept and readable over Redfish; survives QEMU restarts
 - **IPMI SOL** - `ipmitool -I lanplus sol activate` (cipher suites 3 and 17) on the same console, e.g. Ironic's `ipmitool-socat` console; Redfish `SerialConsole` on `Managers/1` and `Systems/1`
 - **BIOS settings** - Redfish `Systems/1/Bios` with an attribute registry, pending `Settings` applied at the next boot and `ResetBios`, for Ironic's `bios` interface (`apply_configuration`, `factory_reset`) and Metal3 firmware settings. Display only: the values do not change the VM
+- **Firmware updates (simulated)** - Redfish `UpdateService`: `FirmwareInventory` (BMC, BIOS), `SimpleUpdate` and multipart HTTP push of small test images, `TaskService` tasks with progress, BIOS versions pending until the next boot, and faults that reject an image or fail the update
 - **Compatibility** - MAAS, Tinkerbell/Rufio
 
 ## Quick Start
@@ -226,6 +227,44 @@ curl -k -u admin:password -X POST https://localhost/redfish/v1/Systems/1/Bios/Ac
 - `BIOS_ATTRIBUTES` (JSON object, e.g. `{"PowerProfile":"Balanced","AssetTag":"rack-1"}`) replaces defaults; an invalid value stops qemu-bmc with an error. The defaults are the initial values and what `ResetBios` goes back to.
 - The values and the pending settings are saved to `bios-settings.json` in `VMEDIA_DIR` (in both modes), so they survive a power off and a container restart when that directory is on a volume. Saved values win over `BIOS_ATTRIBUTES`; delete the file (or `ResetBios`) to start over from the defaults.
 
+#### Firmware updates (UpdateService)
+
+`UpdateService` lets tools that read and update firmware (Ironic's firmware interface, sushy, Metal3) be tried without a real machine. **Nothing is flashed**: an image is a small file whose first line is `QBMC-FW <target> <version>` (target `BMC` or `BIOS`, version up to 64 printable characters without spaces); any bytes may follow.
+
+```bash
+# Test images
+printf 'QBMC-FW BIOS 2.0.0\n' > bios.img
+printf 'QBMC-FW BMC 2.0.0\n' > bmc.img
+
+# Versions
+curl -k -u admin:password https://localhost/redfish/v1/UpdateService/FirmwareInventory/BMC
+curl -k -u admin:password https://localhost/redfish/v1/UpdateService/FirmwareInventory/BIOS
+
+# SimpleUpdate: qemu-bmc downloads the image (http/https; Username/Password optional, sent as Basic auth)
+curl -k -u admin:password -X POST https://localhost/redfish/v1/UpdateService/Actions/UpdateService.SimpleUpdate \
+  -H 'Content-Type: application/json' \
+  -d '{"ImageURI": "http://192.0.2.1/bios.img", "Targets": ["/redfish/v1/UpdateService/FirmwareInventory/BIOS"]}'
+# → 202, Location: /redfish/v1/TaskService/TaskMonitors/1
+
+# Multipart HTTP push
+curl -k -u admin:password https://localhost/redfish/v1/UpdateService/upload \
+  -F 'UpdateParameters={"Targets":["/redfish/v1/UpdateService/FirmwareInventory/BMC"]};type=application/json' \
+  -F 'UpdateFile=@bmc.img'
+
+# Follow the task: 202 while it runs, 200 when it is done (both with the Task)
+curl -k -u admin:password https://localhost/redfish/v1/TaskService/TaskMonitors/1
+```
+
+- Initial versions: `BMC_FIRMWARE_VERSION` (default: the qemu-bmc version) and `BIOS_FIRMWARE_VERSION` (default `QBMC-BIOS-1.0.0`). `Managers/1` `FirmwareVersion` and `Systems/1` `BiosVersion` report the same versions.
+- Both ways answer `202 Accepted` with `Location` = the task monitor and the Task as body. `Targets` (`FirmwareInventory/BMC` or `/BIOS`; `Managers/1` and `Systems/1` are accepted too) is optional: without it the image decides. An image that is not of the form above, or not for the given `Targets`, is a **broken image**: `400` with `Update.1.0.VerificationFailed` in `@Message.ExtendedInfo`, and no task. A SimpleUpdate image that cannot be downloaded is `400` too (`Update.1.0.TransferFailed`). SimpleUpdate downloads like VirtualMedia (`VMEDIA_INSECURE_TLS`, `VMEDIA_TIMEOUT`) before answering. `TransferProtocol` may be `HTTP` / `HTTPS` (it gives the scheme to an `ImageURI` without one). In the multipart push, `UpdateParameters` is optional; `@Redfish.OperationApplyTime` may be `Immediate` or `OnReset`.
+- The task (`/redfish/v1/TaskService/Tasks/{id}`) goes `New` → `Running` → `Completed` (or `Exception`), `PercentComplete` from 0 to 100 over `FIRMWARE_UPDATE_SECONDS` (10), with `StartTime`, `EndTime` and `Update` registry `Messages`. Tasks are kept in memory only, at most 32 (the oldest finished one is dropped).
+- **BMC**: the new version is reported as soon as the task completes (the BMC does not restart).
+- **BIOS**: the version is pending until the machine boots — power on from off, `ForceRestart`, `PowerCycle`, `GracefulRestart` (the same moments as the [BIOS settings](#bios-settings)). Meanwhile `FirmwareInventory/BIOS` keeps the running `Version` with **`Status.State` `StandbyOffline`** ("enabled, but awaits an external action to activate it") and the pending version in its `Description`, and the task's last message is `Update.1.0.AwaitToActivate` with the `Resolution` "... becomes active at the next system boot". A newer BIOS update replaces a pending one.
+- Versions installed by updates (and a pending BIOS version) are saved to `firmware.json` in `VMEDIA_DIR`, so they survive a container restart on a volume; they win over `BMC_FIRMWARE_VERSION` / `BIOS_FIRMWARE_VERSION`. Delete the file to go back to those.
+- Events: `TaskEvent.1.0.TaskStarted`, `TaskCompletedOK`, `TaskAborted` (origin the Task), and `ResourceEvent.1.3.ResourceChanged` on `FirmwareInventory/BMC` / `BIOS` when a version (or the pending BIOS version) changes.
+- Faults (see [Fault injection](#fault-injection)): `firmware-image-rejected` rejects a received image like a broken one; `firmware-update-fail` makes the task end in `Exception` at `atPercent` (50) with `Update.1.0.ApplyFailed`, and the version does not change.
+- sushy: `get_update_service().simple_update(url, targets=[...])` works; sushy's task monitor follows the Task URI of the `202` body, so wait on the Task's `TaskState` (as Ironic does).
+
 #### System identity (SMBIOS)
 
 The guest's SMBIOS and Redfish show the same manufacturer, model and serial number, so a management tool can match the machine it sees over Redfish with what the OS sees (`dmidecode`, Ironic inspection).
@@ -289,10 +328,12 @@ Events (MessageIds of the DMTF `ResourceEvent` 1.3 registry):
 | Secure Boot enabled/disabled, keys reset | `ResourceEvent.1.3.ResourceChanged` | `ResourceUpdated` | `/redfish/v1/Systems/1/SecureBoot` |
 | SessionService or EventService PATCHed | `ResourceEvent.1.3.ResourceChanged` | `ResourceUpdated` | the resource |
 | Session created (login) / deleted (logout) | `ResourceEvent.1.3.ResourceCreated` / `ResourceRemoved` | `ResourceAdded` / `ResourceRemoved` | the session |
+| Firmware update task started / completed / failed (see [Firmware updates](#firmware-updates-updateservice)) | `TaskEvent.1.0.TaskStarted` / `TaskCompletedOK` / `TaskAborted` | `StatusChange` | the Task |
+| Firmware version (or pending BIOS version) changed | `ResourceEvent.1.3.ResourceChanged` | `ResourceUpdated` | `/redfish/v1/UpdateService/FirmwareInventory/BMC` or `/BIOS` |
 | `SubmitTestEvent` | as given | as given (`Other` if omitted) | as given |
 
 - Each Event has one record. `Context` is the subscription's (not sent on SSE). The power state is checked right after every power action and once a second, so a short state (e.g. `Off` during a `PowerCycle`) is reported too; a state shorter than that (e.g. a guest rebooting itself) is not.
-- **Filters** (subscriptions): `RegistryPrefixes` (`ResourceEvent`, `Base`), `ResourceTypes` (`ComputerSystem`, `VirtualMedia`, `SecureBoot`, `Session`, `SessionService`, `EventService`), `MessageIds` (with or without the version: `ResourceEvent.ResourcePoweredOn`), `OriginResources` (with `SubordinateResources: true` also the resources below them), and the older `EventTypes`. All given filters must match; none = all events. Unknown values are rejected (`400`).
+- **Filters** (subscriptions): `RegistryPrefixes` (`ResourceEvent`, `Base`, `TaskEvent`), `ResourceTypes` (`ComputerSystem`, `VirtualMedia`, `SecureBoot`, `Session`, `SessionService`, `EventService`, `Task`, `SoftwareInventory`), `MessageIds` (with or without the version: `ResourceEvent.ResourcePoweredOn`), `OriginResources` (with `SubordinateResources: true` also the resources below them), and the older `EventTypes`. All given filters must match; none = all events. Unknown values are rejected (`400`).
 - **SSE** `$filter`: `<Property> eq '<value>'` on `EventType`, `MessageId`, `OriginResource`, `RegistryPrefix` or `ResourceType`, joined with `and` / `or` (no parentheses). The stream needs authentication like any other request; a comment line is sent every 15 s while idle.
 - **Delivery**: a `POST` with `Content-Type: application/json` and the subscription's `HttpHeaders` (write-only: `GET` returns `[]`); any `2xx` is a success. Events are delivered to each subscription one at a time, in order. A failed delivery is retried `DeliveryRetryAttempts` times (3), `DeliveryRetryIntervalSeconds` (5) apart; what then happens depends on the subscription's `DeliveryRetryPolicy`:
   - `SuspendRetries` (default): the event is dropped and the subscription is kept but suspended (`Status.State` `Disabled`): nothing is sent to it, events in between are lost, until `POST .../Subscriptions/{id}/Actions/EventDestination.ResumeSubscription`.
@@ -440,7 +481,7 @@ curl -H "$T" -X DELETE http://localhost:8623/faults      # delete all
 
 `FAULTS` takes a JSON array of faults active from startup (it works without `FAULT_API_ADDR` too), e.g. `FAULTS='[{"kind":"graceful-ignored"}]'`.
 
-A fault is `{"kind": ..., conditions..., "count": N, "durationSeconds": S}`: `count` is how many times it applies before it is removed, `durationSeconds` how long it lasts (both unlimited if omitted). `target` (`redfish`, `ipmi`, `power`, `bmc`) is optional and filled in from `kind`. Faults are checked in the order added and the first matching one applies. Each application is logged as `fault: <id> <kind> applied to <request>`.
+A fault is `{"kind": ..., conditions..., "count": N, "durationSeconds": S}`: `count` is how many times it applies before it is removed, `durationSeconds` how long it lasts (both unlimited if omitted). `target` (`redfish`, `ipmi`, `power`, `bmc`, `firmware`) is optional and filled in from `kind`. Faults are checked in the order added and the first matching one applies. Each application is logged as `fault: <id> <kind> applied to <request>`.
 
 | Kind | Effect | Conditions / parameters |
 |------|--------|-------------------------|
@@ -455,10 +496,13 @@ A fault is `{"kind": ..., conditions..., "count": N, "durationSeconds": S}`: `co
 | `power-action-ignored` | A power action reports success (204, cc 0x00) but nothing is done — "the BMC took it, the machine did not move" | `action` |
 | `graceful-ignored` | `GracefulShutdown` / `GracefulRestart` (IPMI `power soft`) does not send the ACPI power button event to the VM, like an OS that does not shut down: `PoweringOff`, then back to `On` after `GRACEFUL_TIMEOUT` | `action` |
 | `bmc-unavailable` | Neither Redfish nor IPMI responds (Redfish connections are held open until the fault ends, then closed), like a rebooting BMC | `durationSeconds` |
+| `firmware-image-rejected` | A firmware image received by `SimpleUpdate` or the multipart push is rejected like a broken one (`400`, `Update.1.0.VerificationFailed`, no task) | `target` |
+| `firmware-update-fail` | The update task ends in `Exception` (`Update.1.0.ApplyFailed`) at `PercentComplete` `atPercent`; the version does not change | `target`, `atPercent` (0-100, default 50) |
 
 - `method`: HTTP method, any if omitted. `path`: a path prefix (`/redfish/v1/Systems`), or a glob if it has `*`, `?` or `[` (`/redfish/v1/Systems/*/Actions/*`; `*` does not match `/`); any if omitted. No paths are exempt (the service root, sessions, noVNC included) — narrow it with `path` as needed.
 - `netfn`, `cmd`: number or string (`"0x06"`); any if omitted. Without `includeSession: true`, the messages opening/closing a session (ASF ping, RMCP+ Open Session/RAKP, Get Channel Auth Capabilities, Get Session Challenge, Activate Session, Set Session Privilege, Close Session, Get Channel Cipher Suites) are not affected, so that e.g. `ipmitool` gets a session and then times out on the command. With `netfn`/`cmd`, Open Session/RAKP and ASF ping never match (they are no IPMI commands).
 - `action`: the Redfish `ResetType` as requested (`On`, `ForceOff`, `GracefulShutdown`, `ForceRestart`, `GracefulRestart`, `PowerCycle`, `ForceOn`, `Nmi`, `PushPowerButton`); IPMI chassis control maps to `ForceOff` (off), `On` (on), `PowerCycle` (cycle), `ForceRestart` (reset), `GracefulShutdown` (soft), `Nmi` (diag). Any if omitted.
+- `target` of the `firmware-*` kinds: `BMC` or `BIOS` limits the fault to updates of that firmware; omitted (or `firmware`) = both.
 - With `FAULT_API_ADDR` or `FAULTS` set, Redfish serves HTTP/1.1 only (an HTTP/2 connection cannot be dropped as a whole).
 
 ## Redfish Endpoints
@@ -474,7 +518,7 @@ A fault is `{"kind": ..., conditions..., "count": N, "durationSeconds": S}`: `co
 | GET | `/redfish/v1/SessionService/Sessions/{id}` | Session |
 | DELETE | `/redfish/v1/SessionService/Sessions/{id}` | Log out (204) |
 | GET | `/redfish/v1/Systems` | System collection |
-| GET | `/redfish/v1/Systems/1` | Computer system (Manufacturer, Model, SerialNumber, SKU (if `VM_SKU` is set), Status, Processors, Storage, SimpleStorage, VirtualMedia, SerialConsole (IPMI SOL, process mode); Links: ManagedBy Managers/1, Chassis Chassis/1) |
+| GET | `/redfish/v1/Systems/1` | Computer system (Manufacturer, Model, SerialNumber, SKU (if `VM_SKU` is set), BiosVersion, Status, Processors, Storage, SimpleStorage, VirtualMedia, SerialConsole (IPMI SOL, process mode); Links: ManagedBy Managers/1, Chassis Chassis/1) |
 | PATCH | `/redfish/v1/Systems/1` | Boot device override (`BootSourceOverrideTarget` incl. `UefiHttp`, `Boot.HttpBootUri`; see [UEFI HTTP boot](#uefi-http-boot)) |
 | POST | `/redfish/v1/Systems/1/Actions/ComputerSystem.Reset` | Power control |
 | GET/PATCH | `/redfish/v1/Systems/1/SecureBoot` | Secure Boot (`SecureBootEnable`, `SecureBootCurrentBoot`, `SecureBootMode`; UEFI in process management mode only, else `404`; see [Secure Boot](#secure-boot)) |
@@ -506,7 +550,7 @@ A fault is `{"kind": ..., conditions..., "count": N, "durationSeconds": S}`: `co
 | POST | `/redfish/v1/Systems/1/VirtualMedia/CD1/Actions/VirtualMedia.InsertMedia` | Insert an ISO (204) |
 | POST | `/redfish/v1/Systems/1/VirtualMedia/CD1/Actions/VirtualMedia.EjectMedia` | Eject media (204) |
 | GET | `/redfish/v1/Managers` | Manager collection |
-| GET | `/redfish/v1/Managers/1` | BMC manager (ManagerType BMC, Manufacturer and Model `qemu-bmc`, FirmwareVersion = qemu-bmc version, Status, SerialConsole (IPMI SOL, process mode); Links: ManagerForServers Systems/1, ManagerInChassis Chassis/1) |
+| GET | `/redfish/v1/Managers/1` | BMC manager (ManagerType BMC, Manufacturer and Model `qemu-bmc`, FirmwareVersion = BMC firmware version, Status, SerialConsole (IPMI SOL, process mode); Links: ManagerForServers Systems/1, ManagerInChassis Chassis/1) |
 | GET | `/redfish/v1/Managers/1/VirtualMedia` | VirtualMedia collection (deprecated location; same drive as Systems/1/VirtualMedia) |
 | GET | `/redfish/v1/Managers/1/VirtualMedia/CD1` | VirtualMedia resource (ImageName only while inserted) |
 | POST | `.../VirtualMedia.InsertMedia` | Insert an ISO (container path or HTTP(S) URL; 204) |
@@ -519,6 +563,12 @@ A fault is `{"kind": ..., conditions..., "count": N, "durationSeconds": S}`: `co
 | GET/POST | `/redfish/v1/EventService/Subscriptions` | Subscription collection / subscribe (201, Location) |
 | GET/PATCH/DELETE | `/redfish/v1/EventService/Subscriptions/{id}` | Subscription (PATCH: Context, DeliveryRetryPolicy; DELETE: 204) |
 | POST | `.../Subscriptions/{id}/Actions/EventDestination.SuspendSubscription`, `.../ResumeSubscription` | Suspend / resume deliveries (204) |
+| GET | `/redfish/v1/UpdateService` | Update service (FirmwareInventory, SimpleUpdate, MultipartHttpPushUri); see [Firmware updates](#firmware-updates-updateservice) |
+| GET | `/redfish/v1/UpdateService/FirmwareInventory`, `.../FirmwareInventory/BMC`, `.../BIOS` | Firmware inventory: Version, Updateable, Status (`StandbyOffline` while a BIOS version is pending), RelatedItem Managers/1 / Systems/1 |
+| POST | `/redfish/v1/UpdateService/Actions/UpdateService.SimpleUpdate` | Update from an http(s) `ImageURI` (202 + task monitor; 400 for a broken image) |
+| POST | `/redfish/v1/UpdateService/upload` | Multipart HTTP push (`UpdateParameters`, `UpdateFile`; 202 + task monitor) |
+| GET | `/redfish/v1/TaskService`, `.../Tasks`, `.../Tasks/{id}` | Task service, tasks (TaskState, TaskStatus, PercentComplete, Messages, StartTime, EndTime) |
+| GET | `/redfish/v1/TaskService/TaskMonitors/{id}` | Task monitor: 202 while the task runs, then 200 (both with the Task) |
 | GET | `/novnc/` | Redirect to noVNC UI |
 | GET | `/novnc/vnc.html` | Browser-based VNC console |
 | GET | `/websockify` | WebSocket-to-VNC proxy |
@@ -590,6 +640,9 @@ Another power action (Redfish or IPMI) during `PoweringOff` / `PoweringOn` ends 
 | `VMEDIA_TIMEOUT` | `600` | Seconds a power on or reset requested during a VirtualMedia (or UEFI HTTP boot image) download waits for it before booting without the image |
 | `EVENT_INSECURE_TLS` | `true` | Skip certificate verification when POSTing events to https subscription destinations. See [Events](#events-eventservice) |
 | `BIOS_ATTRIBUTES` | (empty) | JSON object replacing the defaults of the Redfish BIOS attributes (e.g. `{"PowerProfile":"Balanced"}`); the values are saved to `VMEDIA_DIR/bios-settings.json`. See [BIOS settings](#bios-settings) |
+| `BMC_FIRMWARE_VERSION` | (the qemu-bmc version) | Initial BMC firmware version (`FirmwareInventory/BMC`, `Managers/1` `FirmwareVersion`). See [Firmware updates](#firmware-updates-updateservice) |
+| `BIOS_FIRMWARE_VERSION` | `QBMC-BIOS-1.0.0` | Initial BIOS firmware version (`FirmwareInventory/BIOS`, `Systems/1` `BiosVersion`). Versions installed by updates are saved to `VMEDIA_DIR/firmware.json` and win over these two |
+| `FIRMWARE_UPDATE_SECONDS` | `10` | Seconds a simulated firmware update task takes from 0 to 100 % |
 | `FAULT_API_ADDR` | (empty, disabled) | Listen address of the fault injection API (plain HTTP, e.g. `:8623`). See [Fault injection](#fault-injection) |
 | `FAULT_API_TOKEN` | (empty) | Bearer token required by the fault API; no authentication if empty |
 | `FAULTS` | (empty) | JSON array of faults active from startup |
@@ -663,6 +716,7 @@ internal/
   fault/                       # Fault injection (fault API, Redfish/IPMI/power faults)
   serial/                      # Serial console multiplexer (QEMU socket, TCP clients, recent output)
   bios/                        # BIOS attributes (pending settings, saved to a file)
+  firmware/                    # Simulated firmware versions (images, pending BIOS, saved to a file)
 docker/
   Dockerfile                   # Multi-stage build (Go builder + Debian runtime)
   entrypoint.sh                # Environment variables → QEMU args
@@ -722,6 +776,7 @@ QEMU VM を Redfish API (HTTPS) と IPMI over LAN (UDP) の両方で制御する
 - **シリアルコンソールの共有** - `SERIAL_ADDR` に同時に複数つなげる（出力は全員へ、入力はどれからでも）。最近の出力を覚えていて Redfish で読める。QEMU が起動し直してもつながったまま
 - **IPMI SOL** - 同じコンソールを `ipmitool -I lanplus sol activate`（暗号スイート 3 と 17）で使える。Ironic の `ipmitool-socat` のコンソールなど。Redfish の `Managers/1` と `Systems/1` に `SerialConsole`
 - **BIOS の設定** - Redfish の `Systems/1/Bios`（属性レジストリ、次の起動で反映する `Settings`、`ResetBios`）。Ironic の `bios` インターフェース（`apply_configuration`・`factory_reset`）や Metal3 の firmware settings を試せる。見せるだけで、値は VM の動きを変えない
+- **ファームウェアの更新（模擬）** - Redfish の `UpdateService`。`FirmwareInventory`（BMC・BIOS）、小さな試験用イメージでの `SimpleUpdate` と multipart HTTP push、進み具合のある `TaskService` のタスク、次の起動まで保留になる BIOS の版、イメージを断る・更新を失敗させる故障
 - **互換性** - MAAS, Tinkerbell/Rufio
 
 ## クイックスタート
@@ -907,6 +962,44 @@ curl -k -u admin:password -X POST https://localhost/redfish/v1/Systems/1/Bios/Ac
 - `BIOS_ATTRIBUTES`（JSON の object。例 `{"PowerProfile":"Balanced","AssetTag":"rack-1"}`）で既定値を変えられる。値が正しくなければ qemu-bmc はエラーで終わる。既定値は最初の値であり、`ResetBios` で戻る値。
 - 値と保留中の設定は `VMEDIA_DIR` の `bios-settings.json` に残す（両方のモードで）。そのディレクトリがボリュームにあれば、電源オフやコンテナの作り直しを越えて覚えている。残した値は `BIOS_ATTRIBUTES` より強い。既定値からやり直すにはファイルを消す（か `ResetBios`）。
 
+#### ファームウェアの更新（UpdateService）
+
+`UpdateService` で、ファームウェアの版を見て更新するツール（Ironic の firmware インターフェース、sushy、Metal3）を本物の機械なしで試せる。**実際には何も書き込まない**。イメージは 1 行目が `QBMC-FW <target> <version>`（target は `BMC` か `BIOS`、version は空白を含まない 64 文字までの印字可能な文字）の小さなファイルで、その後ろは任意のバイトでよい。
+
+```bash
+# 試験用のイメージ
+printf 'QBMC-FW BIOS 2.0.0\n' > bios.img
+printf 'QBMC-FW BMC 2.0.0\n' > bmc.img
+
+# 版
+curl -k -u admin:password https://localhost/redfish/v1/UpdateService/FirmwareInventory/BMC
+curl -k -u admin:password https://localhost/redfish/v1/UpdateService/FirmwareInventory/BIOS
+
+# SimpleUpdate：qemu-bmc がイメージを落とす（http・https。Username・Password は省略可、Basic 認証で送る）
+curl -k -u admin:password -X POST https://localhost/redfish/v1/UpdateService/Actions/UpdateService.SimpleUpdate \
+  -H 'Content-Type: application/json' \
+  -d '{"ImageURI": "http://192.0.2.1/bios.img", "Targets": ["/redfish/v1/UpdateService/FirmwareInventory/BIOS"]}'
+# → 202、Location: /redfish/v1/TaskService/TaskMonitors/1
+
+# multipart HTTP push
+curl -k -u admin:password https://localhost/redfish/v1/UpdateService/upload \
+  -F 'UpdateParameters={"Targets":["/redfish/v1/UpdateService/FirmwareInventory/BMC"]};type=application/json' \
+  -F 'UpdateFile=@bmc.img'
+
+# タスクを追う：実行中は 202、終わったら 200（どちらも本文は Task）
+curl -k -u admin:password https://localhost/redfish/v1/TaskService/TaskMonitors/1
+```
+
+- 初めの版は `BMC_FIRMWARE_VERSION`（既定は qemu-bmc の版）と `BIOS_FIRMWARE_VERSION`（既定 `QBMC-BIOS-1.0.0`）。`Managers/1` の `FirmwareVersion` と `Systems/1` の `BiosVersion` も同じ版を出す。
+- どちらの受け口も `202 Accepted` で、`Location` はタスクモニタ、本文は Task。`Targets`（`FirmwareInventory/BMC` か `/BIOS`。`Managers/1`・`Systems/1` も受ける）は省略でき、省略するとイメージの中身で決まる。上の形でないイメージや、`Targets` と合わないイメージは **壊れたイメージ** として `400`（`@Message.ExtendedInfo` に `Update.1.0.VerificationFailed`）で断り、タスクは作らない。SimpleUpdate で落とせないイメージも `400`（`Update.1.0.TransferFailed`）。SimpleUpdate は VirtualMedia と同じ設定（`VMEDIA_INSECURE_TLS`・`VMEDIA_TIMEOUT`）で落としてから応える。`TransferProtocol` は `HTTP`・`HTTPS`（スキームの無い `ImageURI` にはそれを付ける）。multipart push の `UpdateParameters` は省略でき、`@Redfish.OperationApplyTime` は `Immediate` か `OnReset`。
+- タスク（`/redfish/v1/TaskService/Tasks/{id}`）は `New` → `Running` → `Completed`（か `Exception`）と進み、`PercentComplete` は `FIRMWARE_UPDATE_SECONDS`（10）秒で 0 から 100 になる。`StartTime`・`EndTime`・`Update` レジストリの `Messages` 付き。タスクはメモリだけに置き、32 件まで（終わったものの古い順に消す）。
+- **BMC**：タスクが終わるとすぐ新しい版になる（BMC の再起動は模さない）。
+- **BIOS**：機械が次に起動するまで保留（電源オフからのオン、`ForceRestart`、`PowerCycle`、`GracefulRestart`。[BIOS の設定](#bios-の設定) と同じ時点）。その間 `FirmwareInventory/BIOS` は `Version` に動いている版を出し、**`Status.State` を `StandbyOffline`**（「有効だが、動かすには外からの操作を待っている」）にして、保留中の版を `Description` に書く。タスクの最後のメッセージは `Update.1.0.AwaitToActivate` で、`Resolution` に「次の起動で反映」と出す。保留中に別の BIOS 更新をすると、そちらに置き換わる。
+- 更新で入れた版（と保留中の BIOS の版）は `VMEDIA_DIR` の `firmware.json` に残すので、ボリュームにあればコンテナを作り直しても残る。`BMC_FIRMWARE_VERSION`・`BIOS_FIRMWARE_VERSION` よりこちらが強い。それらに戻すにはファイルを消す。
+- イベント：`TaskEvent.1.0.TaskStarted`・`TaskCompletedOK`・`TaskAborted`（起点は Task）と、版（か保留中の BIOS の版）が変わったときの `FirmwareInventory/BMC`・`/BIOS` の `ResourceEvent.1.3.ResourceChanged`。
+- 故障（[故障の注入](#故障の注入)）：`firmware-image-rejected` は受けたイメージを壊れたものと同じように断る。`firmware-update-fail` はタスクを `atPercent`（50）で `Exception`（`Update.1.0.ApplyFailed`）にし、版は変わらない。
+- sushy：`get_update_service().simple_update(url, targets=[...])` で通る。sushy のタスクモニタは `202` の本文の Task の URI を追うので、（Ironic と同じく）Task の `TaskState` で終わりを待つ。
+
 #### システムの識別情報（SMBIOS）
 
 ゲストの SMBIOS と Redfish に同じメーカー・型番・シリアル番号を出す。管理ツールが Redfish で見た機械と、OS の中から見た機械（`dmidecode`、Ironic の inspect）を突き合わせられる。
@@ -970,10 +1063,12 @@ curl -sk -u admin:password -H 'Content-Type: application/json' \
 | Secure Boot の有効・無効、鍵のリセット | `ResourceEvent.1.3.ResourceChanged` | `ResourceUpdated` | `/redfish/v1/Systems/1/SecureBoot` |
 | SessionService・EventService を PATCH した | `ResourceEvent.1.3.ResourceChanged` | `ResourceUpdated` | その資源 |
 | セッションの作成（ログイン）・削除（ログアウト） | `ResourceEvent.1.3.ResourceCreated`・`ResourceRemoved` | `ResourceAdded`・`ResourceRemoved` | そのセッション |
+| ファームウェア更新のタスクが始まった・終わった・失敗した（[ファームウェアの更新](#ファームウェアの更新updateservice)） | `TaskEvent.1.0.TaskStarted`・`TaskCompletedOK`・`TaskAborted` | `StatusChange` | その Task |
+| ファームウェアの版（か保留中の BIOS の版）が変わった | `ResourceEvent.1.3.ResourceChanged` | `ResourceUpdated` | `/redfish/v1/UpdateService/FirmwareInventory/BMC` か `/BIOS` |
 | `SubmitTestEvent` | 渡したもの | 渡したもの（省略すると `Other`） | 渡したもの |
 
 - Event 1つにレコードは1つ。`Context` は購読のもの（SSE には付かない）。電源状態は電源操作のすぐ後と1秒ごとに見るので、短い状態（`PowerCycle` 中の `Off` など）も出る。それより短いもの（ゲストが自分で再起動したなど）は出ない。
-- **絞り込み**（購読）：`RegistryPrefixes`（`ResourceEvent`・`Base`）、`ResourceTypes`（`ComputerSystem`・`VirtualMedia`・`SecureBoot`・`Session`・`SessionService`・`EventService`）、`MessageIds`（版は省いてもよい：`ResourceEvent.ResourcePoweredOn`）、`OriginResources`（`SubordinateResources: true` ならその下の資源も）、古い形の `EventTypes`。指定したものが全部合うものだけ届く。何も指定しなければ全部。知らない値は `400`。
+- **絞り込み**（購読）：`RegistryPrefixes`（`ResourceEvent`・`Base`・`TaskEvent`）、`ResourceTypes`（`ComputerSystem`・`VirtualMedia`・`SecureBoot`・`Session`・`SessionService`・`EventService`・`Task`・`SoftwareInventory`）、`MessageIds`（版は省いてもよい：`ResourceEvent.ResourcePoweredOn`）、`OriginResources`（`SubordinateResources: true` ならその下の資源も）、古い形の `EventTypes`。指定したものが全部合うものだけ届く。何も指定しなければ全部。知らない値は `400`。
 - **SSE** の `$filter`：`EventType`・`MessageId`・`OriginResource`・`RegistryPrefix`・`ResourceType` についての `<Property> eq '<value>'` を `and`・`or` でつないだもの（括弧は不可）。ほかの要求と同じく認証が要る。何も無いときは 15 秒ごとにコメント行を送る。
 - **届け方**：`Content-Type: application/json` と購読の `HttpHeaders` を付けた `POST`（`HttpHeaders` は書くだけで、`GET` では `[]`）。`2xx` なら成功。購読ごとに1つずつ順番に届ける。失敗したら `DeliveryRetryIntervalSeconds`（5）おきに `DeliveryRetryAttempts`（3）回送り直し、それでも駄目なら購読の `DeliveryRetryPolicy` で次のようにする：
   - `SuspendRetries`（既定）：そのイベントは捨て、購読は残したまま止める（`Status.State` が `Disabled`）。`POST .../Subscriptions/{id}/Actions/EventDestination.ResumeSubscription` まで何も送らず、その間のイベントは失われる。
@@ -1121,7 +1216,7 @@ curl -H "$T" -X DELETE http://localhost:8623/faults      # 全部消す
 
 `FAULTS` に JSON の配列を渡すと、起動時から効く（`FAULT_API_ADDR` なしでも効く）。例 `FAULTS='[{"kind":"graceful-ignored"}]'`。
 
-故障の形は `{"kind": ..., 条件..., "count": N, "durationSeconds": S}`。`count` は何回効いたら消えるか、`durationSeconds` は何秒で消えるか（どちらも省略で無限）。`target`（`redfish`・`ipmi`・`power`・`bmc`）は省略でき、`kind` から決まる。故障は足した順に照合し、最初に合ったものが効く。効くたびにログに `fault: <id> <kind> applied to <要求>` を出す。
+故障の形は `{"kind": ..., 条件..., "count": N, "durationSeconds": S}`。`count` は何回効いたら消えるか、`durationSeconds` は何秒で消えるか（どちらも省略で無限）。`target`（`redfish`・`ipmi`・`power`・`bmc`・`firmware`）は省略でき、`kind` から決まる。故障は足した順に照合し、最初に合ったものが効く。効くたびにログに `fault: <id> <kind> applied to <要求>` を出す。
 
 | kind | 効き目 | 条件・パラメータ |
 |------|--------|-------------------------|
@@ -1136,10 +1231,13 @@ curl -H "$T" -X DELETE http://localhost:8623/faults      # 全部消す
 | `power-action-ignored` | 電源操作に成功（204・cc 0x00）と返すが、何もしない（「BMC は受けたのに機械が動かない」） | `action` |
 | `graceful-ignored` | `GracefulShutdown` / `GracefulRestart`（IPMI の `power soft`）で ACPI の電源ボタンを VM に送らない（OS が止まらない機械）。`PoweringOff` のあと `GRACEFUL_TIMEOUT` で `On` に戻る | `action` |
 | `bmc-unavailable` | Redfish も IPMI も応えない（BMC の再起動中）。Redfish の接続は故障が終わるまで開いたままで、その後閉じる | `durationSeconds` |
+| `firmware-image-rejected` | `SimpleUpdate`・multipart push で受けたファームウェアのイメージを、壊れたものと同じように断る（`400`、`Update.1.0.VerificationFailed`、タスクは作らない） | `target` |
+| `firmware-update-fail` | 更新のタスクが `PercentComplete` `atPercent` で `Exception`（`Update.1.0.ApplyFailed`）になる。版は変わらない | `target`、`atPercent`（0〜100、既定 50） |
 
 - `method`: HTTP メソッド。省略で全部。`path`: パスの前方一致（`/redfish/v1/Systems`）、`*`・`?`・`[` を含めば glob（`/redfish/v1/Systems/*/Actions/*`。`*` は `/` に合わない）。省略で全部。例外は作らない（サービスルート・セッション・noVNC も含む）ので、必要なら `path` で絞る。
 - `netfn`・`cmd`: 数か文字列（`"0x06"`）。省略で全部。`includeSession: true` でなければ、セッションを開く・閉じるメッセージ（ASF ping、RMCP+ の Open Session・RAKP、Get Channel Auth Capabilities、Get Session Challenge、Activate Session、Set Session Privilege、Close Session、Get Channel Cipher Suites）には効かない。たとえば `ipmitool` はセッションを開けて、コマンドでタイムアウトする。`netfn`・`cmd` を指定すると、Open Session・RAKP と ASF ping には効かない（IPMI のコマンドではないので）。
 - `action`: 要求された Redfish の `ResetType`（`On`・`ForceOff`・`GracefulShutdown`・`ForceRestart`・`GracefulRestart`・`PowerCycle`・`ForceOn`・`Nmi`・`PushPowerButton`）。IPMI の chassis control は `ForceOff`（off）・`On`（on）・`PowerCycle`（cycle）・`ForceRestart`（reset）・`GracefulShutdown`（soft）・`Nmi`（diag）になる。省略で全部。
+- `firmware-*` の `target`：`BMC` か `BIOS` でそのファームウェアの更新だけに効く。省略（か `firmware`）で両方。
 - `FAULT_API_ADDR` か `FAULTS` を設定すると、Redfish は HTTP/1.1 だけになる（HTTP/2 の接続はまるごと閉じられないので）。
 
 ## Redfish エンドポイント
@@ -1155,7 +1253,7 @@ curl -H "$T" -X DELETE http://localhost:8623/faults      # 全部消す
 | GET | `/redfish/v1/SessionService/Sessions/{id}` | セッション |
 | DELETE | `/redfish/v1/SessionService/Sessions/{id}` | ログアウト（204） |
 | GET | `/redfish/v1/Systems` | システムコレクション |
-| GET | `/redfish/v1/Systems/1` | コンピュータシステム（Manufacturer、Model、SerialNumber、SKU（`VM_SKU` があれば）、Status、Processors、Storage、SimpleStorage、VirtualMedia、SerialConsole（IPMI SOL、プロセス管理モード）。Links: ManagedBy に Managers/1、Chassis に Chassis/1） |
+| GET | `/redfish/v1/Systems/1` | コンピュータシステム（Manufacturer、Model、SerialNumber、SKU（`VM_SKU` があれば）、BiosVersion、Status、Processors、Storage、SimpleStorage、VirtualMedia、SerialConsole（IPMI SOL、プロセス管理モード）。Links: ManagedBy に Managers/1、Chassis に Chassis/1） |
 | PATCH | `/redfish/v1/Systems/1` | ブートデバイス変更（`BootSourceOverrideTarget`（`UefiHttp` も）、`Boot.HttpBootUri`。「UEFI HTTP ブート」を参照） |
 | POST | `/redfish/v1/Systems/1/Actions/ComputerSystem.Reset` | 電源制御 |
 | GET/PATCH | `/redfish/v1/Systems/1/SecureBoot` | Secure Boot（`SecureBootEnable`・`SecureBootCurrentBoot`・`SecureBootMode`。プロセス管理モードの UEFI だけ、それ以外は `404`。「Secure Boot」を参照） |
@@ -1187,7 +1285,7 @@ curl -H "$T" -X DELETE http://localhost:8623/faults      # 全部消す
 | POST | `/redfish/v1/Systems/1/VirtualMedia/CD1/Actions/VirtualMedia.InsertMedia` | ISO を差す（204） |
 | POST | `/redfish/v1/Systems/1/VirtualMedia/CD1/Actions/VirtualMedia.EjectMedia` | メディア取り出し（204） |
 | GET | `/redfish/v1/Managers` | マネージャコレクション |
-| GET | `/redfish/v1/Managers/1` | BMC マネージャ（ManagerType は BMC、Manufacturer と Model は `qemu-bmc`、FirmwareVersion は qemu-bmc のバージョン、Status、SerialConsole（IPMI SOL、プロセス管理モード）。Links: ManagerForServers に Systems/1、ManagerInChassis に Chassis/1） |
+| GET | `/redfish/v1/Managers/1` | BMC マネージャ（ManagerType は BMC、Manufacturer と Model は `qemu-bmc`、FirmwareVersion は BMC のファームウェアの版、Status、SerialConsole（IPMI SOL、プロセス管理モード）。Links: ManagerForServers に Systems/1、ManagerInChassis に Chassis/1） |
 | GET | `/redfish/v1/Managers/1/VirtualMedia` | VirtualMedia コレクション（非推奨の場所。Systems/1/VirtualMedia と同じドライブ） |
 | GET | `/redfish/v1/Managers/1/VirtualMedia/CD1` | VirtualMedia リソース（ImageName は差しているときだけ） |
 | POST | `.../VirtualMedia.InsertMedia` | ISO を差す（コンテナ内のパスか HTTP(S) の URL、204） |
@@ -1200,6 +1298,12 @@ curl -H "$T" -X DELETE http://localhost:8623/faults      # 全部消す
 | GET/POST | `/redfish/v1/EventService/Subscriptions` | 購読の一覧・購読する（201、Location） |
 | GET/PATCH/DELETE | `/redfish/v1/EventService/Subscriptions/{id}` | 購読（PATCH は Context・DeliveryRetryPolicy、DELETE は 204） |
 | POST | `.../Subscriptions/{id}/Actions/EventDestination.SuspendSubscription`・`.../ResumeSubscription` | 届けるのを止める・再開する（204） |
+| GET | `/redfish/v1/UpdateService` | 更新サービス（FirmwareInventory、SimpleUpdate、MultipartHttpPushUri）。[ファームウェアの更新](#ファームウェアの更新updateservice) を参照 |
+| GET | `/redfish/v1/UpdateService/FirmwareInventory`・`.../FirmwareInventory/BMC`・`.../BIOS` | ファームウェアの在庫：Version、Updateable、Status（BIOS の版が保留中は `StandbyOffline`）、RelatedItem に Managers/1・Systems/1 |
+| POST | `/redfish/v1/UpdateService/Actions/UpdateService.SimpleUpdate` | http(s) の `ImageURI` から更新（202 とタスクモニタ。壊れたイメージは 400） |
+| POST | `/redfish/v1/UpdateService/upload` | multipart HTTP push（`UpdateParameters`・`UpdateFile`。202 とタスクモニタ） |
+| GET | `/redfish/v1/TaskService`・`.../Tasks`・`.../Tasks/{id}` | タスクサービス・タスク（TaskState、TaskStatus、PercentComplete、Messages、StartTime、EndTime） |
+| GET | `/redfish/v1/TaskService/TaskMonitors/{id}` | タスクモニタ：実行中は 202、終わったら 200（どちらも本文は Task） |
 | GET | `/novnc/` | noVNC UI へリダイレクト |
 | GET | `/novnc/vnc.html` | ブラウザ VNC コンソール |
 | GET | `/websockify` | WebSocket-to-VNC プロキシ |
@@ -1271,6 +1375,9 @@ curl -H "$T" -X DELETE http://localhost:8623/faults      # 全部消す
 | `VMEDIA_TIMEOUT` | `600` | ダウンロード中（VirtualMedia・UEFI HTTP ブートのイメージ）に電源オン・リセットが来たとき、終わるまで待つ秒数（過ぎたら ISO 無しで起動） |
 | `EVENT_INSECURE_TLS` | `true` | https の購読先へイベントを POST するとき証明書を検証しない。[イベント](#イベントeventservice) を参照 |
 | `BIOS_ATTRIBUTES` | （空） | Redfish の BIOS の属性の既定値を変える JSON の object（例 `{"PowerProfile":"Balanced"}`）。値は `VMEDIA_DIR/bios-settings.json` に残す。「BIOS の設定」を参照 |
+| `BMC_FIRMWARE_VERSION` | （qemu-bmc の版） | BMC のファームウェアの初めの版（`FirmwareInventory/BMC`、`Managers/1` の `FirmwareVersion`）。[ファームウェアの更新](#ファームウェアの更新updateservice) を参照 |
+| `BIOS_FIRMWARE_VERSION` | `QBMC-BIOS-1.0.0` | BIOS のファームウェアの初めの版（`FirmwareInventory/BIOS`、`Systems/1` の `BiosVersion`）。更新で入れた版は `VMEDIA_DIR/firmware.json` に残り、この 2 つより強い |
+| `FIRMWARE_UPDATE_SECONDS` | `10` | 模擬のファームウェア更新のタスクが 0 から 100 % まで進む秒数 |
 | `FAULT_API_ADDR` | (空、無効) | 故障の注入の API の待ち受けアドレス（TLS なしの HTTP。例 `:8623`）。[故障の注入](#故障の注入) を参照 |
 | `FAULT_API_TOKEN` | (空) | 故障の API に要る Bearer トークン。空なら認証なし |
 | `FAULTS` | (空) | 起動時から効く故障の JSON の配列 |
@@ -1344,6 +1451,7 @@ internal/
   fault/                       # 故障の注入（故障の API、Redfish・IPMI・電源の故障）
   serial/                      # シリアルコンソールの多重化（QEMU のソケット、TCP の接続、最近の出力）
   bios/                        # BIOS の属性（保留中の設定、ファイルへの保存）
+  firmware/                    # 模擬のファームウェアの版（イメージの検査、保留中の BIOS、ファイルへの保存）
 docker/
   Dockerfile                   # マルチステージビルド (Go ビルダー + Debian ランタイム)
   entrypoint.sh                # 環境変数 → QEMU 引数変換

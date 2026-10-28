@@ -18,6 +18,7 @@ import (
 	"github.com/tjst-t/qemu-bmc/internal/bmc"
 	"github.com/tjst-t/qemu-bmc/internal/config"
 	"github.com/tjst-t/qemu-bmc/internal/fault"
+	"github.com/tjst-t/qemu-bmc/internal/firmware"
 	"github.com/tjst-t/qemu-bmc/internal/ipmi"
 	"github.com/tjst-t/qemu-bmc/internal/machine"
 	"github.com/tjst-t/qemu-bmc/internal/qemu"
@@ -50,6 +51,8 @@ func main() {
 	var identity qemu.SMBIOS
 	var serialConsole *serial.Mux // nil in legacy mode
 	var biosStore *bios.Store
+	// Simulated BMC and BIOS firmware versions (UpdateService)
+	firmwareStore := startFirmware(cfg)
 
 	if len(qemuArgs) > 0 {
 		// Process management mode
@@ -115,8 +118,10 @@ func main() {
 			log.Printf("Secure Boot enabled (VM_SECURE_BOOT)")
 		}
 
-		// Before the first power on: pending BIOS settings apply at boot
+		// Before the first power on: pending BIOS settings and BIOS
+		// firmware apply at boot
 		biosStore = startBios(cfg, m)
+		setBootHook(m, biosStore, firmwareStore)
 
 		if cfg.PowerOnAtStart {
 			log.Printf("Starting QEMU: %s %v", cfg.QEMUBinary, cmdArgs)
@@ -138,6 +143,7 @@ func main() {
 
 		m = machine.New(qmpClient)
 		biosStore = startBios(cfg, m)
+		setBootHook(m, biosStore, firmwareStore)
 		if cfg.VMSecureBoot {
 			log.Printf("WARN: VM_SECURE_BOOT is ignored in legacy mode: %v", machine.ErrSecureBootUnsupported)
 		}
@@ -236,6 +242,14 @@ func main() {
 	redfishServer.SetSystemUUID(systemUUID)
 	redfishServer.SetFirmwareVersion(version)
 	redfishServer.SetBios(biosStore)
+	redfishServer.SetFirmware(firmwareStore)
+	redfishServer.SetFirmwareFaults(faults)
+	redfishServer.SetFirmwareUpdateDuration(cfg.FirmwareUpdateDuration)
+	// SimpleUpdate images are downloaded like VirtualMedia images
+	redfishServer.SetFirmwareDownload(firmware.DownloadOptions{
+		InsecureTLS: cfg.VMediaInsecureTLS,
+		Timeout:     cfg.VMediaTimeout,
+	})
 	if serialConsole != nil {
 		redfishServer.SetSerialLog(serialConsole)
 		if port, err := strconv.Atoi(cfg.IPMIPort); err == nil {
@@ -365,9 +379,30 @@ func startBios(cfg *config.Config, m *machine.Machine) *bios.Store {
 		}
 		return "Disabled"
 	})
-	m.SetBootHook(func() { store.Apply() })
 	log.Printf("BIOS attributes: %s", cfg.BiosFile())
 	return store
+}
+
+// startFirmware loads the simulated firmware versions: BMC_FIRMWARE_VERSION
+// (default: the qemu-bmc version) and BIOS_FIRMWARE_VERSION, overridden by
+// the versions installed by updates (saved in FirmwareFile).
+func startFirmware(cfg *config.Config) *firmware.Store {
+	bmcVersion := cfg.BMCFirmwareVersion
+	if bmcVersion == "" {
+		bmcVersion = version
+	}
+	store := firmware.NewStore(cfg.FirmwareFile(), bmcVersion, cfg.BIOSFirmwareVersion)
+	log.Printf("Firmware: BMC %s, BIOS %s (%s)", store.Version(firmware.TargetBMC), store.Version(firmware.TargetBIOS), cfg.FirmwareFile())
+	return store
+}
+
+// setBootHook applies the pending BIOS settings and BIOS firmware each time
+// the VM boots.
+func setBootHook(m *machine.Machine, biosStore *bios.Store, fw *firmware.Store) {
+	m.SetBootHook(func() {
+		biosStore.Apply()
+		fw.Apply()
+	})
 }
 
 // startSerial sets up the serial console multiplexer (process management

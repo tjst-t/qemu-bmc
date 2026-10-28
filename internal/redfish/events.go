@@ -54,8 +54,9 @@ var eventTypes = []string{"StatusChange", "ResourceUpdated", "ResourceAdded", "R
 
 // The registries and resource types the events come from
 var (
-	eventRegistryPrefixes = []string{"ResourceEvent", "Base"}
-	eventResourceTypes    = []string{"ComputerSystem", "VirtualMedia", "SecureBoot", "Session", "SessionService", "EventService"}
+	eventRegistryPrefixes = []string{"ResourceEvent", "Base", "TaskEvent"}
+	eventResourceTypes    = []string{"ComputerSystem", "VirtualMedia", "SecureBoot", "Session", "SessionService", "EventService",
+		"Task", "SoftwareInventory"}
 )
 
 var deliveryRetryPolicies = []string{"TerminateAfterRetries", "SuspendRetries", "RetryForever", "RetryForeverWithBackoff"}
@@ -541,6 +542,10 @@ func resourceTypeOf(uri string) string {
 		return "EventService"
 	case n == 3 && segs[0] == "EventService" && segs[1] == "Subscriptions":
 		return "EventDestination"
+	case n == 3 && segs[0] == "TaskService" && segs[1] == "Tasks":
+		return "Task"
+	case n == 3 && segs[0] == "UpdateService" && segs[1] == "FirmwareInventory":
+		return "SoftwareInventory"
 	}
 	return ""
 }

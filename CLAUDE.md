@@ -22,6 +22,7 @@ internal/
   fault/                       # Fault injection: store, fault API, Redfish middleware, IPMI/power hooks
   serial/                      # Serial console mux (Console interface, QEMU UNIX socket, TCP server, ring buffer)
   bios/                        # BIOS attributes (definitions, pending settings, ResetBios, JSON file)
+  firmware/                    # Simulated BMC/BIOS firmware versions (image check, download, pending BIOS, JSON file)
 docker/
   Dockerfile                   # Multi-stage build (Go builder + Debian runtime)
   entrypoint.sh                # Environment variables → QEMU args conversion
@@ -32,6 +33,7 @@ tests/                         # Bash-based container integration tests (142 tes
   test_*.sh                    # Test categories (container, ipmi, redfish, power, boot, fault, events, serial, sol, bios, etc.)
   sol_console.py               # expect-like pty driver for ipmitool sol activate (test_sol.sh)
   bios_sushy.py                # sushy client for test_bios.sh (attributes, set, reset, registry)
+  update_sushy.py              # sushy client for test_update.sh (firmware inventory, simple_update)
   ironic/run.sh                # Ironic end-to-end deploy test (make ironic-test; manual, not in CI)
 containerlab/
   example.yml                  # 2 nodes booting their own disk, BMC published on the host
@@ -129,6 +131,9 @@ make ironic-test                       # or IRONIC_FLOWS=redfish-vmedia (redfish
 | `VMEDIA_INSECURE_TLS` | `true` | Skip certificate verification for https VirtualMedia downloads |
 | `VMEDIA_TIMEOUT` | `600` | Seconds a power on/reset (Redfish and IPMI) waits for a VirtualMedia (or, for UefiHttp, HttpBootUri) download in progress |
 | `EVENT_INSECURE_TLS` | `true` | Skip certificate verification when POSTing Redfish events to https subscription destinations |
+| `BMC_FIRMWARE_VERSION` | (qemu-bmc version) | Initial BMC firmware version: FirmwareInventory/BMC, Managers/1 FirmwareVersion (`startFirmware`) |
+| `BIOS_FIRMWARE_VERSION` | `QBMC-BIOS-1.0.0` | Initial BIOS firmware version: FirmwareInventory/BIOS, Systems/1 BiosVersion. Updated versions saved to `<VMEDIA_DIR>/firmware.json` (`Config.FirmwareFile`) win over both |
+| `FIRMWARE_UPDATE_SECONDS` | `10` | Seconds a simulated update task takes from 0 to 100 % |
 | `BIOS_ATTRIBUTES` | (empty) | JSON object replacing the defaults of writable Bios attributes (`bios.NewStore`; invalid → exit). State saved to `<VMEDIA_DIR>/bios-settings.json` (`Config.BiosFile`, both modes); saved values win over the defaults |
 | `FAULT_API_ADDR` | (empty, disabled) | Fault injection API listen address (plain HTTP, e.g. `:8623`), see Fault Injection below |
 | `FAULT_API_TOKEN` | (empty) | Bearer token required by the fault API (none if empty) |
@@ -156,12 +161,12 @@ make ironic-test                       # or IRONIC_FLOWS=redfish-vmedia (redfish
 
 | Method | Path | Description |
 |--------|------|-------------|
-| GET | `/redfish`, `/redfish/v1` | Version document, ServiceRoot (no auth; root has SessionService, EventService, Registries and Links.Sessions) |
+| GET | `/redfish`, `/redfish/v1` | Version document, ServiceRoot (no auth; root has SessionService, EventService, Registries, Tasks, UpdateService (when `SetFirmware`) and Links.Sessions) |
 | GET/PATCH | `/redfish/v1/SessionService` | SessionTimeout (default 1800 s, 30–86400) |
 | GET/POST | `/redfish/v1/SessionService/Sessions` | Session collection / log in (POST needs no auth; 201 with X-Auth-Token and Location; 401 bad credentials; 503 over 64 sessions) |
 | GET/DELETE | `/redfish/v1/SessionService/Sessions/{id}` | Session / log out (204). Sessions are in memory and expire after SessionTimeout idle |
 | GET | `/redfish/v1/Systems` | System collection |
-| GET | `/redfish/v1/Systems/1` | Computer system (`#ComputerSystem.v1_13_0`: Manufacturer, Model, SerialNumber, SKU (VM_* identity), PowerState, Boot, MemorySummary, ProcessorSummary, Processors, Storage, SimpleStorage, EthernetInterfaces, VirtualMedia → Systems/1/VirtualMedia, SecureBoot (UEFI process mode only), Bios (when SetBios), SerialConsole (process mode: MaxConcurrentSessions 1, IPMI {ServiceEnabled, Port = IPMI_PORT, HotKeySequenceDisplay}), Actions, Status, Links.ManagedBy → Managers/1, Links.Chassis → Chassis/1) |
+| GET | `/redfish/v1/Systems/1` | Computer system (`#ComputerSystem.v1_13_0`: Manufacturer, Model, SerialNumber, SKU (VM_* identity), BiosVersion (BIOS firmware, when SetFirmware), PowerState, Boot, MemorySummary, ProcessorSummary, Processors, Storage, SimpleStorage, EthernetInterfaces, VirtualMedia → Systems/1/VirtualMedia, SecureBoot (UEFI process mode only), Bios (when SetBios), SerialConsole (process mode: MaxConcurrentSessions 1, IPMI {ServiceEnabled, Port = IPMI_PORT, HotKeySequenceDisplay}), Actions, Status, Links.ManagedBy → Managers/1, Links.Chassis → Chassis/1) |
 | GET | `/redfish/v1/Systems/1/EthernetInterfaces` | NIC collection (one per guest NIC, command-line order) |
 | GET | `/redfish/v1/Systems/1/EthernetInterfaces/{n}` | NIC (MACAddress, LinkStatus: LinkUp while the VM runs) |
 | GET | `/redfish/v1/Systems/1/Processors` | Processor collection: CPU1, or no members when the CPU count (SystemInfo.CPUs) is 0 |
@@ -188,7 +193,7 @@ make ironic-test                       # or IRONIC_FLOWS=redfish-vmedia (redfish
 | POST | `/redfish/v1/Systems/1/SecureBoot/Actions/SecureBoot.ResetKeys` | `ResetKeysType` `ResetAllKeysToDefault` only (else 400): deletes the secboot VARS, recopied from the template at the next QEMU start (204) |
 | POST | `/redfish/v1/Systems/1/Actions/ComputerSystem.Reset` | Power control: On, ForceOff, GracefulShutdown, ForceRestart, GracefulRestart, PowerCycle (process mode: QEMU stopped and restarted so boot override/VirtualMedia apply; legacy: system_reset; off: On), ForceOn (= On), Nmi (QMP inject-nmi; 409 when off; does not end a graceful action), PushPowerButton (off: On, on: GracefulShutdown) |
 | GET | `/redfish/v1/Managers` | Manager collection |
-| GET | `/redfish/v1/Managers/1` | BMC manager (`#Manager.v1_7_0`, the first with Manufacturer; ManagerType BMC, Manufacturer/Model `qemu-bmc`, FirmwareVersion = qemu-bmc version via SetFirmwareVersion, Status, SerialConsole (process mode, `Server.SetIPMISerialConsole`: ServiceEnabled, MaxConcurrentSessions 1, ConnectTypesSupported ["IPMI"]; Manager.SerialConsole is deprecated from v1_10, so the version stays), Links.ManagerForServers → Systems/1, Links.ManagerInChassis → Chassis/1) |
+| GET | `/redfish/v1/Managers/1` | BMC manager (`#Manager.v1_7_0`, the first with Manufacturer; ManagerType BMC, Manufacturer/Model `qemu-bmc`, FirmwareVersion = BMC firmware version (SetFirmware; else SetFirmwareVersion), Status, SerialConsole (process mode, `Server.SetIPMISerialConsole`: ServiceEnabled, MaxConcurrentSessions 1, ConnectTypesSupported ["IPMI"]; Manager.SerialConsole is deprecated from v1_10, so the version stays), Links.ManagerForServers → Systems/1, Links.ManagerInChassis → Chassis/1) |
 | GET | `/redfish/v1/Managers/1/VirtualMedia` | VirtualMedia collection (deprecated location, kept for gofish/bmclib) |
 | GET | `/redfish/v1/Managers/1/VirtualMedia/CD1` | VirtualMedia resource (ImageName omitted when nothing is inserted; Image stays as "") |
 | POST | `.../VirtualMedia/CD1/Actions/VirtualMedia.InsertMedia` | Insert ISO (container path `/...` or `file://`, or http(s) URL downloaded in the background with optional UserName/Password Basic auth; 204, 400 if missing). Kept while off, attached at QEMU start; power on/reset during a download runs once it ends (reports PoweringOn meanwhile), a failed download ejects |
@@ -198,6 +203,12 @@ make ironic-test                       # or IRONIC_FLOWS=redfish-vmedia (redfish
 | GET | `/redfish/v1/EventService/SSE` | text/event-stream `id: <EventId>` / `data: <Event JSON>` (no Context), `: keep-alive` every 15 s. `$filter`: `Prop eq 'v'` on EventType/MessageId/OriginResource/RegistryPrefix/ResourceType with and/or, no parentheses (`parseSSEFilter`); else 400 |
 | GET/POST | `/redfish/v1/EventService/Subscriptions` | `#EventDestination.v1_13_0`. POST: Destination http(s) + Protocol Redfish required; Context, EventTypes, RegistryPrefixes, ResourceTypes (values checked, 400), MessageIds (version optional), OriginResources (+SubordinateResources), HttpHeaders (sent, GET returns []), DeliveryRetryPolicy (default SuspendRetries). 201 + Location. Max 32 (503). Memory only |
 | GET/PATCH/DELETE | `/redfish/v1/EventService/Subscriptions/{id}` | PATCH Context, DeliveryRetryPolicy only; Status.State Disabled while suspended. Actions `EventDestination.SuspendSubscription` / `ResumeSubscription` (204) |
+| GET | `/redfish/v1/UpdateService` | `#UpdateService.v1_8_0` (when `Server.SetFirmware`; else 404): ServiceEnabled, FirmwareInventory, MultipartHttpPushUri `/redfish/v1/UpdateService/upload`, MaxImageSizeBytes, Actions `#UpdateService.SimpleUpdate` (TransferProtocol@Redfish.AllowableValues HTTP/HTTPS). See Firmware updates below |
+| GET | `/redfish/v1/UpdateService/FirmwareInventory[/BMC\|/BIOS]` | `#SoftwareInventoryCollection` / `#SoftwareInventory.v1_2_0` (Version, Updateable true, Manufacturer, SoftwareId `QBMC-FW-<target>`, Status, RelatedItem Managers/1 / Systems/1). Pending BIOS version: Status.State `StandbyOffline`, pending version in Description |
+| POST | `/redfish/v1/UpdateService/Actions/UpdateService.SimpleUpdate` | ImageURI (http(s); TransferProtocol HTTP/HTTPS only, gives the scheme to a scheme-less URI, else ignored: sushy sends HTTP for https), Targets, Username/Password. Downloads synchronously (`firmware.Download`, VMEDIA_INSECURE_TLS / VMEDIA_TIMEOUT), then 202 + Location (task monitor) + Task body; broken image / Targets mismatch / firmware-image-rejected → 400 `Update.1.0.VerificationFailed`; download error → 400 `Update.1.0.TransferFailed` |
+| POST | `/redfish/v1/UpdateService/upload` | Multipart push: `UpdateParameters` (optional JSON: Targets, `@Redfish.OperationApplyTime` Immediate/OnReset), `UpdateFile` (required; read streaming by `firmware.ReadImage`). Same answers as SimpleUpdate |
+| GET | `/redfish/v1/TaskService`, `.../Tasks`, `.../Tasks/{id}` | `#TaskService.v1_1_0` (CompletedTaskOverWritePolicy Oldest, LifeCycleEventOnTaskStateChange), `#TaskCollection`, `#Task.v1_4_3` (TaskState, TaskStatus, PercentComplete, StartTime, EndTime, TaskMonitor, Messages). Always 200 (Ironic reads TaskState) |
+| GET | `/redfish/v1/TaskService/TaskMonitors/{id}` | 202 + Location + Retry-After 1 + Task while New/Running, then 200 + Task |
 | GET | `/redfish/v1/Chassis` | Chassis collection |
 | GET | `/redfish/v1/Chassis/1` | Chassis resource (PowerState same as Systems/1 incl. PoweringOff/PoweringOn, Manufacturer/Model/SerialNumber same as Systems/1, Status, Links.ComputerSystems → Systems/1, Links.ManagedBy → Managers/1) |
 
@@ -251,6 +262,14 @@ RMCP+ session packets (IPMI and SOL) go through `openSessionPayload` (session mu
 - Applied by `machine.SetBootHook` (main `startBios`, set before POWER_ON_AT_START): `Machine.booting()` runs under resetMu right before QEMU `Start` (process On, also from ForceRestart restart / PowerCycle / GracefulRestart / QEMU gone) and before `system_reset` (process ForceRestart, legacy On from off / ForceRestart / PowerCycle). Guest-initiated reboots are not seen.
 - Container tests: `tests/test_bios.sh` (category `bios`; image `qemu-bmc-sushy-test` = python:3.12-slim + pip sushy, built once, `--network host`, driven by `tests/bios_sushy.py`; BIOS_ATTRIBUTES defaults, registry, invalid values 400, applied at ForceOff/On and ForceRestart, kept in a new container on the VMEDIA_DIR volume, reset_bios + PowerCycle). Ironic: `tests/ironic/run.sh` flow `redfish-bios` (bios setting list, manual cleaning `--disable-ramdisk` apply_configuration ProcVirtualization=Disabled then factory_reset, no "BIOS settings are not supported" in the Ironic log).
 
+## Firmware updates
+
+- `internal/firmware` (`firmware.Store`): versions of `BMC` and `BIOS` (defaults from main `startFirmware`), `Install` (BMC: version at once; BIOS: `Pending`, replaced by a newer one), `Apply` (pending → version; run by the boot hook next to `bios.Store.Apply`, main `setBootHook`, i.e. the same moments as BIOS settings), `OnChange` hooks (Redfish `ResourceChanged` on FirmwareInventory/<target>). Saved (tmp + rename) as `{"Versions", "Pending"}` with only updated versions, so the file wins over the env; invalid entries dropped on load.
+- Images (`ReadImage`): first line `QBMC-FW <BMC|BIOS> <version>` (exactly 3 space-separated fields, version 1-64 printable ASCII without spaces), ended by `\n` (`\r` trimmed) or EOF, max 256 bytes; any bytes after; whole image ≤ `MaxImageBytes` (256 MiB) — else `ErrInvalidImage`.
+- Tasks (`internal/redfish/tasks.go`, `taskService`): memory only, max 32 (oldest finished dropped, all running → 503). `runUpdate` (handler_update_service.go): Running, PercentComplete +1 every `FIRMWARE_UPDATE_SECONDS`/100, then `Install`. Messages (Update.1.0): TargetDetermined, InstallingOnComponent, then UpdateSuccessful (BMC) / AwaitToActivate + Resolution "next system boot" (BIOS) / ApplyFailed (fault). State changes publish `TaskEvent.1.0.TaskStarted` / `TaskCompletedOK` / `TaskAborted` (EventType StatusChange, origin the Task, resource type Task).
+- sushy `simple_update` uses the 202 body's `@odata.id` (the Task) as its monitor, so its `wait()` ends at once; poll `get_task().task_state` (tests/update_sushy.py), as Ironic does.
+- Container tests: `tests/test_update.sh` (category `update`; python:3.12-slim image server on its own docker network, addressed by IP; SimpleUpdate + multipart push for BMC and BIOS (BIOS applied at ForceOff/On and ForceRestart), broken images, both faults, sushy simple_update, versions and a pending BIOS kept in a new container on the VMEDIA_DIR volume).
+
 ## VM IPMI (In-Band)
 
 Supports QEMU's `ipmi-bmc-extern` device for in-band IPMI communication from the guest OS via KCS interface. This enables MaaS commissioning scripts to configure BMC users, LAN settings, and channel access from within the VM.
@@ -301,8 +320,10 @@ Fault JSON: `{"kind", "target" (optional, derived from kind), conditions..., "co
 | `power-action-ignored` | 204 / cc 0, nothing done | `action` |
 | `graceful-ignored` | no ACPI powerdown (`machine.SetGracefulFilter`), GRACEFUL_TIMEOUT behaviour unchanged | `action` |
 | `bmc-unavailable` | Redfish held open until the fault ends then closed, IPMI dropped (session messages too) | — |
+| `firmware-image-rejected` | received firmware image rejected like a broken one (400, no task) via `Store.RejectFirmwareImage` | `target` BMC/BIOS (omitted or `firmware` = both) |
+| `firmware-update-fail` | update task → Exception at `atPercent` (default 50, 0-100), version unchanged; taken when the task is created (`Store.FirmwareUpdateFailure`) | `target`, `atPercent` |
 
-Wiring (`cmd/qemu-bmc/main.go`): `faults.Middleware` wraps the Redfish handler (Redfish then HTTP/1.1 only so connections can be hijacked); `ipmi.Server.SetFaults`; `faultMachine` wraps `*machine.Machine` so Redfish/IPMI (and VM IPMI) `Reset` go through `Store.Reset`. Container tests: `tests/test_fault.sh` (category `fault`).
+Wiring (`cmd/qemu-bmc/main.go`): `faults.Middleware` wraps the Redfish handler (Redfish then HTTP/1.1 only so connections can be hijacked); `ipmi.Server.SetFaults`; `redfish.Server.SetFirmwareFaults`; `faultMachine` wraps `*machine.Machine` so Redfish/IPMI (and VM IPMI) `Reset` go through `Store.Reset`. Container tests: `tests/test_fault.sh` (category `fault`).
 
 ## Serial Console
 
@@ -315,7 +336,7 @@ Wiring (`cmd/qemu-bmc/main.go`): `faults.Middleware` wraps the Redfish handler (
 ## Events
 
 - `machine.Machine.SubscribeEvents()` (`internal/machine/events.go`): small bus, buffered channels (64, drop when full). `EventPowerState` is published by `checkPower` (synchronously after each Reset, setTransition, process ForceOff/start, so Off within a PowerCycle is seen; and by a 1 s poller running while there are subscribers, catching guest power off / QEMU exit / graceful timeout). The Reset-start clearing of the transition does not check, so a PoweringOff ended by ForceOff is PoweringOff → Off. `EventResourceChanged` for Boot (SetBootOverride, ConsumeBootOnce when Once, HTTP boot URI change), VirtualMedia (insert/eject/failed download), SecureBoot.
-- Redfish (`internal/redfish/events.go`): `Server.SetEventSource(m)` (main) converts them; MessageIds `ResourceEvent.1.3.*` (ResourcePoweredOn/Off, ResourcePoweringOn/Off with arg `/redfish/v1/Systems/1`, ResourceChanged; sessions ResourceCreated/ResourceRemoved), EventType StatusChange / ResourceUpdated / ResourceAdded / ResourceRemoved, origin Systems/1, Systems/1/VirtualMedia/CD1, Systems/1/SecureBoot, the session, SessionService, EventService.
+- Redfish (`internal/redfish/events.go`): `Server.SetEventSource(m)` (main) converts them (firmware: TaskEvent and FirmwareInventory ResourceChanged, see Firmware updates); MessageIds `ResourceEvent.1.3.*` (ResourcePoweredOn/Off, ResourcePoweringOn/Off with arg `/redfish/v1/Systems/1`, ResourceChanged; sessions ResourceCreated/ResourceRemoved), EventType StatusChange / ResourceUpdated / ResourceAdded / ResourceRemoved, origin Systems/1, Systems/1/VirtualMedia/CD1, Systems/1/SecureBoot, the session, SessionService, EventService.
 - Delivery: one goroutine per subscription (queue 256), POST JSON `#Event.v1_7_0` with one record, 2xx = success, 10 s timeout, 1 + DeliveryRetryAttempts tries `DeliveryRetryIntervalSeconds` apart (`retryUnit`, ms in tests). Then SuspendRetries → suspended (events dropped until ResumeSubscription), TerminateAfterRetries → deleted; RetryForever(WithBackoff) retries until delivered (backoff doubles, max 10 min).
 - Container tests: `tests/test_events.sh` (category `events`; python:3.12-slim receiver on its own docker network, SSE with curl -N).
 

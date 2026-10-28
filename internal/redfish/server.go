@@ -2,8 +2,10 @@ package redfish
 
 import (
 	"net/http"
+	"time"
 
 	"github.com/gorilla/mux"
+	"github.com/tjst-t/qemu-bmc/internal/firmware"
 	"github.com/tjst-t/qemu-bmc/internal/machine"
 	"github.com/tjst-t/qemu-bmc/internal/novnc"
 	"github.com/tjst-t/qemu-bmc/internal/qmp"
@@ -44,6 +46,11 @@ type Server struct {
 	serialLog    SerialLog
 	bios         BiosStore // nil = no Systems/1/Bios
 	solPort      int       // IPMI port SOL is served on, 0 if none
+	tasks        *taskService
+	fw           FirmwareStore // nil = no UpdateService
+	fwFaults     FirmwareFaults
+	fwDownload   firmware.DownloadOptions
+	fwDuration   time.Duration
 }
 
 // UserStore authenticates BMC users in addition to the configured
@@ -85,6 +92,9 @@ func NewServer(m MachineInterface, user, pass, vncAddr string) *Server {
 		novncHandler: novnc.NewHandler(vncAddr),
 		sessions:     newSessionStore(),
 		events:       newEventService(),
+		tasks:        newTaskService(),
+		fwDownload:   firmware.DownloadOptions{InsecureTLS: true, Timeout: machine.DefaultMediaTimeout},
+		fwDuration:   DefaultFirmwareUpdateDuration,
 	}
 	s.setupRoutes()
 	return s
@@ -102,7 +112,7 @@ func (s *Server) SetUserStore(users UserStore) {
 }
 
 // SetFirmwareVersion sets the qemu-bmc version reported as the Managers/1
-// FirmwareVersion.
+// FirmwareVersion when no firmware store is set (SetFirmware).
 func (s *Server) SetFirmwareVersion(version string) {
 	s.firmware = version
 }
@@ -146,6 +156,19 @@ func (s *Server) setupRoutes() {
 		s.router.HandleFunc(sub+p, s.handleDeleteSubscription).Methods("DELETE")
 		s.router.HandleFunc(sub+"/Actions/EventDestination.SuspendSubscription"+p, s.handleSuspendSubscription).Methods("POST")
 		s.router.HandleFunc(sub+"/Actions/EventDestination.ResumeSubscription"+p, s.handleResumeSubscription).Methods("POST")
+	}
+
+	// Firmware updates and their tasks
+	for _, p := range []string{"", "/"} {
+		s.router.HandleFunc(updateServicePath+p, s.handleGetUpdateService).Methods("GET")
+		s.router.HandleFunc(firmwareInventoryPath+p, s.handleFirmwareInventoryCollection).Methods("GET")
+		s.router.HandleFunc(firmwareInventoryPath+"/{fwid}"+p, s.handleGetFirmwareInventory).Methods("GET")
+		s.router.HandleFunc(simpleUpdatePath+p, s.handleSimpleUpdate).Methods("POST")
+		s.router.HandleFunc(multipartPushPath+p, s.handleMultipartPush).Methods("POST")
+		s.router.HandleFunc(taskServicePath+p, s.handleGetTaskService).Methods("GET")
+		s.router.HandleFunc(tasksPath+p, s.handleTaskCollection).Methods("GET")
+		s.router.HandleFunc(tasksPath+"/{taskid}"+p, s.handleGetTask).Methods("GET")
+		s.router.HandleFunc(taskMonitorsPath+"/{taskid}"+p, s.handleTaskMonitor).Methods("GET")
 	}
 
 	// Systems
