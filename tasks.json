@@ -1189,6 +1189,27 @@
       "updatedAt": "2026-10-28T02:38:44.301Z",
       "closedAt": null,
       "extra": {}
+    },
+    {
+      "id": "redfish-updateservice-firmwareinventory",
+      "number": 54,
+      "kind": "task",
+      "title": "Redfish UpdateService（模擬のファームウェア更新：FirmwareInventory・SimpleUpdate・multipart push・Task）",
+      "status": "ready",
+      "parent": null,
+      "dependsOn": [],
+      "milestone": null,
+      "priority": "normal",
+      "labels": [],
+      "body": "## なぜ\nRedfish でファームウェアの版を観測し、更新する管理ツールを、本物の機械なしで試せるようにする。成功する更新と、失敗する更新の両方を起こせるようにする。\n\n## 仕様\n### 版と在庫\n- `/redfish/v1/UpdateService`（ServiceRoot から Link）：ServiceEnabled、FirmwareInventory、Actions `#UpdateService.SimpleUpdate`、`MultipartHttpPushUri`、HttpPushUriOptions は不要。\n- `/redfish/v1/UpdateService/FirmwareInventory`（コレクション）と `/FirmwareInventory/BMC`・`/FirmwareInventory/BIOS`（SoftwareInventory：Version、Updateable=true、Status、Id、Name、`RelatedItem`＝Managers/1・Systems/1）。\n- 初期の版は環境変数：`BMC_FIRMWARE_VERSION`（既定は qemu-bmc の版）、`BIOS_FIRMWARE_VERSION`（既定は固定の文字列、例 `QBMC-BIOS-1.0.0`）。Managers/1 の FirmwareVersion と Systems/1 の BiosVersion も同じ値を出す。\n- 更新で変わった版はファイルに残す（#49 Bios と同じ VMEDIA_DIR、例 `firmware.json`）。起こし直しても残る。ファイルの値が環境変数の値より勝つ。\n\n### 更新の受け口\n- SimpleUpdate：`ImageURI`（http(s)）、`TransferProtocol`（HTTP/HTTPS、省略可）、`Targets`（FirmwareInventory/BMC か BIOS の URI。省略時はイメージの中身から決める）、Username/Password。イメージは VirtualMedia と同じ仕組み（VMEDIA_INSECURE_TLS・VMEDIA_TIMEOUT）で落とす。\n- multipart HTTP push：`POST /redfish/v1/UpdateService/upload`（MultipartHttpPushUri）。部品は `UpdateParameters`（JSON：Targets、`@Redfish.OperationApplyTime`）と `UpdateFile`。\n- どちらも 202 Accepted と `Location`（TaskMonitor）を返す。\n\n### イメージの形（模擬）\n- 中身は qemu-bmc が決めた小さな形にする。例：1行目が `QBMC-FW <target> <version>`（target は BMC か BIOS）、そのあとは任意のバイト。足りない・形が違う・target が Targets と合わないものは「壊れたイメージ」として断る。\n- README に、試験用のイメージの作り方を書く（`printf 'QBMC-FW BIOS 2.0.0\\n' > bios.img`）。\n\n### Task\n- `/redfish/v1/TaskService` と `/TaskService/Tasks/{id}`（Task：TaskState New→Running→Completed / Exception、PercentComplete、Messages、StartTime・EndTime）、`/TaskService/TaskMonitors/{id}`（実行中は 202、終わったら Task の内容で 200）。タスクはメモリだけで、件数に上限。\n- 進み方は模擬：数秒（`FIRMWARE_UPDATE_SECONDS`、既定 10）で 0→100 に進む。\n- 終わったとき：\n  - BMC：すぐ版が変わる（BMC の再起動は模さなくてよいが、するなら短い応答なしで）。\n  - BIOS：保留にして、次に機械が起動したとき（#49 の Bios の Apply と同じ時点）に版が変わる。保留中は FirmwareInventory/BIOS に保留とわかる印を出す（例 `Status.State: \"StandbyOffline\"` か Oem でない範囲で、Redfish の作法に合うもの。決めたら README に書く）。Task の Messages にも「次の再起動で反映」を出す。\n- EventService があるので、Task の状態の変化（TaskStarted・TaskCompletedOK・TaskAborted 等、TaskEvent レジストリ）を Event として出す。\n\n### 障害（#45 の FAULT_API に足す）\n- `firmware-image-rejected`：イメージを受けた時点で 400（壊れたイメージと同じ断り方）。\n- `firmware-update-fail`：Task が途中（`atPercent`、既定 50）で Exception になり、版は変わらない。\n- どちらも target（BMC・BIOS）で絞れ、count・durationSeconds が効く。\n\n### そのほか\n- Redfish-Service-Validator で失敗 0 件を保つ。\n- README（英語・日本語）・CLAUDE.md・環境変数の表。\n\n## 確かめ方\n- 単体試験：イメージの検査、Task の進み方、BIOS の保留と起動での反映、ファイルへの保存、障害 2 種。\n- コンテナ試験（tests/test_update.sh）：SimpleUpdate（rfnet 上の小さな HTTP サーバから）と multipart push の両方で BMC と BIOS を更新し、TaskMonitor で終わるのを待って版が変わる（BIOS は電源の入れ直しのあと）、壊れたイメージ・障害 2 種で失敗し版が変わらない、コンテナを起こし直しても版が残る。\n- 可能なら sushy の UpdateService（simple_update）で通ること。",
+      "doneWhen": "go test -race と go vet が通り、コンテナ試験で SimpleUpdate と multipart push の両方で BMC・BIOS の版が変わり（BIOS は次の起動で）、壊れたイメージと障害 2 種で失敗して版が変わらず、起こし直しても版が残ることを確かめ、Redfish-Service-Validator が失敗 0 件",
+      "resolution": null,
+      "refs": [],
+      "threads": [],
+      "createdAt": "2026-10-28T04:16:45.889Z",
+      "updatedAt": "2026-10-28T04:16:45.889Z",
+      "closedAt": null,
+      "extra": {}
     }
   ]
 }
