@@ -1126,6 +1126,27 @@
       "updatedAt": "2026-10-27T08:26:54.053Z",
       "closedAt": null,
       "extra": {}
+    },
+    {
+      "id": "redfish-thermal-power-logservice-eventse",
+      "number": 51,
+      "kind": "task",
+      "title": "監視ツール向けに Redfish のセンサー（Thermal・Power）・LogService を足し、EventService を充実させる",
+      "status": "backlog",
+      "parent": null,
+      "dependsOn": [],
+      "milestone": null,
+      "priority": "normal",
+      "labels": [],
+      "body": "## なぜ\n監視ツール（Redfish の exporter など）から、BMC のセンサーとログを読めるようにする。\n\n## 中身\n- Chassis/1 の Thermal（温度・ファン）と Power（電源の電圧・電力・PSU）。新しい ThermalSubsystem・PowerSubsystem・Sensors の形も検討する。値は模擬で、もっともらしいもの（電源の状態に合わせて変わる程度でよい）\n- LogService（イベントのログ）：電源操作・起動・故障の注入などの出来事を LogEntry として残す（SEL 相当。メモリで、件数に上限）。ClearLog\n- EventService の購読の充実：上のセンサーの閾値越えやログの追加も Event として出す\n- IPMI の SDR・SEL との対応も、できる範囲でそろえる\n\n## 確かめ方\n- 単体試験と、Redfish-Service-Validator で失敗 0 件\n- 公開の Redfish exporter などで値とログが読めること",
+      "doneWhen": "Thermal・Power のセンサー値と LogService のエントリが Redfish で読め、ログの追加が Event として届き、go test -race・コンテナ試験・Redfish-Service-Validator（失敗 0 件）が通る",
+      "resolution": null,
+      "refs": [],
+      "threads": [],
+      "createdAt": "2026-10-28T02:38:34.870Z",
+      "updatedAt": "2026-10-28T02:38:34.870Z",
+      "closedAt": null,
+      "extra": {}
     }
   ]
 }
