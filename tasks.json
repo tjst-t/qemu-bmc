@@ -1233,6 +1233,35 @@
       "updatedAt": "2026-10-28T10:30:56.775Z",
       "closedAt": "2026-10-28T10:30:56.775Z",
       "extra": {}
+    },
+    {
+      "id": "once-cd",
+      "number": 56,
+      "kind": "bug",
+      "title": "起動先の上書き Once が、ゲストの中からの再起動では外れない（CD から起き直す）",
+      "status": "in-progress",
+      "parent": null,
+      "dependsOn": [],
+      "milestone": null,
+      "priority": "high",
+      "labels": [
+        "boot",
+        "virtualmedia"
+      ],
+      "body": "## 起きること\nVirtualMedia に ISO を差し、BootSourceOverrideTarget=Cd・BootSourceOverrideEnabled=Once で電源を入れると、ISO から起きる。ゲストの中から reboot すると（QEMU は止まらない）、また CD から起きる。Redfish の BootSourceOverrideEnabled は Disabled に戻っている。\n\n## 原因\n上書きは QEMU の起動引数（-boot d と CD の bootindex=0）に入り、QEMU はリセットしてもそれを保つ。Once を外すのは Redfish の値だけで、動いている QEMU の起動順は戻していなかった。UEFI では、OVMF が QEMU から渡された起動順を変数（OVMF_VARS）に残すため、電源を切って入れ直しても CD が先のままになることがある（OS が自分の起動項目を登録していない場合）。\n\n## 直し方\n- Once を使った起動のあと、動いている QEMU の上書きを戻す（QMP qom-set で bootindex を外し、HMP boot_set で元の起動順）。\n- UEFI で既定の順がディスク先なら、ディスクに bootindex を付け、次の再起動で OVMF がディスクを先にするようにする。上書きの無い次の電源オンでも同じようにし、一度だけすぐリセットする。\n- Once が残っているときの ForceRestart は QEMU を起こし直す。\n- README（英・日）に起動先の上書きの節を足す。あわせて、GracefulShutdown・GracefulRestart はゲストの ACPI 次第で、応えなければ GRACEFUL_TIMEOUT のあと On に戻るだけ、と書く。\n\n## 確かめ方\nコンテナの試験 bootonce（新規）。Debian のディスクと、起動したら印を出してゲストの中から reboot する小さな ISO を使う。Once Cd で ISO から起き、次の起動（ゲストの reboot・電源の切り入れ）がディスクから起きることを、UEFI と BIOS の両方で確かめる。直す前の作りでは、ゲストの reboot の試験が UEFI・BIOS とも落ちることを確かめた。",
+      "doneWhen": "bootonce の試験4本（UEFI・BIOS × ゲストの reboot・電源の切り入れ）が通り、go test -race・コンテナの試験・Redfish の検証・Ironic の通し試験・CI が通る。",
+      "resolution": null,
+      "refs": [],
+      "threads": [
+        {
+          "projectId": "af352873-ba2b-4e39-8094-679762e5c88b",
+          "threadId": "4bd065fd-af9b-4333-ada0-b76759212b76"
+        }
+      ],
+      "createdAt": "2026-10-29T17:12:18.735Z",
+      "updatedAt": "2026-10-29T17:12:18.735Z",
+      "closedAt": null,
+      "extra": {}
     }
   ]
 }
