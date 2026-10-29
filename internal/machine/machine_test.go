@@ -11,6 +11,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"github.com/tjst-t/qemu-bmc/internal/qemu"
 	"github.com/tjst-t/qemu-bmc/internal/qmp"
 )
 
@@ -137,6 +138,22 @@ func (m *mockQMPClient) BlockdevRemoveMedium(id string) error {
 	return m.mediumErr
 }
 
+func (m *mockQMPClient) QOMSet(path, property string, value interface{}) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.calls = append(m.calls, "QOMSet")
+	m.mediumArgs = append(m.mediumArgs, fmt.Sprintf("qom-set %s %s %v", path, property, value))
+	return nil
+}
+
+func (m *mockQMPClient) HumanMonitorCommand(command string) (string, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.calls = append(m.calls, "HumanMonitorCommand")
+	m.mediumArgs = append(m.mediumArgs, "hmp "+command)
+	return "", nil
+}
+
 func (m *mockQMPClient) MediumArgs() []string {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -167,6 +184,7 @@ type mockProcessManager struct {
 	startMedia []string // CD images passed to Start
 	startHTTP  []string // HTTP boot images passed to Start
 	startSB    []bool   // secureBoot passed to Start
+	revert     qemu.BootRevert
 	calls      []string
 	exitCh     chan struct{}
 	startGate  chan struct{} // if set, Start blocks until it is closed
@@ -251,6 +269,12 @@ func (m *mockProcessManager) Calls() []string {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	return append([]string(nil), m.calls...)
+}
+
+func (m *mockProcessManager) BootRevert() qemu.BootRevert {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.revert
 }
 
 func (m *mockProcessManager) StartCalls() []string {
@@ -743,7 +767,7 @@ func TestProcessMode_Reset_ForceRestart_BootOnceRestartsProcess(t *testing.T) {
 	assert.Contains(t, qmpMock.Calls(), "SystemReset")
 }
 
-func TestProcessMode_Reset_ForceRestart_BootOnceSameTarget_ConsumedBySystemReset(t *testing.T) {
+func TestProcessMode_Reset_ForceRestart_BootOnceSameTarget_RestartsQEMU(t *testing.T) {
 	qmpMock := newMockQMPClient(qmp.StatusRunning)
 	pm := newMockProcessManager(false)
 	m := NewWithProcess(qmpMock, pm)
@@ -753,11 +777,12 @@ func TestProcessMode_Reset_ForceRestart_BootOnceSameTarget_ConsumedBySystemReset
 	require.NoError(t, m.Reset("On"))
 	require.Equal(t, []string{"Pxe"}, pm.startCalls)
 
-	// Once Pxe again: same target, so system_reset boots PXE and consumes Once
+	// Once Pxe again: QEMU is restarted (not system_reset) so that the
+	// override is undone for the boot after this one
 	require.NoError(t, m.SetBootOverride(BootOverride{Enabled: "Once", Target: "Pxe", Mode: "UEFI"}))
 	require.NoError(t, m.Reset("ForceRestart"))
-	assert.Equal(t, []string{"Pxe"}, pm.startCalls)
-	assert.Contains(t, qmpMock.Calls(), "SystemReset")
+	assert.Equal(t, []string{"Pxe", "Pxe"}, pm.startCalls)
+	assert.NotContains(t, qmpMock.Calls(), "SystemReset")
 
 	boot := m.GetBootOverride()
 	assert.Equal(t, "Disabled", boot.Enabled)
@@ -765,7 +790,63 @@ func TestProcessMode_Reset_ForceRestart_BootOnceSameTarget_ConsumedBySystemReset
 
 	// Next reset must restart QEMU with the original boot device
 	require.NoError(t, m.Reset("ForceRestart"))
-	assert.Equal(t, []string{"Pxe", "None"}, pm.startCalls)
+	assert.Equal(t, []string{"Pxe", "Pxe", "None"}, pm.startCalls)
+}
+
+// A Once override is undone in the running QEMU after the boot that uses
+// it, so that a reboot by the guest itself boots the default device.
+func TestProcessMode_BootOnce_RevertedForGuestReboot(t *testing.T) {
+	qmpMock := newMockQMPClient(qmp.StatusRunning)
+	pm := newMockProcessManager(false)
+	pm.revert = qemu.BootRevert{Devices: []string{"vmedia-cd0"}, Order: "c"}
+	m := NewWithProcess(qmpMock, pm)
+
+	require.NoError(t, m.SetBootOverride(BootOverride{Enabled: "Once", Target: "Cd", Mode: "UEFI"}))
+	require.NoError(t, m.Reset("On"))
+	assert.Equal(t, []string{"Cd"}, pm.startCalls)
+	assert.Contains(t, qmpMock.MediumArgs(), "qom-set /machine/peripheral/vmedia-cd0 bootindex -1")
+	assert.Contains(t, qmpMock.MediumArgs(), "hmp boot_set c")
+	assert.Equal(t, "Disabled", m.GetBootOverride().Enabled)
+	assert.Len(t, qmpMock.MediumArgs(), 2, "no disk boot index outside UEFI disk-first")
+
+	// A ForceRestart starts QEMU again without the override
+	require.NoError(t, m.Reset("ForceRestart"))
+	assert.Equal(t, []string{"Cd", "None"}, pm.startCalls)
+}
+
+func TestProcessMode_BootOnce_UEFIDisksFirst(t *testing.T) {
+	qmpMock := newMockQMPClient(qmp.StatusRunning)
+	qmpMock.blocks = []qmp.BlockInfo{
+		{Device: "pflash0"},
+		{Device: "virtio0", QDev: "/machine/peripheral-anon/device[0]/virtio-backend"},
+		{Device: "vmedia0", QDev: "vmedia-cd0", Removable: true},
+		{Device: "", QDev: "data1"},
+	}
+	pm := newMockProcessManager(false)
+	pm.revert = qemu.BootRevert{Devices: []string{"vmedia-cd0"}, Order: "c", DisksFirst: true}
+	m := NewWithProcess(qmpMock, pm)
+
+	require.NoError(t, m.SetBootOverride(BootOverride{Enabled: "Once", Target: "Cd", Mode: "UEFI"}))
+	require.NoError(t, m.Reset("On"))
+	args := qmpMock.MediumArgs()
+	assert.Contains(t, args, "qom-set /machine/peripheral/vmedia-cd0 bootindex -1")
+	assert.Contains(t, args, "qom-set /machine/peripheral-anon/device[0]/virtio-backend bootindex 1")
+	assert.Contains(t, args, "qom-set /machine/peripheral/data1 bootindex 2")
+	for _, a := range args {
+		assert.NotContains(t, a, "pflash")
+	}
+}
+
+func TestProcessMode_BootContinuous_NotReverted(t *testing.T) {
+	qmpMock := newMockQMPClient(qmp.StatusRunning)
+	pm := newMockProcessManager(false)
+	pm.revert = qemu.BootRevert{Devices: []string{"vmedia-cd0"}, Order: "c"}
+	m := NewWithProcess(qmpMock, pm)
+
+	require.NoError(t, m.SetBootOverride(BootOverride{Enabled: "Continuous", Target: "Cd", Mode: "UEFI"}))
+	require.NoError(t, m.Reset("On"))
+	assert.NotContains(t, qmpMock.Calls(), "QOMSet")
+	assert.NotContains(t, qmpMock.Calls(), "HumanMonitorCommand")
 }
 
 func TestProcessMode_Reset_ForceRestart_ContinuousSameTarget_SystemReset(t *testing.T) {
@@ -1366,4 +1447,50 @@ func TestReset_GracefulFilter_DoesNotSendACPI(t *testing.T) {
 	m.SetGracefulFilter(nil)
 	require.NoError(t, m.Reset("GracefulShutdown"))
 	assert.Equal(t, []string{"SystemPowerdown"}, filterPowerCalls(mock.Calls()))
+}
+
+// After a UEFI boot override, the next power on without one puts the disks
+// first in OVMF's boot order again (bootindex and an early reset), once.
+func TestProcessMode_UEFIBootOrderRestoredAtNextPowerOn(t *testing.T) {
+	qmpMock := newMockQMPClient(qmp.StatusRunning)
+	qmpMock.blocks = []qmp.BlockInfo{
+		{Device: "virtio0", QDev: "/machine/peripheral-anon/device[0]/virtio-backend"},
+		{Device: "vmedia0", QDev: "vmedia-cd0", Removable: true},
+	}
+	pm := newMockProcessManager(false)
+	pm.revert = qemu.BootRevert{Devices: []string{"vmedia-cd0"}, Order: "c", DisksFirst: true}
+	m := NewWithProcess(qmpMock, pm)
+
+	require.NoError(t, m.SetBootOverride(BootOverride{Enabled: "Once", Target: "Cd", Mode: "UEFI"}))
+	require.NoError(t, m.Reset("On"))
+	pm.exit() // the guest powers off
+	pm.mu.Lock()
+	pm.revert = qemu.BootRevert{} // started without an override
+	pm.mu.Unlock()
+	qmpMock.mu.Lock()
+	qmpMock.calls, qmpMock.mediumArgs = nil, nil
+	qmpMock.mu.Unlock()
+
+	require.NoError(t, m.Reset("On"))
+	assert.Equal(t, []string{"Cd", "None"}, pm.StartCalls())
+	assert.Contains(t, qmpMock.MediumArgs(), "qom-set /machine/peripheral-anon/device[0]/virtio-backend bootindex 1")
+	assert.Contains(t, qmpMock.Calls(), "SystemReset")
+
+	// Only once
+	pm.exit() // the guest powers off
+	qmpMock.mu.Lock()
+	qmpMock.calls, qmpMock.mediumArgs = nil, nil
+	qmpMock.mu.Unlock()
+	require.NoError(t, m.Reset("On"))
+	assert.NotContains(t, qmpMock.Calls(), "SystemReset")
+	assert.Empty(t, qmpMock.MediumArgs())
+}
+
+func TestProcessMode_NoUEFIBootOrderRestoreWithoutOverride(t *testing.T) {
+	qmpMock := newMockQMPClient(qmp.StatusRunning)
+	pm := newMockProcessManager(false)
+	m := NewWithProcess(qmpMock, pm)
+	require.NoError(t, m.Reset("On"))
+	assert.NotContains(t, qmpMock.Calls(), "SystemReset")
+	assert.NotContains(t, qmpMock.Calls(), "QOMSet")
 }

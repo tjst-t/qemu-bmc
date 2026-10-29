@@ -297,6 +297,28 @@ func (c *qmpClient) BlockdevRemoveMedium(id string) error {
 	return c.execute("blockdev-remove-medium", blockdevIDArgs{ID: id})
 }
 
+func (c *qmpClient) QOMSet(path, property string, value interface{}) error {
+	return c.execute("qom-set", map[string]interface{}{"path": path, "property": property, "value": value})
+}
+
+func (c *qmpClient) HumanMonitorCommand(command string) (string, error) {
+	raw, err := c.executeWithResponse("human-monitor-command", map[string]string{"command-line": command})
+	if err != nil {
+		return "", err
+	}
+	var resp struct {
+		Return string    `json:"return"`
+		Error  *qmpError `json:"error"`
+	}
+	if err := json.Unmarshal(raw, &resp); err != nil {
+		return "", fmt.Errorf("parsing human-monitor-command response: %w", err)
+	}
+	if resp.Error != nil {
+		return "", fmt.Errorf("QMP error: %s: %s", resp.Error.Class, resp.Error.Desc)
+	}
+	return resp.Return, nil
+}
+
 func (c *qmpClient) Close() error {
 	c.mu.Lock()
 	defer c.mu.Unlock()

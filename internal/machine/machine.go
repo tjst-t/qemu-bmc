@@ -60,6 +60,9 @@ type ProcessManager interface {
 	Kill() error
 	IsRunning() bool
 	WaitForExit(timeout time.Duration) error
+	// BootRevert returns what undoes the boot override of the running
+	// QEMU at run time.
+	BootRevert() qemu.BootRevert
 }
 
 const (
@@ -79,8 +82,12 @@ type Machine struct {
 	// management mode only).
 	runningBootTarget string
 	runningHTTPBoot   string
-	httpBoot          httpBootState
-	secureBoot        secureBootState
+	// uefiOrderDirty: a boot override was used with UEFI, so OVMF's
+	// stored boot order may still start with the override device; the
+	// next power on without an override puts the disks first again
+	uefiOrderDirty bool
+	httpBoot       httpBootState
+	secureBoot     secureBootState
 	// media is the virtual CD state, kept while QEMU is not running and
 	// applied when it starts. mediaPath is the local path of media.Image
 	// ("" while an http(s) image is downloading); mediaFile is the file
@@ -467,6 +474,7 @@ func (m *Machine) resetProcessMode(resetType string, mediaDeadline time.Time) er
 		}
 		cdImage := m.insertedPath()
 		secureBoot := m.secureBoot.enable
+		once := m.bootOverride.Enabled == "Once"
 		m.mu.RUnlock()
 
 		m.booting()
@@ -485,6 +493,19 @@ func (m *Machine) resetProcessMode(resetType string, mediaDeadline time.Time) er
 		}
 		m.syncMedia(cdImage)
 
+		if m.processManager.BootRevert().DisksFirst {
+			// OVMF stores the override's boot order
+			m.mu.Lock()
+			m.uefiOrderDirty = true
+			m.mu.Unlock()
+		}
+		if once {
+			// This boot uses the override; the guest's own reboots
+			// must not (see qemu.BootRevert)
+			m.revertBootOverride()
+		} else if target == "None" || target == "" {
+			m.restoreUEFIBootOrder()
+		}
 		m.ConsumeBootOnce()
 		m.checkPower()
 		return nil
@@ -501,10 +522,12 @@ func (m *Machine) resetProcessMode(resetType string, mediaDeadline time.Time) er
 
 	case "ForceRestart":
 		m.waitMediaDownload(mediaDeadline)
-		if m.processManager.IsRunning() && m.restartNeeded() {
+		if m.processManager.IsRunning() && (m.restartNeeded() || m.onceOverridePending()) {
 			// -boot and the firmware are fixed at QEMU startup, so
 			// system_reset would boot the old device or firmware. Restart
-			// the process to apply the new settings.
+			// the process to apply the new settings. A Once override
+			// also restarts it, so that the boot after this one (also a
+			// reboot by the guest itself) is back to the default.
 			if err := m.processManager.Stop(30 * time.Second); err != nil {
 				return fmt.Errorf("stopping QEMU: %w", err)
 			}
@@ -630,6 +653,87 @@ func (m *Machine) restartNeeded() bool {
 	target, httpBootImage := m.nextBoot()
 	return normalize(target) != normalize(m.runningBootTarget) || httpBootImage != m.runningHTTPBoot ||
 		m.secureBoot.enable != m.secureBoot.running || m.secureBoot.keysReset
+}
+
+// onceOverridePending reports whether a Once boot override with a target
+// waits for the next boot.
+func (m *Machine) onceOverridePending() bool {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.bootOverride.Enabled == "Once" && m.nextBootTarget() != "None"
+}
+
+// revertBootOverride undoes the boot override of the running QEMU for the
+// guest's next reset, after the boot that used a Once override: the
+// override is on the QEMU command line, which survives a reboot by the
+// guest itself (QEMU keeps running). The boot after this one then uses the
+// default boot order, as on a real machine. The QEMU process still counts
+// as started with the override, so a ForceRestart starts a new one
+// (restartNeeded).
+func (m *Machine) revertBootOverride() {
+	r := m.processManager.BootRevert()
+	if r.Empty() {
+		return
+	}
+	for _, id := range r.Devices {
+		if err := m.qmpClient.QOMSet("/machine/peripheral/"+id, "bootindex", -1); err != nil {
+			log.Printf("Boot override Once: cannot reset the boot index of %s: %v", id, err)
+		}
+	}
+	if r.Order != "" {
+		if _, err := m.qmpClient.HumanMonitorCommand("boot_set " + r.Order); err != nil {
+			log.Printf("Boot override Once: cannot restore the boot order %q: %v", r.Order, err)
+		}
+	}
+	if r.DisksFirst {
+		m.bootDisksFirst()
+	}
+}
+
+// restoreUEFIBootOrder is called after a power on without a boot override.
+// If a boot override was used with UEFI before, OVMF's stored boot order
+// may still start with the override device (e.g. the VirtualMedia CD,
+// still inserted): the disks are given a bootindex and the VM is reset
+// right away (still in the firmware), so that OVMF puts them first again,
+// as -boot c (the default order) means. Done once.
+func (m *Machine) restoreUEFIBootOrder() {
+	m.mu.Lock()
+	dirty := m.uefiOrderDirty
+	m.uefiOrderDirty = false
+	m.mu.Unlock()
+	if !dirty {
+		return
+	}
+	log.Printf("Boot override: restoring the UEFI boot order (disks first) after an earlier override")
+	m.bootDisksFirst()
+	if err := m.qmpClient.SystemReset(); err != nil {
+		log.Printf("Boot override: reset to apply the boot order failed: %v", err)
+	}
+}
+
+// bootDisksFirst gives the VM's disks (non-removable block devices, not
+// the firmware flash) a bootindex in their order, for the next reset.
+func (m *Machine) bootDisksFirst() {
+	blocks, err := m.qmpClient.QueryBlock()
+	if err != nil {
+		log.Printf("Boot override Once: cannot list the disks: %v", err)
+		return
+	}
+	index := 1
+	for _, b := range blocks {
+		if b.Removable || b.QDev == "" || strings.HasPrefix(b.Device, "pflash") {
+			continue
+		}
+		path := b.QDev
+		if !strings.HasPrefix(path, "/") {
+			path = "/machine/peripheral/" + path
+		}
+		if err := m.qmpClient.QOMSet(path, "bootindex", index); err != nil {
+			log.Printf("Boot override Once: cannot set the boot index of disk %s: %v", path, err)
+			continue
+		}
+		index++
+	}
 }
 
 // nextBootTarget returns the boot target for the next boot: the override

@@ -9,60 +9,6 @@
 SERIAL_VOLUME="${SERIAL_VOLUME:-qemu-bmc-serial-test-vm}"
 SERIAL_LOG_PATH=/redfish/v1/Systems/1/LogServices/SerialConsole/Entries/1/attachment
 
-# serial_client NAME - keeps one connection to the serial console open in the
-# container: output goes to /tmp/NAME.log, what is written to the /tmp/NAME.in
-# FIFO is sent. /tmp/NAME.status gets "connected", then "disconnected" if the
-# connection ends (it is not reopened).
-serial_client() {
-    docker exec -d "$TEST_CONTAINER" bash -c '
-        n=$1
-        rm -f /tmp/$n.in /tmp/$n.log; mkfifo /tmp/$n.in; exec 4<>/tmp/$n.in
-        : >/tmp/$n.log
-        if ! exec 3<>/dev/tcp/127.0.0.1/9002; then
-            echo failed >/tmp/$n.status; exit 1
-        fi
-        echo connected >/tmp/$n.status
-        cat <&4 >&3 &
-        cat <&3 >>/tmp/$n.log
-        echo disconnected >>/tmp/$n.status' _ "$1"
-}
-
-serial_status() {
-    container_exec cat "/tmp/$1.status" 2>/dev/null
-}
-
-serial_size() {
-    container_exec bash -c 'stat -c %s "/tmp/$1.log" 2>/dev/null || echo 0' _ "$1"
-}
-
-# serial_since NAME OFFSET - output of client NAME after byte OFFSET, without CR
-serial_since() {
-    container_exec bash -c 'tail -c +$(( $2 + 1 )) "/tmp/$1.log" 2>/dev/null' _ "$1" "$2" | tr -d '\r'
-}
-
-serial_send() {
-    container_exec bash -c 'printf "%s\r" "$2" >"/tmp/$1.in"' _ "$1" "$2"
-}
-
-# serial_wait NAME OFFSET REGEX TIMEOUT [POKE] - waits for extended REGEX in
-# the output of NAME after OFFSET; with POKE, an empty line is sent through
-# client POKE every 10 s (wakes up getty)
-serial_wait() {
-    local name="$1" off="$2" re="$3" timeout="$4" poke="$5" start
-    start=$(date +%s)
-    until serial_since "$name" "$off" | grep -qE -- "$re"; do
-        if [ $(( $(date +%s) - start )) -ge "$timeout" ]; then
-            echo "timed out waiting for /$re/ on $name; last output:"
-            serial_since "$name" "$off" | tail -n 5
-            return 1
-        fi
-        if [ -n "$poke" ] && [ $(( ($(date +%s) - start) % 10 )) -eq 0 ]; then
-            serial_send "$poke" ""
-        fi
-        sleep 1
-    done
-}
-
 test_serial_qemu_uses_internal_socket() {
     local cmdline
     cmdline=$(qemu_cmdline)

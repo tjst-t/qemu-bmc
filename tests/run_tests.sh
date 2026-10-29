@@ -14,7 +14,7 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 source "$SCRIPT_DIR/test_helper.sh"
 
 # Available test categories
-CATEGORIES="container entrypoint ipmi redfish power boot network cross fault events serial sol bios update quick"
+CATEGORIES="container entrypoint ipmi redfish power boot bootonce network cross fault events serial sol bios update quick"
 
 usage() {
     echo "Usage: $0 <category...>"
@@ -27,6 +27,7 @@ usage() {
     echo "  redfish    - Redfish API tests"
     echo "  power      - Power control tests"
     echo "  boot       - Boot device tests"
+    echo "  bootonce   - Boot override Once lasts one boot: guest reboot and power off/on (Debian guest + test ISO, UEFI and BIOS)"
     echo "  network    - Network passthrough tests"
     echo "  cross      - Cross-protocol consistency tests"
     echo "  fault      - Fault injection tests (FAULT_API_ADDR)"

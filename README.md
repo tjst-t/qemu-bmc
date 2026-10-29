@@ -132,6 +132,12 @@ curl -k -u admin:password -X POST \
   https://localhost/redfish/v1/Managers/1/VirtualMedia/CD1/Actions/VirtualMedia.EjectMedia
 ```
 
+#### Boot override
+
+- `BootSourceOverrideEnabled`: `Once` applies to the next boot only (power on, `ForceRestart`, `PowerCycle`, `GracefulRestart`), then goes back to `Disabled` / `None`. `Continuous` applies to every boot until changed. `Disabled` boots the default order (`-boot c`, the disk first) whatever the target.
+- In process management mode the override is put on the QEMU command line (`-boot` and `bootindex=0` on the CD drive, NIC or HTTP boot image), which QEMU keeps across resets. After the boot that used a `Once` override, qemu-bmc undoes it in the running QEMU (QMP `qom-set` of `bootindex`, HMP `boot_set`), so that a reboot by the guest itself (e.g. at the end of an OS installation) boots the default order again, as on a real machine — also with the VirtualMedia ISO still inserted.
+- UEFI: OVMF ignores `-boot` and stores the boot order QEMU gives it in its variables (`OVMF_VARS.fd`), so after an override the override device (e.g. the CD) would stay first. When the default order is disk first and no device has a `bootindex` of the user's, qemu-bmc gives the disks a `bootindex` for the guest's next reboot, and on the next power on without an override it does so and resets the VM once right away (still in the firmware), so that OVMF puts the disks first again. An OS that registers its own boot entry (`efibootmgr`) is booted as OVMF orders it.
+
 #### VirtualMedia
 
 - The CD drive is `/redfish/v1/Systems/1/VirtualMedia/CD1` (recommended since Redfish 2021.1; Ironic/sushy looks here first) and also `/redfish/v1/Managers/1/VirtualMedia/CD1` (deprecated location, kept for gofish, bmclib and existing users). Both are the same drive: inserting through one is seen through the other. `@odata.id` and the action targets follow the URI you read.
@@ -591,6 +597,8 @@ A fault is `{"kind": ..., conditions..., "count": N, "durationSeconds": S}`: `co
 
 Another power action (Redfish or IPMI) during `PoweringOff` / `PoweringOn` ends the graceful action; the state then follows the new action. IPMI `chassis power soft` behaves like `GracefulShutdown`, `chassis power cycle` like `PowerCycle` and `chassis power diag` like `Nmi`; `chassis power status` reports `PoweringOff` / `PoweringOn` as on.
 
+`GracefulShutdown` / `GracefulRestart` (and IPMI `chassis power soft`) only press the ACPI power button (QMP `system_powerdown`): what happens depends on the guest. A guest that does not handle it — an OS installer, a boot loader or firmware screen, an OS without an ACPI power button handler, or one that is still booting — does nothing, and the press is not repeated. qemu-bmc then reports `PoweringOff` until `GRACEFUL_TIMEOUT` (default 120 s) and goes back to `On`, leaving the VM running; it never forces it off. Use `ForceOff` / `ForceRestart` / `PowerCycle` (or a tool's fallback to them) for such guests.
+
 ## IPMI Commands
 
 | Command | Description |
@@ -867,6 +875,12 @@ curl -k -u admin:password -X PATCH \
 curl -k -u admin:password -X POST \
   https://localhost/redfish/v1/Managers/1/VirtualMedia/CD1/Actions/VirtualMedia.EjectMedia
 ```
+
+#### 起動先の上書き
+
+- `BootSourceOverrideEnabled`：`Once` は次の1回の起動（電源オン・`ForceRestart`・`PowerCycle`・`GracefulRestart`）だけに効き、そのあと `Disabled` / `None` に戻る。`Continuous` は変えるまで毎回効く。`Disabled` は起動先に関わらず既定の順（`-boot c`、ディスクが先）で起こす。
+- プロセス管理モードでは、上書きは QEMU の起動引数（`-boot` と、CD・NIC・HTTP ブートのイメージの `bootindex=0`）に入り、QEMU はリセットしてもそれを保つ。`Once` を使った起動のあと、qemu-bmc は動いている QEMU の上書きを戻す（QMP の `qom-set` で `bootindex`、HMP の `boot_set`）。そのため、ゲストが自分で再起動しても（OS の導入の終わりなど）、VirtualMedia の ISO が差さったままでも、実機と同じく既定の順で起きる。
+- UEFI：OVMF は `-boot` を見ず、QEMU が渡した起動順を変数（`OVMF_VARS.fd`）に残すので、上書きのあとはその装置（CD など）が先のままになる。既定の順がディスク先で、利用者が `bootindex` を付けた装置が無ければ、qemu-bmc はゲストの次の再起動に向けてディスクに `bootindex` を付ける。また、上書きの無い次の電源オンでも同じようにし、すぐに一度リセットして（まだファームウェアの中）、OVMF の順をディスク先に戻す。OS が自分の起動項目を登録していれば（`efibootmgr`）、OVMF の並べた順で起きる。
 
 #### VirtualMedia
 
@@ -1326,6 +1340,8 @@ curl -H "$T" -X DELETE http://localhost:8623/faults      # 全部消す
 | `GracefulRestart` | ACPI の電源ボタンを押し、ゲストが電源を切ったら入れ直す | `PoweringOff` → 入れ直す間 `PoweringOn` → `On`。`GRACEFUL_TIMEOUT` 秒たっても切れなければ `On` に戻す |
 
 `PoweringOff` / `PoweringOn` の間に別の電源操作（Redfish でも IPMI でも）が来たら途中の状態は打ち切り、その操作の結果に従う。IPMI の `chassis power soft` は `GracefulShutdown`、`chassis power cycle` は `PowerCycle`、`chassis power diag` は `Nmi` と同じ。`chassis power status` は `PoweringOff` / `PoweringOn` を on として返す。
+
+`GracefulShutdown` / `GracefulRestart`（と IPMI の `chassis power soft`）は ACPI の電源ボタンを押すだけ（QMP の `system_powerdown`）で、どうなるかはゲスト次第。応えないゲスト（OS のインストーラー、ブートローダーやファームウェアの画面、ACPI の電源ボタンを扱わない OS、起動の途中）では何も起きず、押し直しもしない。そのとき qemu-bmc は `GRACEFUL_TIMEOUT`（既定 120 秒）まで `PoweringOff` を返してから `On` に戻し、VM は動いたまま。強制的には切らない。そうしたゲストには `ForceOff` / `ForceRestart` / `PowerCycle`（または管理ツールのそれへの切り替え）を使う。
 
 ## IPMI コマンド
 

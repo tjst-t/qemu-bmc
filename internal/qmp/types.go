@@ -27,6 +27,12 @@ type Client interface {
 	BlockdevOpenTray(id string, force bool) error
 	BlockdevCloseTray(id string) error
 	BlockdevRemoveMedium(id string) error
+	// QOMSet sets a property of a QOM object (qom-set), e.g. the bootindex
+	// of the device "/machine/peripheral/<id>".
+	QOMSet(path, property string, value interface{}) error
+	// HumanMonitorCommand runs an HMP command (human-monitor-command) and
+	// returns its output.
+	HumanMonitorCommand(command string) (string, error)
 	Close() error
 }
 

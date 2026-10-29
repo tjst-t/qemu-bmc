@@ -398,3 +398,90 @@ prepare_debian_disk() {
 cleanup_debian_disk() {
     docker volume rm -f "$1" >/dev/null 2>&1 || true
 }
+
+# --- Serial console clients (SERIAL_ADDR, localhost:9002 in the container) ---
+
+# serial_client NAME - keeps one connection to the serial console open in the
+# container: output goes to /tmp/NAME.log, what is written to the /tmp/NAME.in
+# FIFO is sent. /tmp/NAME.status gets "connected", then "disconnected" if the
+# connection ends (it is not reopened).
+serial_client() {
+    docker exec -d "$TEST_CONTAINER" bash -c '
+        n=$1
+        rm -f /tmp/$n.in /tmp/$n.log; mkfifo /tmp/$n.in; exec 4<>/tmp/$n.in
+        : >/tmp/$n.log
+        if ! exec 3<>/dev/tcp/127.0.0.1/9002; then
+            echo failed >/tmp/$n.status; exit 1
+        fi
+        echo connected >/tmp/$n.status
+        cat <&4 >&3 &
+        cat <&3 >>/tmp/$n.log
+        echo disconnected >>/tmp/$n.status' _ "$1"
+}
+
+serial_status() {
+    container_exec cat "/tmp/$1.status" 2>/dev/null
+}
+
+serial_size() {
+    container_exec bash -c 'stat -c %s "/tmp/$1.log" 2>/dev/null || echo 0' _ "$1"
+}
+
+# serial_since NAME OFFSET - output of client NAME after byte OFFSET, without CR
+serial_since() {
+    container_exec bash -c 'tail -c +$(( $2 + 1 )) "/tmp/$1.log" 2>/dev/null' _ "$1" "$2" | tr -d '\r'
+}
+
+serial_send() {
+    container_exec bash -c 'printf "%s\r" "$2" >"/tmp/$1.in"' _ "$1" "$2"
+}
+
+# serial_wait NAME OFFSET REGEX TIMEOUT [POKE] - waits for extended REGEX in
+# the output of NAME after OFFSET; with POKE, an empty line is sent through
+# client POKE every 10 s (wakes up getty)
+serial_wait() {
+    local name="$1" off="$2" re="$3" timeout="$4" poke="$5" start
+    start=$(date +%s)
+    until serial_since "$name" "$off" | grep -qE -- "$re"; do
+        if [ $(( $(date +%s) - start )) -ge "$timeout" ]; then
+            echo "timed out waiting for /$re/ on $name; last output:"
+            serial_since "$name" "$off" | tail -n 5
+            return 1
+        fi
+        if [ -n "$poke" ] && [ $(( ($(date +%s) - start) % 10 )) -eq 0 ]; then
+            serial_send "$poke" ""
+        fi
+        sleep 1
+    done
+}
+
+# --- Boot-once test ISO ---
+# A tiny BIOS+UEFI bootable ISO (GRUB) that prints QBMC-ONCE-CD-BOOT on the
+# serial console and reboots the VM from inside the guest; built once with a
+# Debian container and cached next to the Debian image.
+ONCE_ISO_FILE="qbmc-once-cd-v2.iso"
+
+prepare_once_iso() {
+    mkdir -p "$DEBIAN_CACHE"
+    [ -s "$DEBIAN_CACHE/$ONCE_ISO_FILE" ] && return 0
+    echo "Building $ONCE_ISO_FILE"
+    docker run --rm -v "$DEBIAN_CACHE:/out" debian:bookworm-slim bash -c '
+        set -e
+        apt-get update -qq >/dev/null
+        DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends \
+            grub-pc-bin grub-efi-amd64-bin grub-common xorriso mtools >/dev/null 2>&1
+        mkdir -p /iso/boot/grub
+        cat >/iso/boot/grub/grub.cfg <<CFG
+serial --unit=0 --speed=115200
+terminal_input serial
+terminal_output serial
+set timeout=0
+echo QBMC-ONCE-CD-BOOT
+sleep 3
+reboot
+CFG
+        grub-mkrescue -o /out/'"$ONCE_ISO_FILE"'.part /iso >/dev/null 2>&1
+        mv /out/'"$ONCE_ISO_FILE"'.part /out/'"$ONCE_ISO_FILE"'
+        chmod 644 /out/'"$ONCE_ISO_FILE"'
+        chown '"$(id -u):$(id -g)"' /out/'"$ONCE_ISO_FILE"
+}

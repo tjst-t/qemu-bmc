@@ -18,6 +18,9 @@ type ProcessManager interface {
 	// Secure Boot variant of the OVMF is booted (see
 	// FindSecureBootFirmware).
 	Start(bootTarget, cdImage, httpBootImage string, secureBoot bool) error
+	// BootRevert returns what undoes, at run time, the boot override the
+	// running QEMU was started with (see BootRevert).
+	BootRevert() BootRevert
 	Stop(timeout time.Duration) error
 	Kill() error
 	IsRunning() bool
@@ -42,6 +45,7 @@ type processManager struct {
 	logf       func(format string, v ...any)
 	running    bool
 	exitCh     chan struct{}
+	revert     BootRevert // undoes the boot override of the running QEMU
 	mu         sync.RWMutex
 }
 
@@ -79,10 +83,13 @@ func (p *processManager) Start(bootTarget, cdImage, httpBootImage string, secure
 		}
 		args = fw.Apply(args)
 	}
-	args = ApplyBootOverride(SetCDImage(args, cdImage), bootTarget)
+	args = SetCDImage(args, cdImage)
+	before := append([]string(nil), args...)
+	args = ApplyBootOverride(args, bootTarget)
 	if bootTarget == "UefiHttp" {
 		args = ApplyHTTPBoot(args, httpBootImage)
 	}
+	p.revert = bootOverrideRevert(before, args)
 	p.cmd = p.cmdFactory(p.binary, args)
 	p.cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	p.stderr = nil
@@ -160,6 +167,12 @@ func (p *processManager) Kill() error {
 		return fmt.Errorf("sending SIGKILL: %w", err)
 	}
 	return nil
+}
+
+func (p *processManager) BootRevert() BootRevert {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	return p.revert
 }
 
 func (p *processManager) IsRunning() bool {
