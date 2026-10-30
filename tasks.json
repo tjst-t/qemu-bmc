@@ -1288,6 +1288,32 @@
       "updatedAt": "2026-10-30T17:03:08.876Z",
       "closedAt": null,
       "extra": {}
+    },
+    {
+      "id": "uefi-once-cd-uefi-shell",
+      "number": 58,
+      "kind": "bug",
+      "title": "UEFI：Once の起動のあと、ディスクが起動できないと CD・ネットワークへ落ちずに UEFI Shell で止まる",
+      "status": "in-progress",
+      "parent": null,
+      "dependsOn": [],
+      "milestone": null,
+      "priority": "high",
+      "labels": [],
+      "body": "## 何が起きるか\nv0.11.2 から、UEFI では BootSourceOverrideEnabled=Once の起動のあと、起動順を「ディスクが先」に戻すために、ディスクだけに bootindex を付けている。OVMF は bootindex の無い装置を起動順から外すので、ディスクが起動できないとき（空のディスク、OS を入れる前）、差したままの CD やネットワークへ落ちずに UEFI Shell で止まる。ゲストの再起動でも、電源を切って入れ直しても同じ。\n\n例：ramdisk を VirtualMedia で起動し、ディスクに OS が無いまま電源を入れ直す手順（BIOS 設定の反映など）で、ramdisk が戻らない。\n\n## 直し方\nディスクの後ろに、CD ドライブ、次に NIC にも bootindex を付ける（コマンドラインの順）。実機の「ディスク → CD → ネットワーク」と同じ落ち方にする。\n\n## 確かめ方\n- 単体試験（qemu・machine）。\n- コンテナの試験 bootonce に、空のディスク＋CD を差したままで、Once のあと（ゲストの再起動・電源の入れ直し）CD から起き直す試験を足す。直す前の版では Shell で止まることを確かめた。\n- 管理ツールの通し試験（make ironic-test）の BIOS 設定の流れが通る。",
+      "doneWhen": "bootonce の新しい2件と make ironic-test の4つの流れが全部通る。",
+      "resolution": null,
+      "refs": [],
+      "threads": [
+        {
+          "projectId": "af352873-ba2b-4e39-8094-679762e5c88b",
+          "threadId": "4bd065fd-af9b-4333-ada0-b76759212b76"
+        }
+      ],
+      "createdAt": "2026-10-30T18:05:49.177Z",
+      "updatedAt": "2026-10-30T18:05:49.177Z",
+      "closedAt": null,
+      "extra": {}
     }
   ]
 }
