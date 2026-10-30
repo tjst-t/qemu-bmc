@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/gorilla/mux"
+	"github.com/tjst-t/qemu-bmc/internal/audit"
 	"github.com/tjst-t/qemu-bmc/internal/firmware"
 	"github.com/tjst-t/qemu-bmc/internal/machine"
 	"github.com/tjst-t/qemu-bmc/internal/novnc"
@@ -163,8 +164,8 @@ func (s *Server) setupRoutes() {
 		s.router.HandleFunc(updateServicePath+p, s.handleGetUpdateService).Methods("GET")
 		s.router.HandleFunc(firmwareInventoryPath+p, s.handleFirmwareInventoryCollection).Methods("GET")
 		s.router.HandleFunc(firmwareInventoryPath+"/{fwid}"+p, s.handleGetFirmwareInventory).Methods("GET")
-		s.router.HandleFunc(simpleUpdatePath+p, s.handleSimpleUpdate).Methods("POST")
-		s.router.HandleFunc(multipartPushPath+p, s.handleMultipartPush).Methods("POST")
+		s.router.HandleFunc(simpleUpdatePath+p, s.logAction(audit.KindUpdate, s.handleSimpleUpdate)).Methods("POST").Name(actionRoutePrefix + audit.KindUpdate)
+		s.router.HandleFunc(multipartPushPath+p, s.logAction(audit.KindUpdate, s.handleMultipartPush)).Methods("POST").Name(actionRoutePrefix + audit.KindUpdate)
 		s.router.HandleFunc(taskServicePath+p, s.handleGetTaskService).Methods("GET")
 		s.router.HandleFunc(tasksPath+p, s.handleTaskCollection).Methods("GET")
 		s.router.HandleFunc(tasksPath+"/{taskid}"+p, s.handleGetTask).Methods("GET")
@@ -176,8 +177,8 @@ func (s *Server) setupRoutes() {
 	s.router.HandleFunc("/redfish/v1/Systems/", s.handleSystemCollection).Methods("GET")
 	s.router.HandleFunc("/redfish/v1/Systems/{id}", s.handleGetSystem).Methods("GET")
 	s.router.HandleFunc("/redfish/v1/Systems/{id}/", s.handleGetSystem).Methods("GET")
-	s.router.HandleFunc("/redfish/v1/Systems/{id}", s.handlePatchSystem).Methods("PATCH")
-	s.router.HandleFunc("/redfish/v1/Systems/{id}/", s.handlePatchSystem).Methods("PATCH")
+	s.router.HandleFunc("/redfish/v1/Systems/{id}", s.logAction(audit.KindBoot, s.handlePatchSystem)).Methods("PATCH").Name(actionRoutePrefix + audit.KindBoot)
+	s.router.HandleFunc("/redfish/v1/Systems/{id}/", s.logAction(audit.KindBoot, s.handlePatchSystem)).Methods("PATCH").Name(actionRoutePrefix + audit.KindBoot)
 
 	// Ethernet interfaces
 	s.router.HandleFunc("/redfish/v1/Systems/{id}/EthernetInterfaces", s.handleEthernetInterfaceCollection).Methods("GET")
@@ -205,20 +206,20 @@ func (s *Server) setupRoutes() {
 		s.router.HandleFunc(sys+"/LogServices/{logid}/Entries/{entryid}"+p, s.handleGetSerialLogEntry).Methods("GET")
 		s.router.HandleFunc(sys+"/LogServices/{logid}/Entries/{entryid}/attachment"+p, s.handleGetSerialLogAttachment).Methods("GET")
 		s.router.HandleFunc(sys+"/SecureBoot"+p, s.handleGetSecureBoot).Methods("GET")
-		s.router.HandleFunc(sys+"/SecureBoot"+p, s.handlePatchSecureBoot).Methods("PATCH")
-		s.router.HandleFunc(sys+"/SecureBoot/Actions/SecureBoot.ResetKeys"+p, s.handleResetKeys).Methods("POST")
+		s.router.HandleFunc(sys+"/SecureBoot"+p, s.logAction(audit.KindSecureBoot, s.handlePatchSecureBoot)).Methods("PATCH").Name(actionRoutePrefix + audit.KindSecureBoot)
+		s.router.HandleFunc(sys+"/SecureBoot/Actions/SecureBoot.ResetKeys"+p, s.logAction(audit.KindSecureBoot, s.handleResetKeys)).Methods("POST").Name(actionRoutePrefix + audit.KindSecureBoot)
 		s.router.HandleFunc(sys+"/Bios"+p, s.handleGetBios).Methods("GET")
 		s.router.HandleFunc(sys+"/Bios/Settings"+p, s.handleGetBiosSettings).Methods("GET")
-		s.router.HandleFunc(sys+"/Bios/Settings"+p, s.handlePatchBiosSettings).Methods("PATCH")
-		s.router.HandleFunc(sys+"/Bios/Actions/Bios.ResetBios"+p, s.handleResetBios).Methods("POST")
+		s.router.HandleFunc(sys+"/Bios/Settings"+p, s.logAction(audit.KindBios, s.handlePatchBiosSettings)).Methods("PATCH").Name(actionRoutePrefix + audit.KindBios)
+		s.router.HandleFunc(sys+"/Bios/Actions/Bios.ResetBios"+p, s.logAction(audit.KindBios, s.handleResetBios)).Methods("POST").Name(actionRoutePrefix + audit.KindBios)
 		s.router.HandleFunc(registriesPath+p, s.handleRegistryCollection).Methods("GET")
 		s.router.HandleFunc(registriesPath+"/{regid}"+p, s.handleGetRegistryFile).Methods("GET")
 		s.router.HandleFunc(biosRegistryURI+p, s.handleGetBiosRegistry).Methods("GET")
 	}
 
 	// Actions
-	s.router.HandleFunc("/redfish/v1/Systems/{id}/Actions/ComputerSystem.Reset", s.handleResetAction).Methods("POST")
-	s.router.HandleFunc("/redfish/v1/Systems/{id}/Actions/ComputerSystem.Reset/", s.handleResetAction).Methods("POST")
+	s.router.HandleFunc("/redfish/v1/Systems/{id}/Actions/ComputerSystem.Reset", s.logAction(audit.KindPower, s.handleResetAction)).Methods("POST").Name(actionRoutePrefix + audit.KindPower)
+	s.router.HandleFunc("/redfish/v1/Systems/{id}/Actions/ComputerSystem.Reset/", s.logAction(audit.KindPower, s.handleResetAction)).Methods("POST").Name(actionRoutePrefix + audit.KindPower)
 
 	// Managers
 	s.router.HandleFunc("/redfish/v1/Managers", s.handleManagerCollection).Methods("GET")
@@ -233,8 +234,8 @@ func (s *Server) setupRoutes() {
 		for _, p := range []string{"", "/"} {
 			s.router.HandleFunc(vm+p, s.handleVirtualMediaCollection).Methods("GET")
 			s.router.HandleFunc(vm+"/{vmid}"+p, s.handleGetVirtualMedia).Methods("GET")
-			s.router.HandleFunc(vm+"/{vmid}/Actions/VirtualMedia.InsertMedia"+p, s.handleInsertMedia).Methods("POST")
-			s.router.HandleFunc(vm+"/{vmid}/Actions/VirtualMedia.EjectMedia"+p, s.handleEjectMedia).Methods("POST")
+			s.router.HandleFunc(vm+"/{vmid}/Actions/VirtualMedia.InsertMedia"+p, s.logAction(audit.KindVMediaInsert, s.handleInsertMedia)).Methods("POST").Name(actionRoutePrefix + audit.KindVMediaInsert)
+			s.router.HandleFunc(vm+"/{vmid}/Actions/VirtualMedia.EjectMedia"+p, s.logAction(audit.KindVMediaEject, s.handleEjectMedia)).Methods("POST").Name(actionRoutePrefix + audit.KindVMediaEject)
 		}
 	}
 

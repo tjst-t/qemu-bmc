@@ -34,6 +34,14 @@ func matchPath(pattern, p string) bool {
 	return strings.HasPrefix(p, pattern)
 }
 
+// SetOnRedfishFault sets a function called for every Redfish request that a
+// fault fails or drops (all but redfish-delay), before the fault applies
+// (e.g. to log the write commands that never reached the server). Set it
+// before the middleware serves requests.
+func (s *Store) SetOnRedfishFault(fn func(r *http.Request, faultID string, kind Kind)) {
+	s.onRedfishFault = fn
+}
+
 // Middleware applies the redfish-* and bmc-unavailable faults to the
 // requests of the Redfish server. A nil store applies none.
 func (s *Store) Middleware(next http.Handler) http.Handler {
@@ -47,6 +55,9 @@ func (s *Store) Middleware(next http.Handler) http.Handler {
 		if e == nil {
 			next.ServeHTTP(w, r)
 			return
+		}
+		if e.Kind != RedfishDelay && s.onRedfishFault != nil {
+			s.onRedfishFault(r, e.ID, e.Kind)
 		}
 		switch e.Kind {
 		case RedfishDelay:

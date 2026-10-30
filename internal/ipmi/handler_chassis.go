@@ -4,6 +4,7 @@ import (
 	"errors"
 	"log"
 
+	"github.com/tjst-t/qemu-bmc/internal/audit"
 	"github.com/tjst-t/qemu-bmc/internal/fault"
 	"github.com/tjst-t/qemu-bmc/internal/machine"
 )
@@ -14,7 +15,7 @@ func handleChassisCommand(msg *IPMIMessage, m MachineInterface) (CompletionCode,
 	case CmdGetChassisStatus:
 		return handleGetChassisStatus(m)
 	case CmdChassisControl:
-		return handleChassisControl(msg.Data, m)
+		return chassisControl(msg.Data, m, msg.action)
 	case CmdChassisIdentify:
 		return handleChassisIdentify()
 	case CmdSetBootOptions:
@@ -48,6 +49,12 @@ func handleGetChassisStatus(m MachineInterface) (CompletionCode, []byte) {
 }
 
 func handleChassisControl(reqData []byte, m MachineInterface) (CompletionCode, []byte) {
+	return chassisControl(reqData, m, nil)
+}
+
+// chassisControl runs a Chassis Control command; action is its action line
+// (nil if not logged), for the result of an injected fault.
+func chassisControl(reqData []byte, m MachineInterface, action *audit.Entry) (CompletionCode, []byte) {
 	if len(reqData) < 1 {
 		return CompletionCodeInvalidField, nil
 	}
@@ -79,9 +86,17 @@ func handleChassisControl(reqData []byte, m MachineInterface) (CompletionCode, [
 		return CompletionCodeInvalidField, nil
 	}
 
+	var ignored *fault.PowerActionIgnoredError
+	if errors.As(err, &ignored) {
+		// A no-op for the client
+		action.Result(audit.Fault, "fault", ignored.FaultID)
+		return CompletionCodeOK, nil
+	}
 	var faultErr *fault.PowerActionError
 	if errors.As(err, &faultErr) {
-		return CompletionCode(faultErr.CompletionCode), nil
+		code := CompletionCode(faultErr.CompletionCode)
+		action.Result(audit.Fault, "cc", ccString(code), "fault", faultErr.FaultID)
+		return code, nil
 	}
 	if err != nil {
 		return CompletionCodeUnspecified, nil
@@ -106,46 +121,7 @@ func handleSetBootOptions(reqData []byte, m MachineInterface) (CompletionCode, [
 		if len(reqData) < 6 {
 			return CompletionCodeInvalidField, nil
 		}
-		bootFlags := reqData[1:]
-		override := machine.BootOverride{
-			Mode: "UEFI",
-		}
-
-		// Byte 1, bit 7: valid; bit 6: persistent (all future boots)
-		// Byte 2, bits 5:2: boot device
-		if bootFlags[0]&0x80 != 0 {
-			if bootFlags[0]&0x40 != 0 {
-				override.Enabled = "Continuous"
-			} else {
-				override.Enabled = "Once"
-			}
-		} else {
-			override.Enabled = "Disabled"
-		}
-
-		deviceBits := (bootFlags[1] >> 2) & 0x0F
-		switch deviceBits {
-		case 0x00:
-			override.Target = "None"
-		case 0x01:
-			override.Target = "Pxe"
-		case 0x02:
-			override.Target = "Hdd"
-		case 0x05:
-			override.Target = "Cd"
-		case 0x06:
-			override.Target = "BiosSetup"
-		default:
-			override.Target = "None"
-		}
-
-		// Byte 1, bit 5: UEFI
-		if bootFlags[0]&0x20 != 0 {
-			override.Mode = "UEFI"
-		} else {
-			override.Mode = "Legacy"
-		}
-
+		override := parseBootFlags(reqData[1:])
 		if err := m.SetBootOverride(override); err != nil {
 			return CompletionCodeInvalidField, nil
 		}
@@ -155,6 +131,46 @@ func handleSetBootOptions(reqData []byte, m MachineInterface) (CompletionCode, [
 		// Accept but ignore other parameters
 		return CompletionCodeOK, nil
 	}
+}
+
+// parseBootFlags reads the boot flags parameter (at least 2 bytes) of Set
+// System Boot Options.
+func parseBootFlags(bootFlags []byte) machine.BootOverride {
+	var override machine.BootOverride
+
+	// Byte 1, bit 7: valid; bit 6: persistent (all future boots)
+	// Byte 2, bits 5:2: boot device
+	if bootFlags[0]&0x80 != 0 {
+		if bootFlags[0]&0x40 != 0 {
+			override.Enabled = "Continuous"
+		} else {
+			override.Enabled = "Once"
+		}
+	} else {
+		override.Enabled = "Disabled"
+	}
+
+	deviceBits := (bootFlags[1] >> 2) & 0x0F
+	switch deviceBits {
+	case 0x01:
+		override.Target = "Pxe"
+	case 0x02:
+		override.Target = "Hdd"
+	case 0x05:
+		override.Target = "Cd"
+	case 0x06:
+		override.Target = "BiosSetup"
+	default:
+		override.Target = "None"
+	}
+
+	// Byte 1, bit 5: UEFI
+	if bootFlags[0]&0x20 != 0 {
+		override.Mode = "UEFI"
+	} else {
+		override.Mode = "Legacy"
+	}
+	return override
 }
 
 func handleGetBootOptions(reqData []byte, m MachineInterface) (CompletionCode, []byte) {

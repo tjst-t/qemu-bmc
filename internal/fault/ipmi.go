@@ -38,6 +38,8 @@ type IPMIAction struct {
 	// Error: respond with CompletionCode instead of handling the request
 	Error          bool
 	CompletionCode uint8
+	// FaultID is the id of the fault applied ("" if none)
+	FaultID string
 }
 
 // matchIPMI reports whether an ipmi-* fault applies to request r.
@@ -73,10 +75,10 @@ func (s *Store) IPMI(r IPMIRequest) IPMIAction {
 	}
 	switch e.Kind {
 	case IPMIDelay:
-		return IPMIAction{Delay: time.Duration(e.DelayMs) * time.Millisecond}
+		return IPMIAction{Delay: time.Duration(e.DelayMs) * time.Millisecond, FaultID: e.ID}
 	case IPMIError:
-		return IPMIAction{Error: true, CompletionCode: uint8(*e.CompletionCode)}
+		return IPMIAction{Error: true, CompletionCode: uint8(*e.CompletionCode), FaultID: e.ID}
 	default: // ipmi-drop, bmc-unavailable
-		return IPMIAction{Drop: true}
+		return IPMIAction{Drop: true, FaultID: e.ID}
 	}
 }

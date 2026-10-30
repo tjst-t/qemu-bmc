@@ -20,6 +20,7 @@ internal/
   bmc/                         # BMC configuration state (users, LAN, channels)
   config/                      # Environment variable config
   fault/                       # Fault injection: store, fault API, Redfish middleware, IPMI/power hooks
+  audit/                       # Action log: one "action:" line per write command (audit.Entry)
   serial/                      # Serial console mux (Console interface, QEMU UNIX socket, TCP server, ring buffer)
   bios/                        # BIOS attributes (definitions, pending settings, ResetBios, JSON file)
   firmware/                    # Simulated BMC/BIOS firmware versions (image check, download, pending BIOS, JSON file)
@@ -27,10 +28,10 @@ docker/
   Dockerfile                   # Multi-stage build (Go builder + Debian runtime)
   entrypoint.sh                # Environment variables → QEMU args conversion
   setup-network.sh             # TAP/bridge network setup for VM passthrough
-tests/                         # Bash-based container integration tests (142 tests)
+tests/                         # Bash-based container integration tests (164 tests)
   run_tests.sh                 # Test runner (category-based)
   test_helper.sh               # Assertions, container mgmt, IPMI/Redfish helpers
-  test_*.sh                    # Test categories (container, ipmi, redfish, power, boot, fault, events, serial, sol, bios, etc.)
+  test_*.sh                    # Test categories (container, ipmi, redfish, power, boot, fault, actionlog, events, serial, sol, bios, etc.)
   sol_console.py               # expect-like pty driver for ipmitool sol activate (test_sol.sh)
   bios_sushy.py                # sushy client for test_bios.sh (attributes, set, reset, registry)
   update_sushy.py              # sushy client for test_update.sh (firmware inventory, simple_update)
@@ -87,7 +88,7 @@ make docker-build
 # Container integration tests (quick smoke tests)
 make container-test
 
-# Container integration tests (all 142 tests across 14 categories)
+# Container integration tests (all 164 tests across 17 categories)
 make container-test-all
 
 # Run specific test categories
@@ -325,6 +326,15 @@ Fault JSON: `{"kind", "target" (optional, derived from kind), conditions..., "co
 | `firmware-update-fail` | update task → Exception at `atPercent` (default 50, 0-100), version unchanged; taken when the task is created (`Store.FirmwareUpdateFailure`) | `target`, `atPercent` |
 
 Wiring (`cmd/qemu-bmc/main.go`): `faults.Middleware` wraps the Redfish handler (Redfish then HTTP/1.1 only so connections can be hijacked); `ipmi.Server.SetFaults`; `redfish.Server.SetFirmwareFaults`; `faultMachine` wraps `*machine.Machine` so Redfish/IPMI (and VM IPMI) `Reset` go through `Store.Reset`. Container tests: `tests/test_fault.sh` (category `fault`).
+
+## Action Log
+
+- `internal/audit`: `audit.New(kind, via, remote)` + `Set`/`Result`/`Log` → one line `action: kind=… via=… remote=… user=… <fields> result=… <details>`; nil `*Entry` is a no-op; README "Action log" documents the format (keep it in sync).
+- Redfish: write routes are wrapped with `s.logAction(kind, h)` and named `actionRoutePrefix+kind`; handlers add fields with `action(r).Set(...)`; result from the status (2xx accepted, 4xx rejected + `status`/`reason` from the error body, 5xx failed) unless the handler set it (`result=fault`). `authMiddleware` puts the user in the context (`withUser`).
+- Redfish-level faults (`redfish-error/drop/hang`, `bmc-unavailable`) on write routes: `fault.Store.SetOnRedfishFault` → `Server.LogFaultedAction` (route matched by name).
+- IPMI: `newAction(msg, via, remote, user)` sets `IPMIMessage.action` for Chassis Control and Set Boot Options param 5 only; `finishAction` from the completion code; `ipmi-drop`/`ipmi-error` and `power-action-*` faults → `result=fault`.
+- `fault.Store.Reset` returns `*PowerActionIgnoredError` for `power-action-ignored`: callers treat it as success (Redfish 204, IPMI cc 00) and log `result=fault`.
+- Tests: `internal/{audit,redfish,ipmi}/action_log_test.go`, `tests/test_actionlog.sh` (category `actionlog`).
 
 ## Serial Console
 

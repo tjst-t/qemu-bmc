@@ -5,6 +5,8 @@ import (
 	"crypto/md5"
 	"encoding/binary"
 	"fmt"
+
+	"github.com/tjst-t/qemu-bmc/internal/audit"
 )
 
 // RMCPHeader is the RMCP message header (4 bytes)
@@ -31,6 +33,10 @@ type IPMIMessage struct {
 	SourceLun     uint8 // Sequence (upper 6 bits) + LUN (lower 2 bits)
 	Command       uint8
 	Data          []byte
+
+	// action is the action line of a logged write command (newAction);
+	// nil if the command is not logged
+	action *audit.Entry
 }
 
 // GetNetFn returns the network function from the message

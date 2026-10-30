@@ -71,12 +71,14 @@ func TestCount_RemovesFaultWhenUsedUp(t *testing.T) {
 	calls := 0
 	reset := func(string) error { calls++; return nil }
 
-	require.NoError(t, s.Reset("On", reset))
+	var ie *PowerActionIgnoredError
+	require.ErrorAs(t, s.Reset("On", reset), &ie)
+	assert.Equal(t, "On", ie.Action)
 	list := s.List()
 	require.Len(t, list, 1)
 	assert.Equal(t, 1, *list[0].Count)
 	assert.Equal(t, 1, list[0].Applied)
-	require.NoError(t, s.Reset("On", reset))
+	require.ErrorAs(t, s.Reset("On", reset), &ie)
 	assert.Empty(t, s.List())
 	assert.Equal(t, 0, calls)
 
@@ -152,11 +154,11 @@ func TestIPMI_Actions(t *testing.T) {
 	s := NewStore()
 	req := IPMIRequest{HasCommand: true, NetFn: 0x00, Cmd: 0x01}
 
-	mustAdd(t, s, Fault{Kind: IPMIError, CompletionCode: bytePtr(0xC0), Count: intPtr(1)})
-	assert.Equal(t, IPMIAction{Error: true, CompletionCode: 0xC0}, s.IPMI(req))
+	f := mustAdd(t, s, Fault{Kind: IPMIError, CompletionCode: bytePtr(0xC0), Count: intPtr(1)})
+	assert.Equal(t, IPMIAction{Error: true, CompletionCode: 0xC0, FaultID: f.ID}, s.IPMI(req))
 
-	mustAdd(t, s, Fault{Kind: IPMIDelay, DelayMs: 250, Count: intPtr(1)})
-	assert.Equal(t, IPMIAction{Delay: 250 * time.Millisecond}, s.IPMI(req))
+	f = mustAdd(t, s, Fault{Kind: IPMIDelay, DelayMs: 250, Count: intPtr(1)})
+	assert.Equal(t, IPMIAction{Delay: 250 * time.Millisecond, FaultID: f.ID}, s.IPMI(req))
 
 	// ipmi-error does not apply to session setup messages (no command)
 	mustAdd(t, s, Fault{Kind: IPMIError, IncludeSession: true, Count: intPtr(1)})

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strconv"
 
 	"github.com/tjst-t/qemu-bmc/internal/machine"
 )
@@ -57,6 +58,7 @@ func (s *Server) handleGetSecureBoot(w http.ResponseWriter, r *http.Request) {
 // handlePatchSecureBoot sets SecureBootEnable, which applies from the next
 // time QEMU starts (a reset restarts it if the setting changed).
 func (s *Server) handlePatchSecureBoot(w http.ResponseWriter, r *http.Request) {
+	action(r).Set("op", "settings").Set("secure_boot_enable", "")
 	if !s.machine.SecureBootSupported() {
 		writeError(w, http.StatusNotFound, "ResourceNotFound", "Secure Boot is not available: "+machine.ErrSecureBootUnsupported.Error())
 		return
@@ -81,6 +83,7 @@ func (s *Server) handlePatchSecureBoot(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "PropertyValueTypeError", "SecureBootEnable must be a boolean")
 		return
 	}
+	action(r).Set("secure_boot_enable", strconv.FormatBool(*enable))
 	if err := s.machine.SetSecureBootEnable(*enable); err != nil {
 		writeError(w, http.StatusBadRequest, "PropertyValueError", err.Error())
 		return
@@ -92,6 +95,7 @@ func (s *Server) handlePatchSecureBoot(w http.ResponseWriter, r *http.Request) {
 // handleResetKeys resets the Secure Boot keys to the defaults (the VARS
 // template), for the next time QEMU starts if it is running.
 func (s *Server) handleResetKeys(w http.ResponseWriter, r *http.Request) {
+	action(r).Set("op", "reset-keys").Set("reset_keys_type", "")
 	if !s.machine.SecureBootSupported() {
 		writeError(w, http.StatusNotFound, "ResourceNotFound", "Secure Boot is not available: "+machine.ErrSecureBootUnsupported.Error())
 		return
@@ -101,6 +105,7 @@ func (s *Server) handleResetKeys(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "MalformedJSON", "invalid request body")
 		return
 	}
+	action(r).Set("reset_keys_type", req.ResetKeysType)
 	if req.ResetKeysType != "ResetAllKeysToDefault" {
 		writeError(w, http.StatusBadRequest, "ActionParameterNotSupported",
 			"invalid ResetKeysType: "+req.ResetKeysType+" (only ResetAllKeysToDefault is supported)")

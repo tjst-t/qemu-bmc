@@ -23,12 +23,16 @@ func (s *Server) validCredentials(user, pass string) bool {
 // authMiddleware accepts a session token (X-Auth-Token) or HTTP Basic auth.
 func (s *Server) authMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if noAuthRequired(r) || s.sessions.authenticate(r.Header.Get("X-Auth-Token")) {
+		if noAuthRequired(r) {
 			next.ServeHTTP(w, r)
 			return
 		}
+		if user, ok := s.sessions.authenticate(r.Header.Get("X-Auth-Token")); ok {
+			next.ServeHTTP(w, withUser(r, user))
+			return
+		}
 		if user, pass, ok := r.BasicAuth(); ok && s.validCredentials(user, pass) {
-			next.ServeHTTP(w, r)
+			next.ServeHTTP(w, withUser(r, user))
 			return
 		}
 		w.Header().Set("WWW-Authenticate", `Basic realm="Redfish"`)

@@ -89,10 +89,10 @@ func (st *sessionStore) create(userName string) (*session, error) {
 }
 
 // authenticate reports whether token belongs to a live session and, if so,
-// marks the session as used.
-func (st *sessionStore) authenticate(token string) bool {
+// marks the session as used and returns its user name.
+func (st *sessionStore) authenticate(token string) (string, bool) {
 	if token == "" {
-		return false
+		return "", false
 	}
 	st.mu.Lock()
 	defer st.mu.Unlock()
@@ -100,10 +100,10 @@ func (st *sessionStore) authenticate(token string) bool {
 	for _, s := range st.sessions {
 		if subtle.ConstantTimeCompare([]byte(s.token), []byte(token)) == 1 {
 			s.lastUsed = st.now()
-			return true
+			return s.userName, true
 		}
 	}
-	return false
+	return "", false
 }
 
 func (st *sessionStore) get(id string) (session, bool) {

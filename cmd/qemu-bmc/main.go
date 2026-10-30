@@ -269,6 +269,10 @@ func main() {
 	}
 	if faults != nil {
 		httpServer.Handler = faults.Middleware(redfishServer)
+		// Write commands failed or dropped by a fault are logged too
+		faults.SetOnRedfishFault(func(r *http.Request, faultID string, kind fault.Kind) {
+			redfishServer.LogFaultedAction(r, faultID, string(kind))
+		})
 		// HTTP/1.1 only: an HTTP/2 connection cannot be hijacked, so
 		// redfish-drop could only reset the stream, not the connection
 		httpServer.TLSNextProto = map[string]func(*http.Server, *tls.Conn, http.Handler){}

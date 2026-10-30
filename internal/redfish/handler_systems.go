@@ -122,6 +122,7 @@ func (s *Server) handleGetSystem(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handlePatchSystem(w http.ResponseWriter, r *http.Request) {
+	action(r).Set("enabled", "").Set("target", "").Set("mode", "")
 	// Check If-Match header for ETag validation
 	ifMatch := r.Header.Get("If-Match")
 	if ifMatch != "" {
@@ -150,6 +151,10 @@ func (s *Server) handlePatchSystem(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "PropertyMissing", "no patchable properties provided")
 		return
 	}
+	// The values requested ("-" if not in the request)
+	action(r).Set("enabled", req.Boot.BootSourceOverrideEnabled).
+		Set("target", req.Boot.BootSourceOverrideTarget).
+		Set("mode", req.Boot.BootSourceOverrideMode)
 
 	// Get current boot override and merge with patch
 	current := s.machine.GetBootOverride()
@@ -185,6 +190,7 @@ func (s *Server) handlePatchSystem(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		httpBootURI = uri
+		action(r).Set("http_boot_uri", machine.RedactImage(*uri))
 	}
 
 	if err := s.machine.SetBootOverride(current); err != nil {

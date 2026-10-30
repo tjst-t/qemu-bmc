@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"net/http"
 	"path"
 	"strconv"
 	"strings"
@@ -251,6 +252,10 @@ type Store struct {
 	faults []*entry
 	nextID int
 	now    func() time.Time
+
+	// onRedfishFault is called for a Redfish request that a fault fails
+	// or drops (SetOnRedfishFault)
+	onRedfishFault func(r *http.Request, faultID string, kind Kind)
 }
 
 // NewStore returns an empty store.

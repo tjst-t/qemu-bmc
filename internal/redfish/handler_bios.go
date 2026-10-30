@@ -148,6 +148,7 @@ func (s *Server) handleGetBiosSettings(w http.ResponseWriter, r *http.Request) {
 // handlePatchBiosSettings adds attributes to the settings pending until the
 // next boot.
 func (s *Server) handlePatchBiosSettings(w http.ResponseWriter, r *http.Request) {
+	action(r).Set("op", "settings").Set("attributes", "")
 	if s.biosNotFound(w) {
 		return
 	}
@@ -192,6 +193,12 @@ func (s *Server) handlePatchBiosSettings(w http.ResponseWriter, r *http.Request)
 		writeError(w, http.StatusBadRequest, "PropertyMissing", "no patchable properties provided: Attributes is required")
 		return
 	}
+	names := make([]string, 0, len(attrs))
+	for name := range attrs {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	action(r).Set("attributes", strings.Join(names, ","))
 
 	if err := s.bios.SetPending(attrs); err != nil {
 		var errs bios.Errors
@@ -215,6 +222,7 @@ func (s *Server) handlePatchBiosSettings(w http.ResponseWriter, r *http.Request)
 // handleResetBios resets the attributes to their defaults at the next boot.
 // The request body, if any, is ignored (the action has no parameters).
 func (s *Server) handleResetBios(w http.ResponseWriter, r *http.Request) {
+	action(r).Set("op", "reset")
 	if s.biosNotFound(w) {
 		return
 	}

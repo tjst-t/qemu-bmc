@@ -7,6 +7,7 @@ import (
 	"net"
 	"sync"
 
+	"github.com/tjst-t/qemu-bmc/internal/audit"
 	"github.com/tjst-t/qemu-bmc/internal/bmc"
 )
 
@@ -139,7 +140,9 @@ func (vs *VMServer) handleIPMIMsg(data []byte, conn net.Conn) {
 	}
 
 	// Route to the shared IPMI command handler
+	msg.action = newAction(msg, audit.ViaIPMIVM, addrString(conn.RemoteAddr()), "")
 	code, respData := handleIPMICommand(msg, vs.machine, vs.bmcState)
+	finishAction(msg.action, code)
 
 	// Build VM protocol response
 	respNetFn := req.NetFn | 0x01

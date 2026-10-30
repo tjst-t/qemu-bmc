@@ -36,6 +36,7 @@ A Go single binary that controls QEMU VMs via both Redfish API (HTTPS) and IPMI 
 - **IPMI SOL** - `ipmitool -I lanplus sol activate` (cipher suites 3 and 17) on the same console, e.g. Ironic's `ipmitool-socat` console; Redfish `SerialConsole` on `Managers/1` and `Systems/1`
 - **BIOS settings** - Redfish `Systems/1/Bios` with an attribute registry, pending `Settings` applied at the next boot and `ResetBios`, for Ironic's `bios` interface (`apply_configuration`, `factory_reset`) and Metal3 firmware settings. Display only: the values do not change the VM
 - **Firmware updates (simulated)** - Redfish `UpdateService`: `FirmwareInventory` (BMC, BIOS), `SimpleUpdate` and multipart HTTP push of small test images, `TaskService` tasks with progress, BIOS versions pending until the next boot, and faults that reject an image or fail the update
+- **Action log** - One `action:` line per write command received (power, boot override, VirtualMedia, BIOS, Secure Boot, firmware update; Redfish and IPMI), with the client, user and result, easy to count with `grep`
 - **Compatibility** - MAAS, Tinkerbell/Rufio
 
 ## Quick Start
@@ -511,6 +512,49 @@ A fault is `{"kind": ..., conditions..., "count": N, "durationSeconds": S}`: `co
 - `target` of the `firmware-*` kinds: `BMC` or `BIOS` limits the fault to updates of that firmware; omitted (or `firmware`) = both.
 - With `FAULT_API_ADDR` or `FAULTS` set, Redfish serves HTTP/1.1 only (an HTTP/2 connection cannot be dropped as a whole).
 
+### Action log
+
+Every write command qemu-bmc receives is logged as one line, so that tests and audits can count the operations it received (for example "the power was never switched" or "switched exactly n times"). Reads (GET, IPMI status commands) are never logged, and nothing else writes a line starting with `action:`.
+
+```
+2026/10/30 17:12:55 audit.go:153: action: kind=power via=redfish remote=192.0.2.10 user=admin reset_type=ForceRestart result=accepted
+2026/10/30 17:12:56 audit.go:153: action: kind=power via=ipmi remote=192.0.2.10 user=admin reset_type=ForceRestart result=accepted
+2026/10/30 17:12:57 audit.go:153: action: kind=boot via=ipmi remote=192.0.2.10 user=admin enabled=Continuous target=Hdd mode=Legacy result=accepted
+2026/10/30 17:12:58 audit.go:153: action: kind=vmedia-insert via=redfish remote=192.0.2.10 user=admin device=CD1 image=http://user:xxxxx@192.0.2.5/boot.iso result=accepted
+2026/10/30 17:12:59 audit.go:153: action: kind=power via=redfish remote=192.0.2.10 user=admin reset_type=Bogus result=rejected status=400 reason=ActionParameterNotSupported
+2026/10/30 17:13:00 audit.go:153: action: kind=power via=ipmi remote=192.0.2.10 user=admin reset_type=ForceRestart result=fault cc=0xc3 fault=2
+```
+
+```bash
+docker logs bmc 2>&1 | grep -c 'action: kind=power '                       # power commands received
+docker logs bmc 2>&1 | grep 'action: kind=power ' | grep -c 'result=accepted'  # ... carried out
+```
+
+The line (after the logger's date, time and source file) is `action:` followed by space-separated `key=value` fields, always in this order: `kind`, `via`, `remote`, `user`, the fields of the kind, `result`, then the details of the result. An empty value is `-`; a value with spaces, `"`, `=` or `\` is quoted (Go syntax).
+
+| Field | Values |
+|-------|--------|
+| `kind` | `power`, `boot`, `vmedia-insert`, `vmedia-eject`, `bios`, `secureboot`, `update` |
+| `via` | `redfish`, `ipmi` (IPMI over LAN), `ipmi-vm` (in-band IPMI from the guest, `VM_IPMI_ADDR`) |
+| `remote` | Client IP address |
+| `user` | Authenticated user (Redfish Basic or session, IPMI RMCP+ session); `-` if none (auth disabled, IPMI 1.5 without a session, in-band, faulted requests) |
+| `result` | `accepted` (carried out, or started: update task), `rejected` (invalid or not possible now; nothing changed), `failed` (an error inside qemu-bmc), `fault` (an injected fault failed or dropped it) |
+| details | `status=` HTTP status and `reason=` Redfish message id / error code (Redfish errors), `cc=` completion code (IPMI errors), `fault=` fault id (`result=fault`; `reason=` the fault kind for a Redfish-level fault) |
+
+| `kind` | Commands | Fields |
+|--------|----------|--------|
+| `power` | Redfish `ComputerSystem.Reset`; IPMI Chassis Control (off/on/cycle/reset/soft/diag as `ForceOff`/`On`/`PowerCycle`/`ForceRestart`/`GracefulShutdown`/`Nmi`) | `reset_type` |
+| `boot` | Redfish `PATCH Systems/1` (Boot); IPMI Set System Boot Options, boot flags parameter (`ipmitool chassis bootdev`) | `enabled`, `target`, `mode` as requested (`-` if not in the request), `http_boot_uri` |
+| `vmedia-insert`, `vmedia-eject` | Redfish `VirtualMedia.InsertMedia` / `EjectMedia` (under Systems/1 or Managers/1) | `device`, `image` (password shown as `xxxxx`) |
+| `bios` | Redfish `PATCH Bios/Settings` (`op=settings`), `Bios.ResetBios` (`op=reset`) | `op`, `attributes` (names, comma-separated) |
+| `secureboot` | Redfish `PATCH SecureBoot` (`op=settings`), `SecureBoot.ResetKeys` (`op=reset-keys`) | `op`, `secure_boot_enable`, `reset_keys_type` |
+| `update` | Redfish `UpdateService.SimpleUpdate` (`op=SimpleUpdate`), multipart push (`op=MultipartPush`) | `op`, `image`, then `target`, `version`, `task` once the image is accepted |
+
+- One line per request as received: an `ipmitool` retry after a lost response is a second request and a second line.
+- Commands refused before they reach the command (Redfish `401` without valid credentials, IPMI session errors) are not logged.
+- With fault injection: `power-action-ignored` gives `result=fault` although the client sees success; `redfish-error`, `redfish-drop`, `redfish-hang` and `bmc-unavailable` on a write command, and `ipmi-drop` / `ipmi-error` on Chassis Control or the boot flags, also log `result=fault` (`redfish-delay`, `ipmi-delay` do not change the result). A firmware update that fails later (`firmware-update-fail`) is `accepted` here and shows in its task.
+- Power changes that are no command are not logged: `POWER_ON_AT_START`, the guest shutting down or rebooting itself, a Graceful action timing out.
+
 ## Redfish Endpoints
 
 | Method | Path | Description |
@@ -786,6 +830,7 @@ QEMU VM を Redfish API (HTTPS) と IPMI over LAN (UDP) の両方で制御する
 - **IPMI SOL** - 同じコンソールを `ipmitool -I lanplus sol activate`（暗号スイート 3 と 17）で使える。Ironic の `ipmitool-socat` のコンソールなど。Redfish の `Managers/1` と `Systems/1` に `SerialConsole`
 - **BIOS の設定** - Redfish の `Systems/1/Bios`（属性レジストリ、次の起動で反映する `Settings`、`ResetBios`）。Ironic の `bios` インターフェース（`apply_configuration`・`factory_reset`）や Metal3 の firmware settings を試せる。見せるだけで、値は VM の動きを変えない
 - **ファームウェアの更新（模擬）** - Redfish の `UpdateService`。`FirmwareInventory`（BMC・BIOS）、小さな試験用イメージでの `SimpleUpdate` と multipart HTTP push、進み具合のある `TaskService` のタスク、次の起動まで保留になる BIOS の版、イメージを断る・更新を失敗させる故障
+- **操作のログ** - 受けた書き込みの命令（電源・起動先の上書き・VirtualMedia・BIOS・Secure Boot・ファームウェアの更新。Redfish と IPMI）を、送り元・利用者・結果つきで1件1行（`action:`）出す。`grep` で数えやすい
 - **互換性** - MAAS, Tinkerbell/Rufio
 
 ## クイックスタート
@@ -1254,6 +1299,47 @@ curl -H "$T" -X DELETE http://localhost:8623/faults      # 全部消す
 - `action`: 要求された Redfish の `ResetType`（`On`・`ForceOff`・`GracefulShutdown`・`ForceRestart`・`GracefulRestart`・`PowerCycle`・`ForceOn`・`Nmi`・`PushPowerButton`）。IPMI の chassis control は `ForceOff`（off）・`On`（on）・`PowerCycle`（cycle）・`ForceRestart`（reset）・`GracefulShutdown`（soft）・`Nmi`（diag）になる。省略で全部。
 - `firmware-*` の `target`：`BMC` か `BIOS` でそのファームウェアの更新だけに効く。省略（か `firmware`）で両方。
 - `FAULT_API_ADDR` か `FAULTS` を設定すると、Redfish は HTTP/1.1 だけになる（HTTP/2 の接続はまるごと閉じられないので）。
+
+### 操作のログ
+
+qemu-bmc は、受けた書き込みの命令を1件ごとに1行ログに出す。試験や監査で、受けた操作を数えられるようにするためのもの（「電源は一度も操作されなかった」「ちょうど n 回操作された」など）。読むだけの要求（GET、IPMI の状態の取得）は出さない。`action:` で始まる行はこれだけが出す。
+
+```
+2026/10/30 17:12:55 audit.go:153: action: kind=power via=redfish remote=192.0.2.10 user=admin reset_type=ForceRestart result=accepted
+2026/10/30 17:12:56 audit.go:153: action: kind=power via=ipmi remote=192.0.2.10 user=admin reset_type=ForceRestart result=accepted
+2026/10/30 17:12:59 audit.go:153: action: kind=power via=redfish remote=192.0.2.10 user=admin reset_type=Bogus result=rejected status=400 reason=ActionParameterNotSupported
+2026/10/30 17:13:00 audit.go:153: action: kind=power via=ipmi remote=192.0.2.10 user=admin reset_type=ForceRestart result=fault cc=0xc3 fault=2
+```
+
+```bash
+docker logs bmc 2>&1 | grep -c 'action: kind=power '                          # 受けた電源の命令
+docker logs bmc 2>&1 | grep 'action: kind=power ' | grep -c 'result=accepted'  # そのうち実行したもの
+```
+
+行の形（ロガーが付ける日時とファイル名のあと）は、`action:` に続けて空白区切りの `key=value` を並べたもの。順番は `kind`・`via`・`remote`・`user`・kind ごとの欄・`result`・結果の詳細で決まっている。空の値は `-`、空白・`"`・`=`・`\` を含む値は引用符で囲む（Go の書き方）。
+
+| 欄 | 値 |
+|----|----|
+| `kind` | `power`・`boot`・`vmedia-insert`・`vmedia-eject`・`bios`・`secureboot`・`update` |
+| `via` | `redfish`・`ipmi`（IPMI over LAN）・`ipmi-vm`（ゲストからのイン・バンド IPMI、`VM_IPMI_ADDR`） |
+| `remote` | 送り元の IP アドレス |
+| `user` | 認証した利用者（Redfish の Basic・セッション、IPMI の RMCP+ セッション）。無ければ `-`（認証なし、セッションなしの IPMI 1.5、イン・バンド、故障で落とした要求） |
+| `result` | `accepted`（実行した。更新はタスクを始めた）・`rejected`（不正・いまはできない。何も変えていない）・`failed`（qemu-bmc の中のエラー）・`fault`（故障の注入で失敗させた・落とした） |
+| 詳細 | Redfish のエラーは `status=`（HTTP の状態）と `reason=`（Redfish の MessageId・エラーコード）、IPMI のエラーは `cc=`（completion code）、`result=fault` は `fault=`（故障の id。Redfish の段の故障は `reason=` に故障の種類） |
+
+| `kind` | 命令 | 欄 |
+|--------|------|----|
+| `power` | Redfish の `ComputerSystem.Reset`、IPMI の Chassis Control（off・on・cycle・reset・soft・diag を `ForceOff`・`On`・`PowerCycle`・`ForceRestart`・`GracefulShutdown`・`Nmi` で出す） | `reset_type` |
+| `boot` | Redfish の `PATCH Systems/1`（Boot）、IPMI の Set System Boot Options の boot flags（`ipmitool chassis bootdev`） | 要求の `enabled`・`target`・`mode`（要求に無ければ `-`）、`http_boot_uri` |
+| `vmedia-insert`・`vmedia-eject` | Redfish の `VirtualMedia.InsertMedia`・`EjectMedia`（Systems/1・Managers/1 の下） | `device`・`image`（パスワードは `xxxxx`） |
+| `bios` | Redfish の `PATCH Bios/Settings`（`op=settings`）・`Bios.ResetBios`（`op=reset`） | `op`・`attributes`（属性の名前をカンマ区切り） |
+| `secureboot` | Redfish の `PATCH SecureBoot`（`op=settings`）・`SecureBoot.ResetKeys`（`op=reset-keys`） | `op`・`secure_boot_enable`・`reset_keys_type` |
+| `update` | Redfish の `UpdateService.SimpleUpdate`（`op=SimpleUpdate`）・multipart push（`op=MultipartPush`） | `op`・`image`、イメージを受けたら `target`・`version`・`task` |
+
+- 受けた要求1件につき1行。応答が失われて `ipmitool` が送り直したら、別の要求として2行目が出る。
+- 命令に届く前に断ったもの（Redfish で認証が無く `401`、IPMI のセッションのエラー）は出さない。
+- 故障の注入：`power-action-ignored` は、相手には成功に見えても `result=fault` で出す。書き込みの命令への `redfish-error`・`redfish-drop`・`redfish-hang`・`bmc-unavailable`、Chassis Control・boot flags への `ipmi-drop`・`ipmi-error` も `result=fault` で出す（`redfish-delay`・`ipmi-delay` は結果を変えない）。あとで失敗する更新（`firmware-update-fail`）はここでは `accepted` で、結果はタスクに出る。
+- 命令によらない電源の変化は出さない：`POWER_ON_AT_START`、ゲストが自分で止まる・再起動する、Graceful が時間切れになる。
 
 ## Redfish エンドポイント
 

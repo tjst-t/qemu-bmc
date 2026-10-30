@@ -8,6 +8,7 @@ import (
 	"net"
 	"time"
 
+	"github.com/tjst-t/qemu-bmc/internal/audit"
 	"github.com/tjst-t/qemu-bmc/internal/bmc"
 	"github.com/tjst-t/qemu-bmc/internal/fault"
 	"github.com/tjst-t/qemu-bmc/internal/serial"
@@ -182,19 +183,27 @@ func (s *Server) handleMessage(data []byte, addr net.Addr) ([]byte, time.Duratio
 			Cmd:        msg.Command,
 			Session:    netFn == NetFnApp && sessionCommands[msg.Command],
 		})
+		msg.action = newAction(msg, audit.ViaIPMI, addrString(addr), sessionUser(session))
 		if !ok {
+			msg.action.Result(audit.Fault, "fault", a.FaultID)
+			msg.action.Log()
 			return 0, nil, errNoResponse
 		}
 		if a.Error {
-			return CompletionCode(a.CompletionCode), nil, nil
+			code := CompletionCode(a.CompletionCode)
+			msg.action.Result(audit.Fault, "cc", ccString(code), "fault", a.FaultID)
+			msg.action.Log()
+			return code, nil, nil
 		}
 		if session != nil {
 			session.setAddr(addr)
 		}
 		if code, resp, ok := s.handleServerCommand(msg, session); ok {
+			finishAction(msg.action, code)
 			return code, resp, nil
 		}
 		code, resp := handleIPMICommand(msg, s.machine, s.bmcState)
+		finishAction(msg.action, code)
 		return code, resp, nil
 	}
 	handlers := sessionHandlers{

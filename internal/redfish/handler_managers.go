@@ -8,6 +8,7 @@ import (
 	"path"
 	"strings"
 
+	"github.com/gorilla/mux"
 	"github.com/tjst-t/qemu-bmc/internal/firmware"
 	"github.com/tjst-t/qemu-bmc/internal/machine"
 )
@@ -117,11 +118,13 @@ func (s *Server) handleGetVirtualMedia(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleInsertMedia(w http.ResponseWriter, r *http.Request) {
+	action(r).Set("device", mux.Vars(r)["vmid"]).Set("image", "")
 	var req InsertMediaRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "MalformedJSON", "Invalid request body")
 		return
 	}
+	action(r).Set("image", machine.RedactImage(req.Image))
 
 	if req.Image == "" {
 		writeError(w, http.StatusBadRequest, "ActionParameterMissing", "Image is required")
@@ -141,6 +144,7 @@ func (s *Server) handleInsertMedia(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleEjectMedia(w http.ResponseWriter, r *http.Request) {
+	action(r).Set("device", mux.Vars(r)["vmid"])
 	if err := s.machine.EjectMedia(); err != nil {
 		log.Printf("VirtualMedia: EjectMedia failed: %v", err)
 		writeError(w, http.StatusInternalServerError, "InternalError", err.Error())

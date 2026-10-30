@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/gorilla/mux"
+	"github.com/tjst-t/qemu-bmc/internal/audit"
 	"github.com/tjst-t/qemu-bmc/internal/firmware"
 	"github.com/tjst-t/qemu-bmc/internal/machine"
 )
@@ -232,6 +233,7 @@ type SimpleUpdateRequest struct {
 // checks it and starts the update task: 202 with the task monitor as
 // Location. A broken image is rejected with 400 before any task exists.
 func (s *Server) handleSimpleUpdate(w http.ResponseWriter, r *http.Request) {
+	action(r).Set("op", "SimpleUpdate").Set("image", "")
 	if s.firmwareNotFound(w) {
 		return
 	}
@@ -240,6 +242,7 @@ func (s *Server) handleSimpleUpdate(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "MalformedJSON", "invalid request body")
 		return
 	}
+	action(r).Set("image", machine.RedactImage(req.ImageURI))
 	if req.ImageURI == "" {
 		writeError(w, http.StatusBadRequest, "ActionParameterMissing", "ImageURI is required")
 		return
@@ -268,7 +271,7 @@ func (s *Server) handleSimpleUpdate(w http.ResponseWriter, r *http.Request) {
 			fmt.Sprintf("downloading %s failed: %v", shown, err))
 		return
 	}
-	s.acceptImage(w, img, shown, targets)
+	s.acceptImage(w, r, img, shown, targets)
 }
 
 // imageURL returns the http(s) URL of a SimpleUpdate image. ImageURI
@@ -327,6 +330,7 @@ type UpdateParameters struct {
 // @Redfish.OperationApplyTime Immediate or OnReset; the BIOS always
 // activates at the next boot) and starts the update task.
 func (s *Server) handleMultipartPush(w http.ResponseWriter, r *http.Request) {
+	action(r).Set("op", "MultipartPush").Set("image", "")
 	if s.firmwareNotFound(w) {
 		return
 	}
@@ -369,6 +373,7 @@ func (s *Server) handleMultipartPush(w http.ResponseWriter, r *http.Request) {
 			if fn := part.FileName(); fn != "" {
 				name = fn
 			}
+			action(r).Set("image", name)
 			img, imgErr = firmware.ReadImage(part)
 		}
 		part.Close()
@@ -398,17 +403,19 @@ func (s *Server) handleMultipartPush(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "MalformedJSON", "reading UpdateFile: "+imgErr.Error())
 		return
 	}
-	s.acceptImage(w, img, name, targets)
+	s.acceptImage(w, r, img, name, targets)
 }
 
 // acceptImage checks a received image against the Targets and the
 // firmware-image-rejected faults, and starts its update task.
-func (s *Server) acceptImage(w http.ResponseWriter, img firmware.Image, name string, targets map[string]bool) {
+func (s *Server) acceptImage(w http.ResponseWriter, r *http.Request, img firmware.Image, name string, targets map[string]bool) {
+	action(r).Set("target", img.Target).Set("version", img.Version)
 	if len(targets) > 0 && !targets[img.Target] {
 		writeImageRejected(w, name, targets, fmt.Errorf("%w: the image is for %s, not the Targets", firmware.ErrInvalidImage, img.Target))
 		return
 	}
 	if s.fwFaults != nil && s.fwFaults.RejectFirmwareImage(img.Target) {
+		action(r).Result(audit.Fault, "status", "400", "reason", "VerificationFailed")
 		writeImageRejected(w, name, map[string]bool{img.Target: true}, fmt.Errorf("%w: rejected (injected fault)", firmware.ErrInvalidImage))
 		return
 	}
@@ -418,6 +425,7 @@ func (s *Server) acceptImage(w http.ResponseWriter, img firmware.Image, name str
 		return
 	}
 	log.Printf("UpdateService: task %s: %s %s from %s", t.id, img.Target, img.Version, name)
+	action(r).Set("task", t.id)
 	writeTaskAccepted(w, t)
 }
 
