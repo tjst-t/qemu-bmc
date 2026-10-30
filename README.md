@@ -137,7 +137,7 @@ curl -k -u admin:password -X POST \
 
 - `BootSourceOverrideEnabled`: `Once` applies to the next boot only (power on, `ForceRestart`, `PowerCycle`, `GracefulRestart`), then goes back to `Disabled` / `None`. `Continuous` applies to every boot until changed. `Disabled` boots the default order (`-boot c`, the disk first) whatever the target.
 - In process management mode the override is put on the QEMU command line (`-boot` and `bootindex=0` on the CD drive, NIC or HTTP boot image), which QEMU keeps across resets. After the boot that used a `Once` override, qemu-bmc undoes it in the running QEMU (QMP `qom-set` of `bootindex`, HMP `boot_set`), so that a reboot by the guest itself (e.g. at the end of an OS installation) boots the default order again, as on a real machine — also with the VirtualMedia ISO still inserted.
-- UEFI: OVMF ignores `-boot` and stores the boot order QEMU gives it in its variables (`OVMF_VARS.fd`), so after an override the override device (e.g. the CD) would stay first. When the default order is disk first and no device has a `bootindex` of the user's, qemu-bmc gives the disks a `bootindex` for the guest's next reboot, and on the next power on without an override it does so and resets the VM once right away (still in the firmware), so that OVMF puts the disks first again. An OS that registers its own boot entry (`efibootmgr`) is booted as OVMF orders it.
+- UEFI: OVMF ignores `-boot` and stores the boot order QEMU gives it in its variables (`OVMF_VARS.fd`), so after an override the override device (e.g. the CD) would stay first. When the default order is disk first and no device has a `bootindex` of the user's, qemu-bmc gives the disks a `bootindex` for the guest's next reboot, and on the next power on without an override it does so and resets the VM once right away (still in the firmware), so that OVMF puts the disks first again. The CD drives and then the NICs get a `bootindex` after the disks (OVMF would drop devices without one), so that when the disk does not boot (empty, no OS yet) the VM still falls back to an inserted CD or the network, as with a disk, CD, network order on a real machine. An OS that registers its own boot entry (`efibootmgr`) is booted as OVMF orders it.
 
 #### VirtualMedia
 
@@ -925,7 +925,7 @@ curl -k -u admin:password -X POST \
 
 - `BootSourceOverrideEnabled`：`Once` は次の1回の起動（電源オン・`ForceRestart`・`PowerCycle`・`GracefulRestart`）だけに効き、そのあと `Disabled` / `None` に戻る。`Continuous` は変えるまで毎回効く。`Disabled` は起動先に関わらず既定の順（`-boot c`、ディスクが先）で起こす。
 - プロセス管理モードでは、上書きは QEMU の起動引数（`-boot` と、CD・NIC・HTTP ブートのイメージの `bootindex=0`）に入り、QEMU はリセットしてもそれを保つ。`Once` を使った起動のあと、qemu-bmc は動いている QEMU の上書きを戻す（QMP の `qom-set` で `bootindex`、HMP の `boot_set`）。そのため、ゲストが自分で再起動しても（OS の導入の終わりなど）、VirtualMedia の ISO が差さったままでも、実機と同じく既定の順で起きる。
-- UEFI：OVMF は `-boot` を見ず、QEMU が渡した起動順を変数（`OVMF_VARS.fd`）に残すので、上書きのあとはその装置（CD など）が先のままになる。既定の順がディスク先で、利用者が `bootindex` を付けた装置が無ければ、qemu-bmc はゲストの次の再起動に向けてディスクに `bootindex` を付ける。また、上書きの無い次の電源オンでも同じようにし、すぐに一度リセットして（まだファームウェアの中）、OVMF の順をディスク先に戻す。OS が自分の起動項目を登録していれば（`efibootmgr`）、OVMF の並べた順で起きる。
+- UEFI：OVMF は `-boot` を見ず、QEMU が渡した起動順を変数（`OVMF_VARS.fd`）に残すので、上書きのあとはその装置（CD など）が先のままになる。既定の順がディスク先で、利用者が `bootindex` を付けた装置が無ければ、qemu-bmc はゲストの次の再起動に向けてディスクに `bootindex` を付ける。また、上書きの無い次の電源オンでも同じようにし、すぐに一度リセットして（まだファームウェアの中）、OVMF の順をディスク先に戻す。ディスクの後ろには CD ドライブ、次に NIC にも `bootindex` を付ける（OVMF は `bootindex` の無い装置を順から外すため）。そのため、ディスクが起動できないとき（空、OS を入れる前）も、実機の「ディスク → CD → ネットワーク」の順と同じく、差した CD やネットワークへ落ちる。OS が自分の起動項目を登録していれば（`efibootmgr`）、OVMF の並べた順で起きる。
 
 #### VirtualMedia
 

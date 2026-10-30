@@ -58,3 +58,25 @@ func TestBootOverrideRevert_NoOverride(t *testing.T) {
 	r := bootOverrideRevert(before, after)
 	assert.Empty(t, r.Devices)
 }
+
+func TestFallbackBootDevices(t *testing.T) {
+	args := []string{
+		"-drive", "if=pflash,format=raw,readonly=on,file=/OVMF_CODE.fd",
+		"-drive", "file=/vm/disk.qcow2,format=qcow2,if=virtio",
+		"-netdev", "tap,id=net0", "-device", "virtio-net-pci,netdev=net0,mac=52:54:00:00:00:01",
+		"-device", "ide-cd,drive=" + CDDriveID + ",id=" + CDDeviceID,
+		"-netdev", "tap,id=net1", "-device", "e1000,netdev=net1,id=nic1",
+		"-device", "ide-cd,bus=ahci0.0,drive=" + HTTPBootDriveID + ",id=" + HTTPBootDeviceID,
+		"-nic", "user",
+	}
+	// CD drives first, then the NICs; the HTTP boot image and -nic are left out
+	assert.Equal(t, []string{CDDeviceID, "qbmc-boot7", "nic1"}, fallbackBootDevices(args))
+	assert.Equal(t, "virtio-net-pci,netdev=net0,mac=52:54:00:00:00:01,id=qbmc-boot7", args[7])
+
+	// The id given by bootOverrideRevert is kept
+	before := []string{"-drive", "if=pflash,format=raw,readonly=on,file=/OVMF_CODE.fd",
+		"-netdev", "tap,id=net0", "-device", "virtio-net-pci,netdev=net0"}
+	after := ApplyBootOverride(append([]string(nil), before...), "Pxe")
+	r := bootOverrideRevert(before, after)
+	assert.Equal(t, r.Devices, fallbackBootDevices(after))
+}

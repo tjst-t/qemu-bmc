@@ -734,6 +734,15 @@ func (m *Machine) bootDisksFirst() {
 		}
 		index++
 	}
+	// Then the CD drives and the NICs, which OVMF would otherwise leave out
+	// of its boot order (no fallback when the disk does not boot)
+	for _, id := range m.processManager.BootRevert().Others {
+		if err := m.qmpClient.QOMSet("/machine/peripheral/"+id, "bootindex", index); err != nil {
+			log.Printf("Boot override: cannot set the boot index of %s: %v", id, err)
+			continue
+		}
+		index++
+	}
 }
 
 // nextBootTarget returns the boot target for the next boot: the override

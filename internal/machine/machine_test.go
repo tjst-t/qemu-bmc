@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -823,18 +824,25 @@ func TestProcessMode_BootOnce_UEFIDisksFirst(t *testing.T) {
 		{Device: "", QDev: "data1"},
 	}
 	pm := newMockProcessManager(false)
-	pm.revert = qemu.BootRevert{Devices: []string{"vmedia-cd0"}, Order: "c", DisksFirst: true}
+	pm.revert = qemu.BootRevert{Devices: []string{"vmedia-cd0"}, Order: "c", DisksFirst: true,
+		Others: []string{"vmedia-cd0", "qbmc-boot9"}}
 	m := NewWithProcess(qmpMock, pm)
 
 	require.NoError(t, m.SetBootOverride(BootOverride{Enabled: "Once", Target: "Cd", Mode: "UEFI"}))
 	require.NoError(t, m.Reset("On"))
 	args := qmpMock.MediumArgs()
-	assert.Contains(t, args, "qom-set /machine/peripheral/vmedia-cd0 bootindex -1")
-	assert.Contains(t, args, "qom-set /machine/peripheral-anon/device[0]/virtio-backend bootindex 1")
-	assert.Contains(t, args, "qom-set /machine/peripheral/data1 bootindex 2")
 	for _, a := range args {
 		assert.NotContains(t, a, "pflash")
 	}
+	// The override undone, then disks first, then the CD and the NIC as
+	// fallbacks (OVMF drops devices without a bootindex)
+	assert.Equal(t, []string{
+		"qom-set /machine/peripheral/vmedia-cd0 bootindex -1",
+		"qom-set /machine/peripheral-anon/device[0]/virtio-backend bootindex 1",
+		"qom-set /machine/peripheral/data1 bootindex 2",
+		"qom-set /machine/peripheral/vmedia-cd0 bootindex 3",
+		"qom-set /machine/peripheral/qbmc-boot9 bootindex 4",
+	}, qomSets(args))
 }
 
 func TestProcessMode_BootContinuous_NotReverted(t *testing.T) {
@@ -1465,7 +1473,7 @@ func TestProcessMode_UEFIBootOrderRestoredAtNextPowerOn(t *testing.T) {
 	require.NoError(t, m.Reset("On"))
 	pm.exit() // the guest powers off
 	pm.mu.Lock()
-	pm.revert = qemu.BootRevert{} // started without an override
+	pm.revert = qemu.BootRevert{Others: []string{"vmedia-cd0"}} // started without an override
 	pm.mu.Unlock()
 	qmpMock.mu.Lock()
 	qmpMock.calls, qmpMock.mediumArgs = nil, nil
@@ -1473,7 +1481,10 @@ func TestProcessMode_UEFIBootOrderRestoredAtNextPowerOn(t *testing.T) {
 
 	require.NoError(t, m.Reset("On"))
 	assert.Equal(t, []string{"Cd", "None"}, pm.StartCalls())
-	assert.Contains(t, qmpMock.MediumArgs(), "qom-set /machine/peripheral-anon/device[0]/virtio-backend bootindex 1")
+	assert.Equal(t, []string{
+		"qom-set /machine/peripheral-anon/device[0]/virtio-backend bootindex 1",
+		"qom-set /machine/peripheral/vmedia-cd0 bootindex 2",
+	}, qomSets(qmpMock.MediumArgs()))
 	assert.Contains(t, qmpMock.Calls(), "SystemReset")
 
 	// Only once
@@ -1493,4 +1504,15 @@ func TestProcessMode_NoUEFIBootOrderRestoreWithoutOverride(t *testing.T) {
 	require.NoError(t, m.Reset("On"))
 	assert.NotContains(t, qmpMock.Calls(), "SystemReset")
 	assert.NotContains(t, qmpMock.Calls(), "QOMSet")
+}
+
+// qomSets returns the qom-set calls among the recorded QMP arguments.
+func qomSets(args []string) []string {
+	var sets []string
+	for _, a := range args {
+		if strings.HasPrefix(a, "qom-set ") {
+			sets = append(sets, a)
+		}
+	}
+	return sets
 }

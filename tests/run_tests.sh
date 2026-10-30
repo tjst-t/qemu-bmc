@@ -27,7 +27,7 @@ usage() {
     echo "  redfish    - Redfish API tests"
     echo "  power      - Power control tests"
     echo "  boot       - Boot device tests"
-    echo "  bootonce   - Boot override Once lasts one boot: guest reboot and power off/on (Debian guest + test ISO, UEFI and BIOS)"
+    echo "  bootonce   - Boot override Once lasts one boot: guest reboot and power off/on (Debian guest + test ISO, UEFI and BIOS); an empty disk falls back to the CD"
     echo "  network    - Network passthrough tests"
     echo "  cross      - Cross-protocol consistency tests"
     echo "  fault      - Fault injection tests (FAULT_API_ADDR)"

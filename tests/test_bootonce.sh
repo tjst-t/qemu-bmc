@@ -59,6 +59,55 @@ bootonce_check() {
     assert_contains "$media" '"Inserted":true' "the ISO should still be inserted"
 }
 
+# bootonce_fallback_check HOW - UEFI, empty disk, the ISO stays inserted:
+# after the Once boot, the next boot (HOW: reboot by the guest, or poweroff
+# and on) cannot boot the disk and must fall back to the CD, as with a
+# disk, CD, network boot order on a real machine (not stop in the UEFI
+# shell)
+bootonce_fallback_check() {
+    local how="$1" off out
+    docker volume rm -f "$BOOTONCE_VOLUME-empty" >/dev/null 2>&1
+    start_test_container -v "$BOOTONCE_VOLUME-empty:/vm" -v "$DEBIAN_CACHE:/base:ro" \
+        -e "POWER_ON_AT_START=false" -e "VM_BOOT_MODE=uefi" -e "VM_DISK_SIZE=1G"
+    wait_for_redfish_ready 60 || return 1
+    serial_client a
+    sleep 1
+
+    redfish_post /redfish/v1/Managers/1/VirtualMedia/CD1/Actions/VirtualMedia.InsertMedia \
+        "{\"Image\":\"/base/$ONCE_ISO_FILE\"}" >/dev/null
+    redfish_patch /redfish/v1/Systems/1 \
+        '{"Boot":{"BootSourceOverrideTarget":"Cd","BootSourceOverrideEnabled":"Once"}}' >/dev/null
+    redfish_post /redfish/v1/Systems/1/Actions/ComputerSystem.Reset '{"ResetType":"On"}' >/dev/null
+    wait_for_qemu_running 30 || return 1
+    serial_wait a 0 "$ONCE_MARK" 180 || return 1
+
+    if [ "$how" = poweroff ]; then
+        redfish_post /redfish/v1/Systems/1/Actions/ComputerSystem.Reset '{"ResetType":"ForceOff"}' >/dev/null
+        wait_for_qemu_stopped 30 || return 1
+        off=$(serial_size a)
+        redfish_post /redfish/v1/Systems/1/Actions/ComputerSystem.Reset '{"ResetType":"On"}' >/dev/null
+        wait_for_qemu_running 30 || return 1
+    else
+        off=$(container_exec bash -c "grep -ab -o '$ONCE_MARK' /tmp/a.log | head -1 | cut -d: -f1")
+        off=$(( off + ${#ONCE_MARK} ))
+    fi
+    serial_wait a "$off" "$ONCE_MARK|Shell>" 240 || return 1
+    out=$(serial_since a "$off")
+    assert_contains "$out" "$ONCE_MARK" "the next boot ($how) should fall back to the CD (empty disk)"
+    local rc=$?
+    stop_test_container >/dev/null
+    docker volume rm -f "$BOOTONCE_VOLUME-empty" >/dev/null 2>&1
+    return $rc
+}
+
+test_bootonce_empty_disk_falls_back_to_cd_reboot_uefi() {
+    bootonce_fallback_check reboot
+}
+
+test_bootonce_empty_disk_falls_back_to_cd_power_off_on_uefi() {
+    bootonce_fallback_check poweroff
+}
+
 test_bootonce_guest_reboot_uefi() {
     bootonce_check uefi reboot
 }
@@ -80,6 +129,8 @@ run_test test_bootonce_guest_reboot_uefi
 run_test test_bootonce_guest_reboot_bios
 run_test test_bootonce_power_off_on_uefi
 run_test test_bootonce_power_off_on_bios
+run_test test_bootonce_empty_disk_falls_back_to_cd_reboot_uefi
+run_test test_bootonce_empty_disk_falls_back_to_cd_power_off_on_uefi
 
 stop_test_container
 cleanup_debian_disk "$BOOTONCE_VOLUME"

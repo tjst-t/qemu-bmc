@@ -90,6 +90,9 @@ func (p *processManager) Start(bootTarget, cdImage, httpBootImage string, secure
 		args = ApplyHTTPBoot(args, httpBootImage)
 	}
 	p.revert = bootOverrideRevert(before, args)
+	if IsUEFI(args) {
+		p.revert.Others = fallbackBootDevices(args)
+	}
 	p.cmd = p.cmdFactory(p.binary, args)
 	p.cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	p.stderr = nil
