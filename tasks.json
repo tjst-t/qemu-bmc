@@ -1262,6 +1262,32 @@
       "updatedAt": "2026-10-29T17:51:23.461Z",
       "closedAt": "2026-10-29T17:51:23.461Z",
       "extra": {}
+    },
+    {
+      "id": "virtualmedia-bios-simpleupdate-1-1",
+      "number": 57,
+      "kind": "task",
+      "title": "受けた書き込みの命令（電源・起動先・VirtualMedia・Bios・SimpleUpdate）をログに1件1行で出す",
+      "status": "in-progress",
+      "parent": null,
+      "dependsOn": [],
+      "milestone": null,
+      "priority": "low",
+      "labels": [],
+      "body": "## なぜ\n試験や監査で、BMC が受けた操作を数えられるようにする。いまは Redfish の ComputerSystem.Reset を受けて 204 を返しても、ログに行が残らない。\n\n## やること\n- 受けた書き込みの命令を、1件ごとに1行、決まった形（前置き `action:` に key=value を並べる）でログに出す。\n  - 電源：Redfish ComputerSystem.Reset と IPMI chassis control。ResetType・送り元（IP と Redfish か IPMI か）・結果（受けた・断った・障害で落とした）。\n  - 起動先の上書き（Once・Continuous）、VirtualMedia の挿入と取り出し、Bios の設定、SimpleUpdate も同じ形。\n- README（英語・日本語）に形を書く。\n- 試験：命令ごとにちょうど1行出ること、命令が無ければ1行も出ないこと。",
+      "doneWhen": "go test と container の試験で、命令1件につき action: の行がちょうど1行、命令が無いときは0行であることを確かめる。README に形が書いてある。",
+      "resolution": null,
+      "refs": [],
+      "threads": [
+        {
+          "projectId": "af352873-ba2b-4e39-8094-679762e5c88b",
+          "threadId": "4bd065fd-af9b-4333-ada0-b76759212b76"
+        }
+      ],
+      "createdAt": "2026-10-30T17:03:08.876Z",
+      "updatedAt": "2026-10-30T17:03:08.876Z",
+      "closedAt": null,
+      "extra": {}
     }
   ]
 }
